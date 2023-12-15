@@ -7,6 +7,7 @@ bool build_cvr()
     Nob_Cmd cmd = {0};
     nob_cmd_append(&cmd, "cc");
     nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
+    nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
     nob_cmd_append(&cmd, "-o", "./build/cvr");
     nob_cmd_append(&cmd, "./src/main.c");
     nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi");
