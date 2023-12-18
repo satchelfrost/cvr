@@ -7,11 +7,24 @@
 #define LOAD_PFN(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(app.instance, #pfn)
 #define UNUSED(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
+#define VK_OK(x) ((x) == VK_SUCCESS)
+
+typedef struct {
+    uint32_t gfx_idx;
+    bool has_gfx;
+} QueueFamilyIndices;
+
+typedef struct {
+    const char **items;
+    size_t capacity;
+    size_t count;
+} RequiredExts;
 
 typedef struct {
     GLFWwindow *window;
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_msgr;
+    VkPhysicalDevice phys_device;
 } App;
 
 // globals
@@ -34,6 +47,10 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 bool setup_debug_msgr();
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *ci);
+bool inst_exts_satisfied(RequiredExts req_exts);
+bool pick_phys_device();
+bool is_device_suitable(VkPhysicalDevice phys_device);
+QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
 
 bool init_window()
 {
@@ -64,6 +81,11 @@ bool init_vulkan()
         return false;
     }
 #endif
+
+    if (!pick_phys_device()) {
+        nob_log(NOB_ERROR, "failed find suitable GPU");
+        return false;
+    }
 
     return true;
 }
@@ -103,46 +125,31 @@ bool create_instance()
     instance_ci.pApplicationInfo = &app_info;
     uint32_t glfw_ext_count = 0;
     const char **glfw_exts = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
-    instance_ci.enabledExtensionCount = glfw_ext_count;
-    instance_ci.ppEnabledExtensionNames = glfw_exts;
+    RequiredExts req_exts = {0};
+    for (size_t i = 0; i < glfw_ext_count; i++)
+        nob_da_append(&req_exts, glfw_exts[i]);
 #ifdef ENABLE_VALIDATION
     instance_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
     instance_ci.ppEnabledLayerNames = validation_layers;
-    const char *req_exts[++glfw_ext_count];
-    for (size_t i = 0; i < glfw_ext_count - 1; i++)
-        req_exts[i] = glfw_exts[i];
-    req_exts[glfw_ext_count - 1] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-    instance_ci.enabledExtensionCount = glfw_ext_count;
-    instance_ci.ppEnabledExtensionNames = req_exts;
+    nob_da_append(&req_exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     VkDebugUtilsMessengerCreateInfoEXT ci = {0};
     populated_debug_msgr_ci(&ci);
     instance_ci.pNext = &ci;
 #endif
+    instance_ci.enabledExtensionCount = req_exts.count;
+    instance_ci.ppEnabledExtensionNames = req_exts.items;
 
-    // Checked to see if instance extensions were available
-    uint32_t avail_ext_count = 0;
-    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
-    VkExtensionProperties avail_exts[avail_ext_count];
-    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
-    size_t unsatisfied_exts = glfw_ext_count;
-    for (size_t i = 0; i < glfw_ext_count; i++) {
-        for (size_t j = 0; j < avail_ext_count; j++) {
-#ifdef ENABLE_VALIDATION
-            if (strcmp(req_exts[i], avail_exts[j].extensionName) == 0)
-                unsatisfied_exts--;
-#else
-            if (strcmp(glfw_exts[i], avail_exts[j].extensionName) == 0)
-                unsatisfied_exts--;
-#endif
-        }
-    }
-    if (unsatisfied_exts) {
+    bool result = true;
+    if (!inst_exts_satisfied(req_exts)) {
         nob_log(NOB_ERROR, "unsatisfied instance extensions");
-        return false;
+        nob_return_defer(false);
     }
 
-    VkResult result = vkCreateInstance(&instance_ci, NULL, &app.instance);
-    return result == VK_SUCCESS;
+    result = VK_OK(vkCreateInstance(&instance_ci, NULL, &app.instance));
+
+defer:
+    nob_da_free(req_exts);
+    return result;
 }
 
 
@@ -221,6 +228,65 @@ void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *ci)
                       VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                       VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     ci->pfnUserCallback = debug_callback;
+}
+
+bool inst_exts_satisfied(RequiredExts req_exts)
+{
+    uint32_t avail_ext_count = 0;
+    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
+    VkExtensionProperties avail_exts[avail_ext_count];
+    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
+    size_t unsatisfied_exts = req_exts.count;
+    for (size_t i = 0; i < req_exts.count; i++) {
+        for (size_t j = 0; j < avail_ext_count; j++) {
+            if (strcmp(req_exts.items[i], avail_exts[j].extensionName) == 0) {
+                if (--unsatisfied_exts == 0)
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool pick_phys_device()
+{
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(app.instance, &device_count, NULL);
+    VkPhysicalDevice phys_devices[device_count];
+    vkEnumeratePhysicalDevices(app.instance, &device_count, phys_devices);
+    for (size_t i = 0; i < device_count; i++) {
+        if (is_device_suitable(phys_devices[i])) {
+            app.phys_device = phys_devices[i];
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool is_device_suitable(VkPhysicalDevice phys_device)
+{
+    QueueFamilyIndices indices = find_queue_fams(phys_device);
+
+    return indices.has_gfx;
+}
+
+QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
+{
+    uint32_t queue_fam_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, NULL);
+    VkQueueFamilyProperties queue_fams[queue_fam_count];
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, queue_fams);
+    QueueFamilyIndices indices = {0};
+    for (size_t i = 0; i < queue_fam_count; i++) {
+        if (queue_fams[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            indices.gfx_idx = i;
+            indices.has_gfx = true;
+            return indices;
+        }
+    }
+    return indices;
 }
 
 int main()
