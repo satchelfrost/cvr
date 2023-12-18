@@ -4,7 +4,7 @@
 #define NOB_IMPLEMENTATION
 #include "nob.h"
 
-#define LOAD_PFN(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(app.instance, #pfn);
+#define LOAD_PFN(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(app.instance, #pfn)
 #define UNUSED(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
 
@@ -185,7 +185,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity)
 {
-    switch(msg_severity) {
+    switch (msg_severity) {
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
         return NOB_INFO;
@@ -202,7 +202,7 @@ bool setup_debug_msgr()
 {
     VkDebugUtilsMessengerCreateInfoEXT ci = {0};
     populated_debug_msgr_ci(&ci);
-    LOAD_PFN(vkCreateDebugUtilsMessengerEXT)
+    LOAD_PFN(vkCreateDebugUtilsMessengerEXT);
     if (vkCreateDebugUtilsMessengerEXT) {
         VkResult result = vkCreateDebugUtilsMessengerEXT(app.instance, &ci, NULL, &app.debug_msgr);
         return result == VK_SUCCESS;
