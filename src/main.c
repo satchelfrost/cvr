@@ -8,10 +8,17 @@
 #define UNUSED(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
 #define VK_OK(x) ((x) == VK_SUCCESS)
+#define Vec(type) struct { \
+    type *items;           \
+    size_t capacity;       \
+    size_t count;          \
+}
 
 typedef struct {
     uint32_t gfx_idx;
     bool has_gfx;
+    uint32_t present_idx;
+    bool has_present;
 } QueueFamilyIndices;
 
 typedef struct {
@@ -26,6 +33,9 @@ typedef struct {
     VkDebugUtilsMessengerEXT debug_msgr;
     VkPhysicalDevice phys_device;
     VkDevice device;
+    VkQueue gfx_queue;
+    VkQueue present_queue;
+    VkSurfaceKHR surface;
 } App;
 
 // globals
@@ -53,6 +63,9 @@ bool pick_phys_device();
 bool is_device_suitable(VkPhysicalDevice phys_device);
 QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
 bool create_device();
+bool create_surface();
+typedef Vec(uint32_t) U32_Set;
+void populate_set(int arr[], size_t arr_size, U32_Set *set);
 
 bool init_window()
 {
@@ -84,6 +97,11 @@ bool init_vulkan()
     }
 #endif
 
+    if (!create_surface()) {
+        nob_log(NOB_ERROR, "failed create window surface");
+        return false;
+    }
+
     if (!pick_phys_device()) {
         nob_log(NOB_ERROR, "failed find suitable GPU");
         return false;
@@ -105,6 +123,7 @@ bool cleanup()
     if (vkDestroyDebugUtilsMessengerEXT)
         vkDestroyDebugUtilsMessengerEXT(app.instance, app.debug_msgr, NULL);
 #endif
+    vkDestroySurfaceKHR(app.instance, app.surface, NULL);
     vkDestroyInstance(app.instance, NULL);
     glfwDestroyWindow(app.window);
     glfwTerminate();
@@ -291,8 +310,17 @@ QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
         if (queue_fams[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             indices.gfx_idx = i;
             indices.has_gfx = true;
-            return indices;
         }
+
+        VkBool32 present_support = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(phys_device, i, app.surface, &present_support);
+        if (present_support) {
+            indices.present_idx = i;
+            indices.has_present = true;
+        }
+
+        if (indices.has_gfx && indices.has_present)
+            return indices;
     }
     return indices;
 }
@@ -300,25 +328,60 @@ QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
 bool create_device()
 {
     QueueFamilyIndices indices = find_queue_fams(app.phys_device);
-    VkDeviceQueueCreateInfo queue_ci = {0};
-    queue_ci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queue_ci.queueFamilyIndex = indices.gfx_idx;
-    queue_ci.queueCount = 1;
-    float queue_priority = 1.0f;
-    queue_ci.pQueuePriorities = &queue_priority;
+
+    int queue_fams[] = {indices.gfx_idx, indices.present_idx};
+    U32_Set unique_fams = {0};
+    populate_set(queue_fams, NOB_ARRAY_LEN(queue_fams), &unique_fams);
+
+    Vec(VkDeviceQueueCreateInfo) queue_cis = {0};
+    float queuePriority = 1.0f;
+    for (size_t i = 0; i < unique_fams.count; i++) {
+        VkDeviceQueueCreateInfo queue_ci = {0};
+        queue_ci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queue_ci.queueFamilyIndex = unique_fams.items[i];
+        queue_ci.queueCount = 1;
+        queue_ci.pQueuePriorities = &queuePriority;
+        nob_da_append(&queue_cis, queue_ci);
+    }
 
     VkDeviceCreateInfo device_ci = {0};
     device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     VkPhysicalDeviceFeatures features = {0};
     device_ci.pEnabledFeatures = &features;
-    device_ci.pQueueCreateInfos = &queue_ci;
-    device_ci.queueCreateInfoCount = 1;
+    device_ci.pQueueCreateInfos = queue_cis.items;
+    device_ci.queueCreateInfoCount = queue_cis.count;
 #ifdef ENABLE_VALIDATION
     device_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
     device_ci.ppEnabledLayerNames = validation_layers;
 #endif
 
-    return VK_OK(vkCreateDevice(app.phys_device, &device_ci, NULL, &app.device));
+    if (VK_OK(vkCreateDevice(app.phys_device, &device_ci, NULL, &app.device))) {
+        vkGetDeviceQueue(app.device, indices.gfx_idx, 0, &app.gfx_queue);
+        vkGetDeviceQueue(app.device, indices.present_idx, 0, &app.present_queue);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+bool create_surface()
+{
+    return VK_OK(glfwCreateWindowSurface(app.instance, app.window, NULL, &app.surface));
+}
+
+void populate_set(int arr[], size_t arr_size, U32_Set *set)
+{
+    for (size_t i = 0; i < arr_size; i++) {
+        if (arr[i] == -1)
+            continue;
+
+        nob_da_append(set, arr[i]);
+
+        for (size_t j = i + 1; j < arr_size; j++)
+            if (arr[i] == arr[j])
+                arr[j] = -1;
+    }
+
 }
 
 int main()
