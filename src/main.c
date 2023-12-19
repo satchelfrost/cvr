@@ -25,6 +25,7 @@ typedef struct {
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_msgr;
     VkPhysicalDevice phys_device;
+    VkDevice device;
 } App;
 
 // globals
@@ -51,6 +52,7 @@ bool inst_exts_satisfied(RequiredExts req_exts);
 bool pick_phys_device();
 bool is_device_suitable(VkPhysicalDevice phys_device);
 QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
+bool create_device();
 
 bool init_window()
 {
@@ -87,11 +89,17 @@ bool init_vulkan()
         return false;
     }
 
+    if (!create_device()) {
+        nob_log(NOB_ERROR, "failed to create logical device");
+        return false;
+    }
+
     return true;
 }
 
 bool cleanup()
 {
+    vkDestroyDevice(app.device, NULL);
 #ifdef ENABLE_VALIDATION
     LOAD_PFN(vkDestroyDebugUtilsMessengerEXT);
     if (vkDestroyDebugUtilsMessengerEXT)
@@ -287,6 +295,30 @@ QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
         }
     }
     return indices;
+}
+
+bool create_device()
+{
+    QueueFamilyIndices indices = find_queue_fams(app.phys_device);
+    VkDeviceQueueCreateInfo queue_ci = {0};
+    queue_ci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_ci.queueFamilyIndex = indices.gfx_idx;
+    queue_ci.queueCount = 1;
+    float queue_priority = 1.0f;
+    queue_ci.pQueuePriorities = &queue_priority;
+
+    VkDeviceCreateInfo device_ci = {0};
+    device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    VkPhysicalDeviceFeatures features = {0};
+    device_ci.pEnabledFeatures = &features;
+    device_ci.pQueueCreateInfos = &queue_ci;
+    device_ci.queueCreateInfoCount = 1;
+#ifdef ENABLE_VALIDATION
+    device_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
+    device_ci.ppEnabledLayerNames = validation_layers;
+#endif
+
+    return VK_OK(vkCreateDevice(app.phys_device, &device_ci, NULL, &app.device));
 }
 
 int main()
