@@ -13,6 +13,7 @@
     size_t capacity;       \
     size_t count;          \
 }
+#define CLAMP(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
 
 typedef struct {
     uint32_t gfx_idx;
@@ -36,12 +37,19 @@ typedef struct {
     VkQueue gfx_queue;
     VkQueue present_queue;
     VkSurfaceKHR surface;
+    VkSurfaceFormatKHR surface_fmt;
+    VkExtent2D extent;
+    VkSwapchainKHR swpchain;
+    Vec(VkImage) swpchain_imgs;
 } App;
 
 // globals
 App app = {0};
 const char *validation_layers[] = {
     "VK_LAYER_KHRONOS_validation",
+};
+const char *device_exts[] = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
 bool init_window();
@@ -66,6 +74,12 @@ bool create_device();
 bool create_surface();
 typedef Vec(uint32_t) U32_Set;
 void populate_set(int arr[], size_t arr_size, U32_Set *set);
+bool create_swpchain();
+bool device_exts_supported(VkPhysicalDevice phys_device);
+bool swpchain_adequate(VkPhysicalDevice phys_device);
+VkSurfaceFormatKHR choose_swpchain_fmt();
+VkPresentModeKHR choose_present_mode();
+VkExtent2D choose_swp_extent();
 
 bool init_window()
 {
@@ -112,11 +126,18 @@ bool init_vulkan()
         return false;
     }
 
+    if (!create_swpchain()) {
+        nob_log(NOB_ERROR, "failed to create the swapchain");
+        return false;
+    }
+
     return true;
 }
 
 bool cleanup()
 {
+    vkDestroySwapchainKHR(app.device, app.swpchain, NULL);
+    nob_da_free(app.swpchain_imgs);
     vkDestroyDevice(app.device, NULL);
 #ifdef ENABLE_VALIDATION
     LOAD_PFN(vkDestroyDebugUtilsMessengerEXT);
@@ -295,8 +316,20 @@ bool pick_phys_device()
 bool is_device_suitable(VkPhysicalDevice phys_device)
 {
     QueueFamilyIndices indices = find_queue_fams(phys_device);
+    if (!(indices.has_gfx && indices.has_present)) {
+        nob_log(NOB_ERROR, "requested indices not present");
+        return false;
+    }
+    if (!device_exts_supported(phys_device)) {
+        nob_log(NOB_ERROR, "device extensions not supported");
+        return false;
+    }
+    if (!swpchain_adequate(phys_device)) {
+        nob_log(NOB_ERROR, "swapchain was not adequate");
+        return false;
+    }
 
-    return indices.has_gfx;
+    return true;
 }
 
 QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
@@ -350,18 +383,24 @@ bool create_device()
     device_ci.pEnabledFeatures = &features;
     device_ci.pQueueCreateInfos = queue_cis.items;
     device_ci.queueCreateInfoCount = queue_cis.count;
+    device_ci.enabledExtensionCount = NOB_ARRAY_LEN(device_exts);
+    device_ci.ppEnabledExtensionNames = device_exts;
 #ifdef ENABLE_VALIDATION
     device_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
     device_ci.ppEnabledLayerNames = validation_layers;
 #endif
 
+    bool result = true;
     if (VK_OK(vkCreateDevice(app.phys_device, &device_ci, NULL, &app.device))) {
         vkGetDeviceQueue(app.device, indices.gfx_idx, 0, &app.gfx_queue);
         vkGetDeviceQueue(app.device, indices.present_idx, 0, &app.present_queue);
-        return true;
     } else {
-        return false;
+        nob_return_defer(false);
     }
+
+defer:
+    nob_da_free(queue_cis);
+    return result;
 }
 
 bool create_surface()
@@ -382,6 +421,134 @@ void populate_set(int arr[], size_t arr_size, U32_Set *set)
                 arr[j] = -1;
     }
 
+}
+
+bool create_swpchain()
+{
+    VkSurfaceCapabilitiesKHR capabilities = {0};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(app.phys_device, app.surface, &capabilities);
+    app.surface_fmt = choose_swpchain_fmt();
+    uint32_t img_count = capabilities.minImageCount + 1;
+    if (capabilities.maxImageCount > 0 && img_count > capabilities.maxImageCount)
+        img_count = capabilities.maxImageCount;
+
+    VkSwapchainCreateInfoKHR swpchain_ci = {0};
+    swpchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swpchain_ci.surface = app.surface;
+    swpchain_ci.minImageCount = img_count;
+    swpchain_ci.imageFormat = app.surface_fmt.format;
+    swpchain_ci.imageColorSpace = app.surface_fmt.colorSpace;
+    swpchain_ci.imageExtent = app.extent = choose_swp_extent();
+    swpchain_ci.imageArrayLayers = 1;
+    swpchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    QueueFamilyIndices indices = find_queue_fams(app.phys_device);
+    uint32_t queue_fams[] = {indices.gfx_idx, indices.present_idx};
+    if (indices.gfx_idx != indices.present_idx) {
+        swpchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        swpchain_ci.queueFamilyIndexCount = 2;
+        swpchain_ci.pQueueFamilyIndices = queue_fams;
+    } else {
+        swpchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    }
+    swpchain_ci.clipped = VK_TRUE;
+    swpchain_ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swpchain_ci.presentMode = choose_present_mode();
+    swpchain_ci.preTransform = capabilities.currentTransform;
+
+    if (VK_OK(vkCreateSwapchainKHR(app.device, &swpchain_ci, NULL, &app.swpchain))) {
+        uint32_t img_count = 0;
+        vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, NULL);
+        VkImage imgs[img_count];
+        vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, imgs);
+        for (size_t i = 0; i < img_count; i++)
+            nob_da_append(&app.swpchain_imgs, imgs[i]);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+bool device_exts_supported(VkPhysicalDevice phys_device)
+{
+    uint32_t ext_count = 0;
+    vkEnumerateDeviceExtensionProperties(phys_device, NULL, &ext_count, NULL);
+    VkExtensionProperties avail_exts[ext_count];
+    vkEnumerateDeviceExtensionProperties(phys_device, NULL, &ext_count, avail_exts);
+    uint32_t unsatisfied_exts = NOB_ARRAY_LEN(device_exts);
+    for (size_t i = 0; i < NOB_ARRAY_LEN(device_exts); i++) {
+        for (size_t j = 0; j < ext_count; j++) {
+            if (strcmp(device_exts[i], avail_exts[j].extensionName) == 0) {
+                if (--unsatisfied_exts == 0)
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool swpchain_adequate(VkPhysicalDevice phys_device)
+{
+    uint32_t surface_fmt_count = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(phys_device, app.surface, &surface_fmt_count, NULL);
+    if (!surface_fmt_count) return false;
+    uint32_t present_mode_count = 0; 
+    vkGetPhysicalDeviceSurfacePresentModesKHR(phys_device, app.surface, &present_mode_count, NULL);
+    if (!present_mode_count) return false;
+
+    return true;
+}
+
+VkSurfaceFormatKHR choose_swpchain_fmt()
+{
+    uint32_t surface_fmt_count = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(app.phys_device, app.surface, &surface_fmt_count, NULL);
+    VkSurfaceFormatKHR fmts[surface_fmt_count];
+    vkGetPhysicalDeviceSurfaceFormatsKHR(app.phys_device, app.surface, &surface_fmt_count, fmts);
+    for (size_t i = 0; i < surface_fmt_count; i++) {
+        if (fmts[i].format == VK_FORMAT_B8G8R8A8_SRGB && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            return fmts[i];
+    }
+
+    assert(surface_fmt_count && "surface format count was zero");
+    return fmts[0];
+}
+
+VkPresentModeKHR choose_present_mode()
+{
+    uint32_t present_mode_count = 0; 
+    vkGetPhysicalDeviceSurfacePresentModesKHR(app.phys_device, app.surface, &present_mode_count, NULL);
+    VkPresentModeKHR present_modes[present_mode_count];
+    vkGetPhysicalDeviceSurfacePresentModesKHR(app.phys_device, app.surface, &present_mode_count, present_modes);
+    for (size_t i = 0; i < present_mode_count; i++) {
+        if (present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+            return present_modes[i];
+    }
+
+    assert(present_mode_count && "present mode count was zero");
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+VkExtent2D choose_swp_extent()
+{
+    VkSurfaceCapabilitiesKHR capabilities = {0};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(app.phys_device, app.surface, &capabilities);
+    if (capabilities.currentExtent.width != UINT32_MAX) {
+        return capabilities.currentExtent;
+    } else {
+        int width, height;
+        glfwGetFramebufferSize(app.window, &width, &height);
+
+        VkExtent2D extent = {
+            .width = width,
+            .height = height
+        };
+
+        extent.width = CLAMP(extent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+        extent.height = CLAMP(extent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+        return extent;
+    }
 }
 
 int main()
