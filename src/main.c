@@ -4,6 +4,13 @@
 #define NOB_IMPLEMENTATION
 #include "nob.h"
 
+// unofficial nob
+#define nob_da_resize(da, new_size)                                                    \
+    do {                                                                               \
+        (da)->capacity = (da)->count = new_size;                                       \
+        (da)->items = NOB_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); \
+    } while (0)
+
 #define LOAD_PFN(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(app.instance, #pfn)
 #define UNUSED(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
@@ -14,6 +21,13 @@
     size_t count;          \
 }
 #define CLAMP(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
+#define VK_INIT(func)                             \
+    do {                                          \
+        if (!func()) {                            \
+            nob_log(NOB_ERROR, #func"() failed"); \
+            return false;                         \
+        }                                         \
+    } while (0)
 
 typedef struct {
     uint32_t gfx_idx;
@@ -21,12 +35,6 @@ typedef struct {
     uint32_t present_idx;
     bool has_present;
 } QueueFamilyIndices;
-
-typedef struct {
-    const char **items;
-    size_t capacity;
-    size_t count;
-} RequiredExts;
 
 typedef struct {
     GLFWwindow *window;
@@ -66,6 +74,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 bool setup_debug_msgr();
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *ci);
+typedef Vec(const char*) RequiredExts;
 bool inst_exts_satisfied(RequiredExts req_exts);
 bool pick_phys_device();
 bool is_device_suitable(VkPhysicalDevice phys_device);
@@ -99,37 +108,14 @@ bool main_loop()
 
 bool init_vulkan()
 {
-    if (!create_instance()) {
-        nob_log(NOB_ERROR, "failed to create vulkan instance");
-        return false;
-    }
-
+    VK_INIT(create_instance);
 #ifdef ENABLE_VALIDATION
-    if (!setup_debug_msgr()) {
-        nob_log(NOB_ERROR, "failed to setup debug messenger");
-        return false;
-    }
+    VK_INIT(setup_debug_msgr);
 #endif
-
-    if (!create_surface()) {
-        nob_log(NOB_ERROR, "failed create window surface");
-        return false;
-    }
-
-    if (!pick_phys_device()) {
-        nob_log(NOB_ERROR, "failed find suitable GPU");
-        return false;
-    }
-
-    if (!create_device()) {
-        nob_log(NOB_ERROR, "failed to create logical device");
-        return false;
-    }
-
-    if (!create_swpchain()) {
-        nob_log(NOB_ERROR, "failed to create the swapchain");
-        return false;
-    }
+    VK_INIT(create_surface);
+    VK_INIT(pick_phys_device);
+    VK_INIT(create_device);
+    VK_INIT(create_swpchain);
 
     return true;
 }
@@ -458,10 +444,8 @@ bool create_swpchain()
     if (VK_OK(vkCreateSwapchainKHR(app.device, &swpchain_ci, NULL, &app.swpchain))) {
         uint32_t img_count = 0;
         vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, NULL);
-        VkImage imgs[img_count];
-        vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, imgs);
-        for (size_t i = 0; i < img_count; i++)
-            nob_da_append(&app.swpchain_imgs, imgs[i]);
+        nob_da_resize(&app.swpchain_imgs, img_count);
+        vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, app.swpchain_imgs.items);
         return true;
     } else {
         return false;
