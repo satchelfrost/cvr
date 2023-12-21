@@ -21,12 +21,12 @@
     size_t count;          \
 }
 #define CLAMP(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
-#define VK_INIT(func)                             \
-    do {                                          \
-        if (!func()) {                            \
-            nob_log(NOB_ERROR, #func"() failed"); \
-            return false;                         \
-        }                                         \
+#define VK_INIT(func)                           \
+    do {                                        \
+        if (!func) {                            \
+            nob_log(NOB_ERROR, #func" failed"); \
+            return false;                       \
+        }                                       \
     } while (0)
 
 typedef struct {
@@ -49,6 +49,7 @@ typedef struct {
     VkExtent2D extent;
     VkSwapchainKHR swpchain;
     Vec(VkImage) swpchain_imgs;
+    Vec(VkImageView) swpchain_img_views;
 } App;
 
 // globals
@@ -73,7 +74,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     void* p_user_data);
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 bool setup_debug_msgr();
-void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *ci);
+void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
 typedef Vec(const char*) RequiredExts;
 bool inst_exts_satisfied(RequiredExts req_exts);
 bool pick_phys_device();
@@ -89,6 +90,7 @@ bool swpchain_adequate(VkPhysicalDevice phys_device);
 VkSurfaceFormatKHR choose_swpchain_fmt();
 VkPresentModeKHR choose_present_mode();
 VkExtent2D choose_swp_extent();
+bool create_img_views();
 
 bool init_window()
 {
@@ -108,20 +110,24 @@ bool main_loop()
 
 bool init_vulkan()
 {
-    VK_INIT(create_instance);
+    VK_INIT(create_instance());
 #ifdef ENABLE_VALIDATION
-    VK_INIT(setup_debug_msgr);
+    VK_INIT(setup_debug_msgr());
 #endif
-    VK_INIT(create_surface);
-    VK_INIT(pick_phys_device);
-    VK_INIT(create_device);
-    VK_INIT(create_swpchain);
+    VK_INIT(create_surface());
+    VK_INIT(pick_phys_device());
+    VK_INIT(create_device());
+    VK_INIT(create_swpchain());
+    VK_INIT(create_img_views());
 
     return true;
 }
 
 bool cleanup()
 {
+    for (size_t i = 0; i < app.swpchain_img_views.count; i++)
+        vkDestroyImageView(app.device, app.swpchain_img_views.items[i], NULL);
+    nob_da_free(app.swpchain_img_views);
     vkDestroySwapchainKHR(app.device, app.swpchain, NULL);
     nob_da_free(app.swpchain_imgs);
     vkDestroyDevice(app.device, NULL);
@@ -166,9 +172,9 @@ bool create_instance()
     instance_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
     instance_ci.ppEnabledLayerNames = validation_layers;
     nob_da_append(&req_exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    VkDebugUtilsMessengerCreateInfoEXT ci = {0};
-    populated_debug_msgr_ci(&ci);
-    instance_ci.pNext = &ci;
+    VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
+    populated_debug_msgr_ci(&debug_msgr_ci);
+    instance_ci.pNext = &debug_msgr_ci;
 #endif
     instance_ci.enabledExtensionCount = req_exts.count;
     instance_ci.ppEnabledExtensionNames = req_exts.items;
@@ -241,27 +247,27 @@ Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_
 
 bool setup_debug_msgr()
 {
-    VkDebugUtilsMessengerCreateInfoEXT ci = {0};
-    populated_debug_msgr_ci(&ci);
+    VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
+    populated_debug_msgr_ci(&debug_msgr_ci);
     LOAD_PFN(vkCreateDebugUtilsMessengerEXT);
     if (vkCreateDebugUtilsMessengerEXT) {
-        VkResult result = vkCreateDebugUtilsMessengerEXT(app.instance, &ci, NULL, &app.debug_msgr);
+        VkResult result = vkCreateDebugUtilsMessengerEXT(app.instance, &debug_msgr_ci, NULL, &app.debug_msgr);
         return result == VK_SUCCESS;
     } else {
         return false;
     }
 }
 
-void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *ci)
+void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci)
 {
-    ci->sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    ci->messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    ci->messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    ci->pfnUserCallback = debug_callback;
+    debug_msgr_ci->sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debug_msgr_ci->messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    debug_msgr_ci->messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    debug_msgr_ci->pfnUserCallback = debug_callback;
 }
 
 bool inst_exts_satisfied(RequiredExts req_exts)
@@ -533,6 +539,32 @@ VkExtent2D choose_swp_extent()
 
         return extent;
     }
+}
+
+bool create_img_views()
+{
+    nob_da_resize(&app.swpchain_img_views, app.swpchain_imgs.count);
+    for (size_t i = 0; i < app.swpchain_img_views.count; i++)  {
+        VkImageViewCreateInfo img_view_ci = {0};
+        img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        img_view_ci.image = app.swpchain_imgs.items[i];
+        img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        img_view_ci.format = app.surface_fmt.format;
+        img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        img_view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        img_view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        img_view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        img_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        img_view_ci.subresourceRange.baseMipLevel = 0;
+        img_view_ci.subresourceRange.levelCount = 1;
+        img_view_ci.subresourceRange.baseArrayLayer = 0;
+        img_view_ci.subresourceRange.layerCount = 1;
+
+        if (!VK_OK(vkCreateImageView(app.device, &img_view_ci, NULL, &app.swpchain_img_views.items[i])))
+            return false;
+    }
+
+    return true;
 }
 
 int main()
