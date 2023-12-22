@@ -91,6 +91,8 @@ VkSurfaceFormatKHR choose_swpchain_fmt();
 VkPresentModeKHR choose_present_mode();
 VkExtent2D choose_swp_extent();
 bool create_img_views();
+bool create_gfx_pipeline();
+bool create_shader_module(const char *shader, VkShaderModule *module);
 
 bool init_window()
 {
@@ -119,6 +121,7 @@ bool init_vulkan()
     VK_INIT(create_device());
     VK_INIT(create_swpchain());
     VK_INIT(create_img_views());
+    VK_INIT(create_gfx_pipeline());
 
     return true;
 }
@@ -199,18 +202,14 @@ bool chk_validation_support()
     vkEnumerateInstanceLayerProperties(&layer_count, NULL);
     VkLayerProperties avail_layers[layer_count];
     vkEnumerateInstanceLayerProperties(&layer_count, avail_layers);
-
+    size_t unsatisfied_layers = NOB_ARRAY_LEN(validation_layers);
     for (size_t i = 0; i < NOB_ARRAY_LEN(validation_layers); i++) {
-        bool layer_found = false;
         for (size_t j = 0; j < layer_count; j++) {
             if (strcmp(validation_layers[i], avail_layers[j].layerName) == 0) {
-                layer_found = true;
-                break;
+                if (--unsatisfied_layers == 0)
+                    return true;
             }
         }
-
-        if (!layer_found)
-            return false;
     }
 
     return true;
@@ -412,7 +411,6 @@ void populate_set(int arr[], size_t arr_size, U32_Set *set)
             if (arr[i] == arr[j])
                 arr[j] = -1;
     }
-
 }
 
 bool create_swpchain()
@@ -565,6 +563,54 @@ bool create_img_views()
     }
 
     return true;
+}
+
+bool create_gfx_pipeline()
+{
+    VkPipelineShaderStageCreateInfo vert_ci = {0};
+    vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vert_ci.pName = "main";
+    if (!create_shader_module("./build/shaders/shader.vert.spv", &vert_ci.module))
+        return false;
+
+    VkPipelineShaderStageCreateInfo frag_ci = {0};
+    frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    frag_ci.pName = "main";
+    if (!create_shader_module("./build/shaders/shader.frag.spv", &frag_ci.module))
+        return false;
+
+    // VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
+
+
+    vkDestroyShaderModule(app.device, frag_ci.module, NULL);
+    vkDestroyShaderModule(app.device, vert_ci.module, NULL);
+    return true;
+}
+
+bool create_shader_module(const char *shader, VkShaderModule *module)
+{
+    bool result = true;
+    Nob_String_Builder sb = {};
+    if (!nob_read_entire_file(shader, &sb)) {
+        nob_log(NOB_ERROR, "failed to read entire file %s", shader);
+        nob_return_defer(false);
+    }
+
+    VkShaderModuleCreateInfo module_ci = {0};
+    module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    module_ci.codeSize = sb.count;
+    module_ci.pCode = (uint32_t *)sb.items;
+
+    if (!VK_OK(vkCreateShaderModule(app.device, &module_ci, NULL, module))) {
+        nob_log(NOB_ERROR, "failed to create shader module from %s", shader);
+        nob_return_defer(false);
+    }
+
+defer:
+    nob_sb_free(sb);
+    return result;
 }
 
 int main()
