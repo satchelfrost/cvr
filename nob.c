@@ -5,16 +5,55 @@ bool build_cvr()
 {
     bool result = true;
     Nob_Cmd cmd = {0};
+
+    const char *output_path = nob_temp_sprintf("./build/cvr");
+    const char *input_path = nob_temp_sprintf("./src/main.c");
+
     nob_cmd_append(&cmd, "cc");
     nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
     nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
-    nob_cmd_append(&cmd, "-o", "./build/cvr");
-    nob_cmd_append(&cmd, "./src/main.c");
+    nob_cmd_append(&cmd, "-o", output_path);
+    nob_cmd_append(&cmd, input_path);
     nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    if (nob_needs_rebuild(output_path, &input_path, 1)) {
+        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    }
 
 defer:
     nob_cmd_free(cmd);
+    return result;
+}
+
+const char *shaders[] = {
+    "shader.frag",
+    "shader.vert"
+};
+
+bool compile_shaders()
+{
+    bool result = true;
+    Nob_Cmd cmd = {0};
+    Nob_Procs procs = {0};
+
+    if (!nob_mkdir_if_not_exists("build/shaders")) nob_return_defer(false);
+
+    for (size_t i = 0; i < NOB_ARRAY_LEN(shaders); i++) {
+        const char *output_path = nob_temp_sprintf("./build/shaders/%s.spv", shaders[i]);
+        const char *input_path = nob_temp_sprintf("./src/shaders/%s", shaders[i]);
+
+        if (nob_needs_rebuild(output_path, &input_path, 1)) {
+            cmd.count = 0;
+            nob_cmd_append(&cmd, "glslc", input_path, "-o", output_path);
+            Nob_Proc proc = nob_cmd_run_async(cmd);
+            nob_da_append(&procs, proc);
+        }
+    }
+    if (!nob_procs_wait(procs)) nob_return_defer(false);
+
+defer:
+    nob_cmd_free(cmd);
+    nob_da_free(procs);
     return result;
 }
 
@@ -22,6 +61,7 @@ int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
     if (!nob_mkdir_if_not_exists("build")) return 1;
+    if (!compile_shaders()) return 1;
     if (!build_cvr()) return 1;
     Nob_Cmd cmd = {0};
     nob_cmd_append(&cmd, "./build/cvr");
