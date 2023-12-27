@@ -15,15 +15,14 @@
 #define UNUSED(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
 #define VK_OK(x) ((x) == VK_SUCCESS)
-#define CVR_CHK(expr, msg)            \
-    do {                              \
-        if (!(expr)) {                \
+#define CVR_CHK(expr, msg)           \
+    do {                             \
+        if (!(expr)) {               \
             nob_log(NOB_ERROR, msg); \
-            nob_return_defer(false);  \
-        }                             \
+            nob_return_defer(false); \
+        }                            \
     } while (0)
 #define VK_CHK(vk_result, msg) CVR_CHK(VK_OK(vk_result), msg)
-
 #define Vec(type) struct { \
     type *items;           \
     size_t capacity;       \
@@ -263,15 +262,11 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity)
 {
     switch (msg_severity) {
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-        return NOB_INFO;
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-        return NOB_WARNING;
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-        return NOB_ERROR;
-    default:
-        assert(0 && "this message severity is not handled");
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: return NOB_INFO;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:    return NOB_INFO;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: return NOB_WARNING;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:   return NOB_ERROR;
+    default: assert(0 && "this message severity is not handled");
     }
 }
 
