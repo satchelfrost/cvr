@@ -15,19 +15,21 @@
 #define UNUSED(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
 #define VK_OK(x) ((x) == VK_SUCCESS)
+#define CVR_CHK(expr, msg)            \
+    do {                              \
+        if (!(expr)) {                \
+            nob_log(NOB_ERROR, msg); \
+            nob_return_defer(false);  \
+        }                             \
+    } while (0)
+#define VK_CHK(vk_result, msg) CVR_CHK(VK_OK(vk_result), msg)
+
 #define Vec(type) struct { \
     type *items;           \
     size_t capacity;       \
     size_t count;          \
 }
 #define CLAMP(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
-#define VK_INIT(func)                           \
-    do {                                        \
-        if (!func) {                            \
-            nob_log(NOB_ERROR, #func" failed"); \
-            return false;                       \
-        }                                       \
-    } while (0)
 
 typedef struct {
     uint32_t gfx_idx;
@@ -48,18 +50,24 @@ typedef struct {
     VkSurfaceFormatKHR surface_fmt;
     VkExtent2D extent;
     VkSwapchainKHR swpchain;
+    VkRenderPass render_pass;
+    VkPipelineLayout pipeline_layout;
+    VkPipeline pipeline;
+    VkCommandPool cmd_pool;
+    VkCommandBuffer cmd_buffer;
+    VkSemaphore img_available_sem;
+    VkSemaphore render_finished_sem;
+    VkFence fence;
     Vec(VkImage) swpchain_imgs;
     Vec(VkImageView) swpchain_img_views;
+    Vec(VkFramebuffer) frame_buffs;
 } App;
 
 // globals
 App app = {0};
-const char *validation_layers[] = {
-    "VK_LAYER_KHRONOS_validation",
-};
-const char *device_exts[] = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
-};
+static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
+static const char *device_exts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
 bool init_window();
 bool init_vulkan();
@@ -93,6 +101,13 @@ VkExtent2D choose_swp_extent();
 bool create_img_views();
 bool create_gfx_pipeline();
 bool create_shader_module(const char *shader, VkShaderModule *module);
+bool create_render_pass();
+bool create_frame_buffs();
+bool create_cmd_pool();
+bool create_cmd_buff();
+bool create_syncs();
+bool draw_frame();
+bool rec_cmd_buff(uint32_t img_idx);
 
 bool init_window()
 {
@@ -105,29 +120,52 @@ bool init_window()
 
 bool main_loop()
 {
-    while(!glfwWindowShouldClose(app.window))
+    bool result = true;
+    while(!glfwWindowShouldClose(app.window)) {
         glfwPollEvents();
-    return true;
+        CVR_CHK(draw_frame(), "failed to draw frame");
+    }
+
+defer:
+    vkDeviceWaitIdle(app.device);
+    return result;
 }
 
 bool init_vulkan()
 {
-    VK_INIT(create_instance());
+    bool result = true;
+    CVR_CHK(create_instance(), "failed to create instance");
 #ifdef ENABLE_VALIDATION
-    VK_INIT(setup_debug_msgr());
+    CVR_CHK(setup_debug_msgr(), "failed to setup debug messenger");
 #endif
-    VK_INIT(create_surface());
-    VK_INIT(pick_phys_device());
-    VK_INIT(create_device());
-    VK_INIT(create_swpchain());
-    VK_INIT(create_img_views());
-    VK_INIT(create_gfx_pipeline());
+    CVR_CHK(create_surface(), "failed to create vulkan surface");
+    CVR_CHK(pick_phys_device(), "failed to find suitable GPU");
+    CVR_CHK(create_device(), "failed to create logical device");
+    CVR_CHK(create_swpchain(), "failed to create swapchain");
+    CVR_CHK(create_img_views(), "failed to create image views");
+    CVR_CHK(create_render_pass(), "failed to create render pass");
+    CVR_CHK(create_gfx_pipeline(), "failed to create graphics pipelin");
+    CVR_CHK(create_frame_buffs(), "failed to create frame buffers");
+    CVR_CHK(create_cmd_pool(), "failed to create command pool");
+    CVR_CHK(create_cmd_buff(), "failed to create command buffers");
+    CVR_CHK(create_syncs(), "failed to create synchronization objects");
 
-    return true;
+defer:
+    return result;
 }
 
 bool cleanup()
 {
+    vkDestroySemaphore(app.device, app.img_available_sem, NULL);
+    vkDestroySemaphore(app.device, app.render_finished_sem, NULL);
+    vkDestroyFence(app.device, app.fence, NULL);
+    vkDestroyCommandPool(app.device, app.cmd_pool, NULL);
+    for (size_t i = 0; i < app.frame_buffs.count; i++)
+        vkDestroyFramebuffer(app.device, app.frame_buffs.items[i], NULL);
+    nob_da_free(app.frame_buffs);
+    vkDestroyPipeline(app.device, app.pipeline, NULL);
+    vkDestroyPipelineLayout(app.device, app.pipeline_layout, NULL);
+    vkDestroyRenderPass(app.device, app.render_pass, NULL);
     for (size_t i = 0; i < app.swpchain_img_views.count; i++)
         vkDestroyImageView(app.device, app.swpchain_img_views.items[i], NULL);
     nob_da_free(app.swpchain_img_views);
@@ -148,11 +186,9 @@ bool cleanup()
 
 bool create_instance()
 {
+    bool result = true;
 #ifdef ENABLE_VALIDATION
-    if (!chk_validation_support()) {
-        nob_log(NOB_ERROR, "validation requested, but not supported");
-        return false;
-    }
+    CVR_CHK(chk_validation_support(), "validation requested, but not supported");
 #endif
 
     VkApplicationInfo app_info = {0};
@@ -182,13 +218,8 @@ bool create_instance()
     instance_ci.enabledExtensionCount = req_exts.count;
     instance_ci.ppEnabledExtensionNames = req_exts.items;
 
-    bool result = true;
-    if (!inst_exts_satisfied(req_exts)) {
-        nob_log(NOB_ERROR, "unsatisfied instance extensions");
-        nob_return_defer(false);
-    }
-
-    result = VK_OK(vkCreateInstance(&instance_ci, NULL, &app.instance));
+    CVR_CHK(inst_exts_satisfied(req_exts), "unsatisfied instance extensions");
+    VK_CHK(vkCreateInstance(&instance_ci, NULL, &app.instance), "failed to create vulkan instance");
 
 defer:
     nob_da_free(req_exts);
@@ -250,9 +281,9 @@ bool setup_debug_msgr()
     populated_debug_msgr_ci(&debug_msgr_ci);
     LOAD_PFN(vkCreateDebugUtilsMessengerEXT);
     if (vkCreateDebugUtilsMessengerEXT) {
-        VkResult result = vkCreateDebugUtilsMessengerEXT(app.instance, &debug_msgr_ci, NULL, &app.debug_msgr);
-        return result == VK_SUCCESS;
+        return VK_OK(vkCreateDebugUtilsMessengerEXT(app.instance, &debug_msgr_ci, NULL, &app.debug_msgr));
     } else {
+        nob_log(NOB_ERROR, "failed to load function pointer for vkCreateDebugUtilesMessenger");
         return false;
     }
 }
@@ -306,21 +337,14 @@ bool pick_phys_device()
 
 bool is_device_suitable(VkPhysicalDevice phys_device)
 {
+    bool result = true;
     QueueFamilyIndices indices = find_queue_fams(phys_device);
-    if (!(indices.has_gfx && indices.has_present)) {
-        nob_log(NOB_ERROR, "requested indices not present");
-        return false;
-    }
-    if (!device_exts_supported(phys_device)) {
-        nob_log(NOB_ERROR, "device extensions not supported");
-        return false;
-    }
-    if (!swpchain_adequate(phys_device)) {
-        nob_log(NOB_ERROR, "swapchain was not adequate");
-        return false;
-    }
+    CVR_CHK(indices.has_gfx && indices.has_present, "requested indices not present");
+    CVR_CHK(device_exts_supported(phys_device), "device extensions not supported");
+    CVR_CHK(swpchain_adequate(phys_device), "swapchain was not adequate");
 
-    return true;
+defer:
+    return result;
 }
 
 QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
@@ -557,7 +581,6 @@ bool create_img_views()
         img_view_ci.subresourceRange.levelCount = 1;
         img_view_ci.subresourceRange.baseArrayLayer = 0;
         img_view_ci.subresourceRange.layerCount = 1;
-
         if (!VK_OK(vkCreateImageView(app.device, &img_view_ci, NULL, &app.swpchain_img_views.items[i])))
             return false;
     }
@@ -567,49 +590,301 @@ bool create_img_views()
 
 bool create_gfx_pipeline()
 {
+    bool result = true;
     VkPipelineShaderStageCreateInfo vert_ci = {0};
     vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vert_ci.pName = "main";
     if (!create_shader_module("./build/shaders/shader.vert.spv", &vert_ci.module))
-        return false;
+        nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo frag_ci = {0};
     frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_ci.pName = "main";
     if (!create_shader_module("./build/shaders/shader.frag.spv", &frag_ci.module))
-        return false;
+        nob_return_defer(false);
 
-    // VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
+    VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
 
+    VkPipelineDynamicStateCreateInfo dynamic_state_ci = {0};
+    dynamic_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic_state_ci.dynamicStateCount = NOB_ARRAY_LEN(dynamic_states);
+    dynamic_state_ci.pDynamicStates = dynamic_states;
 
+    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {0};
+    vertex_input_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {0};
+    input_assembly_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkViewport viewport = {0};
+    viewport.width = (float) app.extent.width;
+    viewport.height = (float) app.extent.height;
+    viewport.maxDepth = 1.0f;
+    VkRect2D scissor = {0};
+    scissor.extent = app.extent;
+    VkPipelineViewportStateCreateInfo viewport_state_ci = {0};
+    viewport_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state_ci.viewportCount = 1;
+    viewport_state_ci.pViewports = &viewport;
+    viewport_state_ci.scissorCount = 1;
+    viewport_state_ci.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
+    rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer_ci.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
+    multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling_ci.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState color_blend = {0};
+    color_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                                 VK_COLOR_COMPONENT_G_BIT |
+                                 VK_COLOR_COMPONENT_B_BIT |
+                                 VK_COLOR_COMPONENT_A_BIT;
+    VkPipelineColorBlendStateCreateInfo color_blend_ci = {0};
+    color_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blend_ci.attachmentCount = 1;
+    color_blend_ci.pAttachments = &color_blend;
+
+    VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
+    pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkResult vk_result = vkCreatePipelineLayout(
+        app.device,
+        &pipeline_layout_ci,
+        NULL,
+        &app.pipeline_layout
+    );
+    VK_CHK(vk_result, "failed to create pipeline layout");
+
+    VkGraphicsPipelineCreateInfo pipeline_ci = {0};
+    pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_ci.stageCount = NOB_ARRAY_LEN(stages);
+    pipeline_ci.pStages = stages;
+    pipeline_ci.pVertexInputState = &vertex_input_ci;
+    pipeline_ci.pInputAssemblyState = &input_assembly_ci;
+    pipeline_ci.pViewportState = &viewport_state_ci;
+    pipeline_ci.pRasterizationState = &rasterizer_ci;
+    pipeline_ci.pMultisampleState = &multisampling_ci;
+    pipeline_ci.pColorBlendState = &color_blend_ci;
+    pipeline_ci.pDynamicState = &dynamic_state_ci;
+    pipeline_ci.layout = app.pipeline_layout;
+    pipeline_ci.renderPass = app.render_pass;
+    pipeline_ci.subpass = 0;
+
+    vk_result = vkCreateGraphicsPipelines(app.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &app.pipeline);
+    VK_CHK(vk_result, "failed to create pipeline");
+
+defer:
     vkDestroyShaderModule(app.device, frag_ci.module, NULL);
     vkDestroyShaderModule(app.device, vert_ci.module, NULL);
-    return true;
+    return result;
 }
 
 bool create_shader_module(const char *shader, VkShaderModule *module)
 {
     bool result = true;
     Nob_String_Builder sb = {};
-    if (!nob_read_entire_file(shader, &sb)) {
-        nob_log(NOB_ERROR, "failed to read entire file %s", shader);
-        nob_return_defer(false);
-    }
+    char *err_msg = nob_temp_sprintf("failed to read entire file %s", shader);
+    CVR_CHK(nob_read_entire_file(shader, &sb), err_msg);
 
     VkShaderModuleCreateInfo module_ci = {0};
     module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     module_ci.codeSize = sb.count;
-    module_ci.pCode = (uint32_t *)sb.items;
-
-    if (!VK_OK(vkCreateShaderModule(app.device, &module_ci, NULL, module))) {
-        nob_log(NOB_ERROR, "failed to create shader module from %s", shader);
-        nob_return_defer(false);
-    }
+    module_ci.pCode = (const uint32_t *)sb.items;
+    err_msg = nob_temp_sprintf("failed to create shader module from %s", shader);
+    VK_CHK(vkCreateShaderModule(app.device, &module_ci, NULL, module), err_msg);
 
 defer:
     nob_sb_free(sb);
+    return result;
+}
+
+bool create_render_pass()
+{
+    VkAttachmentDescription color_attach = {0};
+    color_attach.format = app.surface_fmt.format;
+    color_attach.samples = VK_SAMPLE_COUNT_1_BIT;
+    color_attach.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attach.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attach.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color_attach.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color_attach.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    color_attach.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference color_attach_ref = {0};
+    color_attach_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription gfx_subpass = {0};
+    gfx_subpass.colorAttachmentCount = 1;
+    gfx_subpass.pColorAttachments = &color_attach_ref;
+
+    VkRenderPassCreateInfo render_pass_ci = {0};
+    render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    render_pass_ci.attachmentCount = 1;
+    render_pass_ci.pAttachments = &color_attach;
+    render_pass_ci.subpassCount = 1;
+    render_pass_ci.pSubpasses = &gfx_subpass;
+    VkSubpassDependency dependency = {0};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    render_pass_ci.dependencyCount = 1;
+    render_pass_ci.pDependencies = &dependency;
+
+    return VK_OK(vkCreateRenderPass(app.device, &render_pass_ci, NULL, &app.render_pass));
+}
+
+bool create_frame_buffs()
+{
+    nob_da_resize(&app.frame_buffs, app.swpchain_img_views.count);
+    for (size_t i = 0; i < app.swpchain_img_views.count; i++) {
+        VkFramebufferCreateInfo frame_buff_ci = {0};
+        frame_buff_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        frame_buff_ci.renderPass = app.render_pass;
+        frame_buff_ci.attachmentCount = 1;
+        frame_buff_ci.pAttachments = &app.swpchain_img_views.items[i];
+        frame_buff_ci.width =  app.extent.width;
+        frame_buff_ci.height = app.extent.height;
+        frame_buff_ci.layers = 1;
+        if (!VK_OK(vkCreateFramebuffer(app.device, &frame_buff_ci, NULL, &app.frame_buffs.items[i])))
+            return false;
+    }
+
+    return true;
+}
+
+bool create_cmd_pool()
+{
+    bool result = true;
+    QueueFamilyIndices indices = find_queue_fams(app.phys_device);
+    CVR_CHK(indices.has_gfx, "failed to create command pool, no graphics queue");
+    VkCommandPoolCreateInfo cmd_pool_ci = {0};
+    cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
+    VK_CHK(vkCreateCommandPool(app.device, &cmd_pool_ci, NULL, &app.cmd_pool), "failed to create command pool");
+
+defer:
+    return result;
+}
+
+bool create_cmd_buff()
+{
+    VkCommandBufferAllocateInfo ci = {0};
+    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ci.commandPool = app.cmd_pool;
+    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ci.commandBufferCount = 1;
+    return VK_OK(vkAllocateCommandBuffers(app.device, &ci, &app.cmd_buffer));
+}
+
+bool create_syncs()
+{
+    bool result = true;
+    VkSemaphoreCreateInfo sem_ci = {0};
+    sem_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    VkFenceCreateInfo fence_ci = {0};
+    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VK_CHK(vkCreateSemaphore(app.device, &sem_ci, NULL, &app.img_available_sem), "failed to create semaphore");
+    VK_CHK(vkCreateSemaphore(app.device, &sem_ci, NULL, &app.render_finished_sem), "failed to create semaphore");
+    VK_CHK(vkCreateFence(app.device, &fence_ci, NULL, &app.fence), "failed to create fence");
+
+defer:
+    return result;
+}
+
+bool draw_frame()
+{
+    bool result = true;
+    VK_CHK(vkWaitForFences(app.device, 1, &app.fence, VK_TRUE, UINT64_MAX), "failed to wait for fences");
+    VK_CHK(vkResetFences(app.device, 1, &app.fence), "failed to reset fences");
+
+    uint32_t img_idx = 0;
+    VkResult vk_result = vkAcquireNextImageKHR(
+        app.device,
+        app.swpchain,
+        UINT64_MAX,
+        app.img_available_sem,
+        VK_NULL_HANDLE,
+        &img_idx
+    );
+    VK_CHK(vk_result, "failed to acquire next image");
+
+    VK_CHK(vkResetCommandBuffer(app.cmd_buffer, 0), "failed to reset cmd buffer");
+    rec_cmd_buff(img_idx);
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkSemaphore wait_semaphores[] = {app.img_available_sem};
+    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = wait_semaphores;
+    submit.pWaitDstStageMask = wait_stages;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &app.cmd_buffer;
+    VkSemaphore sig_semaphores[] = {app.render_finished_sem};
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = sig_semaphores;
+
+    VK_CHK(vkQueueSubmit(app.gfx_queue, 1, &submit, app.fence), "failed to draw command buffer");
+
+    VkPresentInfoKHR present = {0};
+    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = sig_semaphores;
+    VkSwapchainKHR swapchains[] = {app.swpchain};
+    present.swapchainCount = 1;
+    present.pSwapchains = swapchains;
+    present.pImageIndices = &img_idx;
+
+    VK_CHK(vkQueuePresentKHR(app.present_queue, &present), "failed to present queue");
+
+defer:
+    return result;
+}
+
+bool rec_cmd_buff(uint32_t img_idx)
+{
+    bool result = true;
+    VkCommandBufferBeginInfo beginInfo = {0};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VK_CHK(vkBeginCommandBuffer(app.cmd_buffer, &beginInfo), "failed to begin command buffer");
+
+    VkRenderPassBeginInfo begin_rp = {0};
+    begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    begin_rp.renderPass = app.render_pass;
+    begin_rp.framebuffer = app.frame_buffs.items[img_idx];
+    begin_rp.renderArea.extent = app.extent;
+    VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    begin_rp.clearValueCount = 1;
+    begin_rp.pClearValues = &clear_color;
+    vkCmdBeginRenderPass(app.cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdBindPipeline(app.cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app.pipeline);
+
+    VkViewport viewport = {0};
+    viewport.width = (float)app.extent.width;
+    viewport.height =(float)app.extent.height;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(app.cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {0};
+    scissor.extent = app.extent;
+    vkCmdSetScissor(app.cmd_buffer, 0, 1, &scissor);
+
+    vkCmdDraw(app.cmd_buffer, 3, 1, 0, 0);
+
+    vkCmdEndRenderPass(app.cmd_buffer);
+    VK_CHK(vkEndCommandBuffer(app.cmd_buffer), "failed to record command buffer");
+
+defer:
     return result;
 }
 
