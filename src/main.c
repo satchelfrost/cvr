@@ -53,10 +53,10 @@ typedef struct {
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
     VkCommandPool cmd_pool;
-    VkCommandBuffer cmd_buffer;
-    VkSemaphore img_available_sem;
-    VkSemaphore render_finished_sem;
-    VkFence fence;
+    Vec(VkCommandBuffer) cmd_buffers;
+    Vec(VkSemaphore) img_available_sems;
+    Vec(VkSemaphore) render_finished_sems;
+    Vec(VkFence) fences;
     Vec(VkImage) swpchain_imgs;
     Vec(VkImageView) swpchain_img_views;
     Vec(VkFramebuffer) frame_buffs;
@@ -67,6 +67,8 @@ App app = {0};
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
 static const char *device_exts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+static const size_t MAX_FRAMES_IN_FLIGHT = 2;
+uint32_t curr_frame = 0;
 
 bool init_window();
 bool init_vulkan();
@@ -106,7 +108,7 @@ bool create_cmd_pool();
 bool create_cmd_buff();
 bool create_syncs();
 bool draw_frame();
-bool rec_cmd_buff(uint32_t img_idx);
+bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);
 
 bool init_window()
 {
@@ -155,9 +157,12 @@ defer:
 
 bool cleanup()
 {
-    vkDestroySemaphore(app.device, app.img_available_sem, NULL);
-    vkDestroySemaphore(app.device, app.render_finished_sem, NULL);
-    vkDestroyFence(app.device, app.fence, NULL);
+    for (size_t i = 0; i < app.img_available_sems.count; i++)
+        vkDestroySemaphore(app.device, app.img_available_sems.items[i], NULL);
+    for (size_t i = 0; i < app.render_finished_sems.count; i++)
+        vkDestroySemaphore(app.device, app.render_finished_sems.items[i], NULL);
+    for (size_t i = 0; i < app.fences.count; i++)
+        vkDestroyFence(app.device, app.fences.items[i], NULL);
     vkDestroyCommandPool(app.device, app.cmd_pool, NULL);
     for (size_t i = 0; i < app.frame_buffs.count; i++)
         vkDestroyFramebuffer(app.device, app.frame_buffs.items[i], NULL);
@@ -775,8 +780,9 @@ bool create_cmd_buff()
     ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ci.commandPool = app.cmd_pool;
     ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ci.commandBufferCount = 1;
-    return VK_OK(vkAllocateCommandBuffers(app.device, &ci, &app.cmd_buffer));
+    nob_da_resize(&app.cmd_buffers, MAX_FRAMES_IN_FLIGHT);
+    ci.commandBufferCount = app.cmd_buffers.count;
+    return VK_OK(vkAllocateCommandBuffers(app.device, &ci, app.cmd_buffers.items));
 }
 
 bool create_syncs()
@@ -787,9 +793,18 @@ bool create_syncs()
     VkFenceCreateInfo fence_ci = {0};
     fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    VK_CHK(vkCreateSemaphore(app.device, &sem_ci, NULL, &app.img_available_sem), "failed to create semaphore");
-    VK_CHK(vkCreateSemaphore(app.device, &sem_ci, NULL, &app.render_finished_sem), "failed to create semaphore");
-    VK_CHK(vkCreateFence(app.device, &fence_ci, NULL, &app.fence), "failed to create fence");
+    nob_da_resize(&app.img_available_sems, MAX_FRAMES_IN_FLIGHT);
+    nob_da_resize(&app.render_finished_sems, MAX_FRAMES_IN_FLIGHT);
+    nob_da_resize(&app.fences, MAX_FRAMES_IN_FLIGHT);
+    VkResult vk_result;
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.img_available_sems.items[i]);
+        VK_CHK(vk_result, "failed to create semaphore");
+        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.render_finished_sems.items[i]);
+        VK_CHK(vk_result, "failed to create semaphore");
+        vk_result = vkCreateFence(app.device, &fence_ci, NULL, &app.fences.items[i]);
+        VK_CHK(vk_result, "failed to create fence");
+    }
 
 defer:
     return result;
@@ -798,60 +813,60 @@ defer:
 bool draw_frame()
 {
     bool result = true;
-    VK_CHK(vkWaitForFences(app.device, 1, &app.fence, VK_TRUE, UINT64_MAX), "failed to wait for fences");
-    VK_CHK(vkResetFences(app.device, 1, &app.fence), "failed to reset fences");
+
+    VkResult vk_result = vkWaitForFences(app.device, 1, &app.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
+    VK_CHK(vk_result, "failed to wait for fences");
+    VK_CHK(vkResetFences(app.device, 1, &app.fences.items[curr_frame]), "failed to reset fences");
 
     uint32_t img_idx = 0;
-    VkResult vk_result = vkAcquireNextImageKHR(
-        app.device,
+    vk_result = vkAcquireNextImageKHR(app.device,
         app.swpchain,
         UINT64_MAX,
-        app.img_available_sem,
+        app.img_available_sems.items[curr_frame],
         VK_NULL_HANDLE,
         &img_idx
     );
     VK_CHK(vk_result, "failed to acquire next image");
 
-    VK_CHK(vkResetCommandBuffer(app.cmd_buffer, 0), "failed to reset cmd buffer");
-    rec_cmd_buff(img_idx);
+    VK_CHK(vkResetCommandBuffer(app.cmd_buffers.items[curr_frame], 0), "failed to reset cmd buffer");
+    rec_cmds(img_idx, app.cmd_buffers.items[curr_frame]);
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkSemaphore wait_semaphores[] = {app.img_available_sem};
     VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = wait_semaphores;
+    submit.pWaitSemaphores = &app.img_available_sems.items[curr_frame];
     submit.pWaitDstStageMask = wait_stages;
     submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &app.cmd_buffer;
-    VkSemaphore sig_semaphores[] = {app.render_finished_sem};
+    submit.pCommandBuffers = &app.cmd_buffers.items[curr_frame];
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = sig_semaphores;
+    submit.pSignalSemaphores = &app.render_finished_sems.items[curr_frame];
 
-    VK_CHK(vkQueueSubmit(app.gfx_queue, 1, &submit, app.fence), "failed to draw command buffer");
+    VK_CHK(vkQueueSubmit(app.gfx_queue, 1, &submit, app.fences.items[curr_frame]), "failed to draw command buffer");
 
     VkPresentInfoKHR present = {0};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = sig_semaphores;
-    VkSwapchainKHR swapchains[] = {app.swpchain};
+    present.pWaitSemaphores = &app.render_finished_sems.items[curr_frame];
     present.swapchainCount = 1;
-    present.pSwapchains = swapchains;
+    present.pSwapchains = &app.swpchain;
     present.pImageIndices = &img_idx;
 
     VK_CHK(vkQueuePresentKHR(app.present_queue, &present), "failed to present queue");
+
+    curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
 defer:
     return result;
 }
 
-bool rec_cmd_buff(uint32_t img_idx)
+bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
 {
     bool result = true;
     VkCommandBufferBeginInfo beginInfo = {0};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    VK_CHK(vkBeginCommandBuffer(app.cmd_buffer, &beginInfo), "failed to begin command buffer");
+    VK_CHK(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
 
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -861,23 +876,21 @@ bool rec_cmd_buff(uint32_t img_idx)
     VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
     begin_rp.clearValueCount = 1;
     begin_rp.pClearValues = &clear_color;
-    vkCmdBeginRenderPass(app.cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(app.cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app.pipeline);
-
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app.pipeline);
     VkViewport viewport = {0};
     viewport.width = (float)app.extent.width;
     viewport.height =(float)app.extent.height;
     viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(app.cmd_buffer, 0, 1, &viewport);
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
     VkRect2D scissor = {0};
     scissor.extent = app.extent;
-    vkCmdSetScissor(app.cmd_buffer, 0, 1, &scissor);
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
 
-    vkCmdDraw(app.cmd_buffer, 3, 1, 0, 0);
-
-    vkCmdEndRenderPass(app.cmd_buffer);
-    VK_CHK(vkEndCommandBuffer(app.cmd_buffer), "failed to record command buffer");
+    vkCmdEndRenderPass(cmd_buffer);
+    VK_CHK(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
 
 defer:
     return result;
