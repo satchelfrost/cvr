@@ -1,27 +1,57 @@
 #define NOB_IMPLEMENTATION
 #include "src/nob.h"
 
+const char *cvr[] = {
+    "main",
+    "app",
+    "app_utils",
+    "ext_man",
+};
+
 bool build_cvr()
 {
     bool result = true;
     Nob_Cmd cmd = {0};
+    Nob_Procs procs = {0};
+    Nob_File_Paths obj_files = {0};
 
-    const char *output_path = nob_temp_sprintf("./build/cvr");
-    const char *input_path = nob_temp_sprintf("./src/main.c");
+    for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
+        const char *output_path = nob_temp_sprintf("./build/%s.o", cvr[i]);
+        const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
+        nob_da_append(&obj_files, output_path);
+        if (nob_needs_rebuild(output_path, &input_path, 1)) {
+            cmd.count = 0;
+            nob_cmd_append(&cmd, "cc");
+            nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
+            nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
+            nob_cmd_append(&cmd, "-c", input_path);
+            nob_cmd_append(&cmd, "-o", output_path);
+            Nob_Proc proc = nob_cmd_run_async(cmd);
+            nob_da_append(&procs, proc);
+        }
+    }
 
-    nob_cmd_append(&cmd, "cc");
-    nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-    nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
-    nob_cmd_append(&cmd, "-o", output_path);
-    nob_cmd_append(&cmd, input_path);
-    nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi");
+    if (!nob_procs_wait(procs)) nob_return_defer(false);
 
-    if (nob_needs_rebuild(output_path, &input_path, 1)) {
+    const char *exec_path = nob_temp_sprintf("./build/cvr");
+    if (nob_needs_rebuild(exec_path, obj_files.items, obj_files.count)) {
+        cmd.count = 0;
+        nob_cmd_append(&cmd, "cc");
+        nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
+        nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
+        for (size_t i = 0; i < obj_files.count; i++) {
+            const char *input_path = nob_temp_sprintf("./build/%s.o", cvr[i]);
+            nob_cmd_append(&cmd, input_path);
+        }
+        nob_cmd_append(&cmd, "-o", exec_path);
+        nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
 
 defer:
     nob_cmd_free(cmd);
+    nob_cmd_free(procs);
+    nob_cmd_free(obj_files);
     return result;
 }
 

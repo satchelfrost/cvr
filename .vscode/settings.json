@@ -3,6 +3,12 @@
         "nob.h": "c",
         "vector": "c",
         "__bit_reference": "c",
-        "__split_buffer": "c"
+        "__split_buffer": "c",
+        "app.h": "c",
+        "common.h": "c",
+        "ext_man.h": "c",
+        "vk_utils.h": "c",
+        "nob_ext.h": "c",
+        "app_utils.h": "c"
     }
 }
