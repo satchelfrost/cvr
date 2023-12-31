@@ -9,9 +9,9 @@ bool is_device_suitable(VkPhysicalDevice phys_device)
 {
     bool result = true;
     QueueFamilyIndices indices = find_queue_fams(phys_device);
-    CVR_CHK(indices.has_gfx && indices.has_present, "requested indices not present");
-    CVR_CHK(device_exts_supported(phys_device), "device extensions not supported");
-    CVR_CHK(swpchain_adequate(phys_device), "swapchain was not adequate");
+    cvr_chk(indices.has_gfx && indices.has_present, "requested indices not present");
+    cvr_chk(device_exts_supported(phys_device), "device extensions not supported");
+    cvr_chk(swpchain_adequate(phys_device), "swapchain was not adequate");
 
 defer:
     return result;
@@ -23,8 +23,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data,
     void* p_user_data)
 {
-    UNUSED(msg_type);
-    UNUSED(p_user_data);
+    unused(msg_type);
+    unused(p_user_data);
     Nob_Log_Level log_lvl = translate_msg_severity(msg_severity);
     if (log_lvl < MIN_SEVERITY) return VK_FALSE;
     nob_log(log_lvl, p_callback_data->pMessage);
@@ -58,9 +58,9 @@ bool setup_debug_msgr()
 {
     VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
     populated_debug_msgr_ci(&debug_msgr_ci);
-    LOAD_PFN(vkCreateDebugUtilsMessengerEXT);
+    load_pfn(vkCreateDebugUtilsMessengerEXT);
     if (vkCreateDebugUtilsMessengerEXT) {
-        return VK_OK(vkCreateDebugUtilsMessengerEXT(app.instance, &debug_msgr_ci, NULL, &app.debug_msgr));
+        return vk_ok(vkCreateDebugUtilsMessengerEXT(app.instance, &debug_msgr_ci, NULL, &app.debug_msgr));
     } else {
         nob_log(NOB_ERROR, "failed to load function pointer for vkCreateDebugUtilesMessenger");
         return false;
@@ -180,8 +180,8 @@ VkExtent2D choose_swp_extent()
             .height = height
         };
 
-        extent.width = CLAMP(extent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-        extent.height = CLAMP(extent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+        extent.width = clamp(extent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+        extent.height = clamp(extent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
 
         return extent;
     }

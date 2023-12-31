@@ -4,7 +4,7 @@
 #include "common.h"
 #include <vulkan/vulkan.h>
 
-typedef Vec(const char*) Extensions;
+typedef vec(const char*) Extensions;
 
 typedef struct {
     Extensions validation_layers;

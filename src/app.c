@@ -13,7 +13,7 @@ bool create_instance()
 {
     bool result = true;
 #ifdef ENABLE_VALIDATION
-    CVR_CHK(chk_validation_support(), "validation requested, but not supported");
+    cvr_chk(chk_validation_support(), "validation requested, but not supported");
 #endif
 
     VkApplicationInfo app_info = {0};
@@ -42,8 +42,8 @@ bool create_instance()
     instance_ci.enabledExtensionCount = ext_manager.inst_exts.count;
     instance_ci.ppEnabledExtensionNames = ext_manager.inst_exts.items;
 
-    CVR_CHK(inst_exts_satisfied(), "unsatisfied instance extensions");
-    VK_CHK(vkCreateInstance(&instance_ci, NULL, &app.instance), "failed to create vulkan instance");
+    cvr_chk(inst_exts_satisfied(), "unsatisfied instance extensions");
+    vk_chk(vkCreateInstance(&instance_ci, NULL, &app.instance), "failed to create vulkan instance");
 
 defer:
     return result;
@@ -57,7 +57,7 @@ bool create_device()
     U32_Set unique_fams = {0};
     populate_set(queue_fams, NOB_ARRAY_LEN(queue_fams), &unique_fams);
 
-    Vec(VkDeviceQueueCreateInfo) queue_cis = {0};
+    vec(VkDeviceQueueCreateInfo) queue_cis = {0};
     float queuePriority = 1.0f;
     for (size_t i = 0; i < unique_fams.count; i++) {
         VkDeviceQueueCreateInfo queue_ci = {0};
@@ -82,7 +82,7 @@ bool create_device()
 #endif
 
     bool result = true;
-    if (VK_OK(vkCreateDevice(app.phys_device, &device_ci, NULL, &app.device))) {
+    if (vk_ok(vkCreateDevice(app.phys_device, &device_ci, NULL, &app.device))) {
         vkGetDeviceQueue(app.device, indices.gfx_idx, 0, &app.gfx_queue);
         vkGetDeviceQueue(app.device, indices.present_idx, 0, &app.present_queue);
     } else {
@@ -96,7 +96,7 @@ defer:
 
 bool create_surface()
 {
-    return VK_OK(glfwCreateWindowSurface(app.instance, app.window, NULL, &app.surface));
+    return vk_ok(glfwCreateWindowSurface(app.instance, app.window, NULL, &app.surface));
 }
 
 bool create_swpchain()
@@ -131,7 +131,7 @@ bool create_swpchain()
     swpchain_ci.presentMode = choose_present_mode();
     swpchain_ci.preTransform = capabilities.currentTransform;
 
-    if (VK_OK(vkCreateSwapchainKHR(app.device, &swpchain_ci, NULL, &app.swpchain))) {
+    if (vk_ok(vkCreateSwapchainKHR(app.device, &swpchain_ci, NULL, &app.swpchain))) {
         uint32_t img_count = 0;
         vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, NULL);
         nob_da_resize(&app.swpchain_imgs, img_count);
@@ -160,7 +160,7 @@ bool create_img_views()
         img_view_ci.subresourceRange.levelCount = 1;
         img_view_ci.subresourceRange.baseArrayLayer = 0;
         img_view_ci.subresourceRange.layerCount = 1;
-        if (!VK_OK(vkCreateImageView(app.device, &img_view_ci, NULL, &app.swpchain_img_views.items[i])))
+        if (!vk_ok(vkCreateImageView(app.device, &img_view_ci, NULL, &app.swpchain_img_views.items[i])))
             return false;
     }
 
@@ -238,7 +238,7 @@ bool create_gfx_pipeline()
         NULL,
         &app.pipeline_layout
     );
-    VK_CHK(vk_result, "failed to create pipeline layout");
+    vk_chk(vk_result, "failed to create pipeline layout");
 
     VkGraphicsPipelineCreateInfo pipeline_ci = {0};
     pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -256,7 +256,7 @@ bool create_gfx_pipeline()
     pipeline_ci.subpass = 0;
 
     vk_result = vkCreateGraphicsPipelines(app.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &app.pipeline);
-    VK_CHK(vk_result, "failed to create pipeline");
+    vk_chk(vk_result, "failed to create pipeline");
 
 defer:
     vkDestroyShaderModule(app.device, frag_ci.module, NULL);
@@ -269,14 +269,14 @@ bool create_shader_module(const char *shader, VkShaderModule *module)
     bool result = true;
     Nob_String_Builder sb = {};
     char *err_msg = nob_temp_sprintf("failed to read entire file %s", shader);
-    CVR_CHK(nob_read_entire_file(shader, &sb), err_msg);
+    cvr_chk(nob_read_entire_file(shader, &sb), err_msg);
 
     VkShaderModuleCreateInfo module_ci = {0};
     module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     module_ci.codeSize = sb.count;
     module_ci.pCode = (const uint32_t *)sb.items;
     err_msg = nob_temp_sprintf("failed to create shader module from %s", shader);
-    VK_CHK(vkCreateShaderModule(app.device, &module_ci, NULL, module), err_msg);
+    vk_chk(vkCreateShaderModule(app.device, &module_ci, NULL, module), err_msg);
 
 defer:
     nob_sb_free(sb);
@@ -316,7 +316,7 @@ bool create_render_pass()
     render_pass_ci.dependencyCount = 1;
     render_pass_ci.pDependencies = &dependency;
 
-    return VK_OK(vkCreateRenderPass(app.device, &render_pass_ci, NULL, &app.render_pass));
+    return vk_ok(vkCreateRenderPass(app.device, &render_pass_ci, NULL, &app.render_pass));
 }
 
 bool create_frame_buffs()
@@ -331,7 +331,7 @@ bool create_frame_buffs()
         frame_buff_ci.width =  app.extent.width;
         frame_buff_ci.height = app.extent.height;
         frame_buff_ci.layers = 1;
-        if (!VK_OK(vkCreateFramebuffer(app.device, &frame_buff_ci, NULL, &app.frame_buffs.items[i])))
+        if (!vk_ok(vkCreateFramebuffer(app.device, &frame_buff_ci, NULL, &app.frame_buffs.items[i])))
             return false;
     }
 
@@ -342,12 +342,12 @@ bool create_cmd_pool()
 {
     bool result = true;
     QueueFamilyIndices indices = find_queue_fams(app.phys_device);
-    CVR_CHK(indices.has_gfx, "failed to create command pool, no graphics queue");
+    cvr_chk(indices.has_gfx, "failed to create command pool, no graphics queue");
     VkCommandPoolCreateInfo cmd_pool_ci = {0};
     cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
-    VK_CHK(vkCreateCommandPool(app.device, &cmd_pool_ci, NULL, &app.cmd_pool), "failed to create command pool");
+    vk_chk(vkCreateCommandPool(app.device, &cmd_pool_ci, NULL, &app.cmd_pool), "failed to create command pool");
 
 defer:
     return result;
@@ -361,7 +361,7 @@ bool create_cmd_buff()
     ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     nob_da_resize(&app.cmd_buffers, MAX_FRAMES_IN_FLIGHT);
     ci.commandBufferCount = app.cmd_buffers.count;
-    return VK_OK(vkAllocateCommandBuffers(app.device, &ci, app.cmd_buffers.items));
+    return vk_ok(vkAllocateCommandBuffers(app.device, &ci, app.cmd_buffers.items));
 }
 
 bool create_syncs()
@@ -378,11 +378,11 @@ bool create_syncs()
     VkResult vk_result;
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.img_available_sems.items[i]);
-        VK_CHK(vk_result, "failed to create semaphore");
+        vk_chk(vk_result, "failed to create semaphore");
         vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.render_finished_sems.items[i]);
-        VK_CHK(vk_result, "failed to create semaphore");
+        vk_chk(vk_result, "failed to create semaphore");
         vk_result = vkCreateFence(app.device, &fence_ci, NULL, &app.fences.items[i]);
-        VK_CHK(vk_result, "failed to create fence");
+        vk_chk(vk_result, "failed to create fence");
     }
 
 defer:
@@ -394,7 +394,7 @@ bool draw()
     bool result = true;
 
     VkResult vk_result = vkWaitForFences(app.device, 1, &app.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
-    VK_CHK(vk_result, "failed to wait for fences");
+    vk_chk(vk_result, "failed to wait for fences");
 
     uint32_t img_idx = 0;
     vk_result = vkAcquireNextImageKHR(app.device,
@@ -405,16 +405,16 @@ bool draw()
         &img_idx
     );
     if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
-        CVR_CHK(recreate_swpchain(), "failed to recreate swapchain");
-    } else if (!VK_OK(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
+        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
         nob_log(NOB_ERROR, "failed to acquire swapchain image");
         nob_return_defer(false);
     } else if (vk_result == VK_SUBOPTIMAL_KHR) {
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    VK_CHK(vkResetFences(app.device, 1, &app.fences.items[curr_frame]), "failed to reset fences");
-    VK_CHK(vkResetCommandBuffer(app.cmd_buffers.items[curr_frame], 0), "failed to reset cmd buffer");
+    vk_chk(vkResetFences(app.device, 1, &app.fences.items[curr_frame]), "failed to reset fences");
+    vk_chk(vkResetCommandBuffer(app.cmd_buffers.items[curr_frame], 0), "failed to reset cmd buffer");
     rec_cmds(img_idx, app.cmd_buffers.items[curr_frame]);
 
     VkSubmitInfo submit = {0};
@@ -428,7 +428,7 @@ bool draw()
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &app.render_finished_sems.items[curr_frame];
 
-    VK_CHK(vkQueueSubmit(app.gfx_queue, 1, &submit, app.fences.items[curr_frame]), "failed to draw command buffer");
+    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, app.fences.items[curr_frame]), "failed to draw command buffer");
 
     VkPresentInfoKHR present = {0};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -442,8 +442,8 @@ bool draw()
     vk_result = vkQueuePresentKHR(app.present_queue, &present);
     if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || app.frame_buff_resized) {
         app.frame_buff_resized = false;
-        CVR_CHK(recreate_swpchain(), "failed to recreate swapchain");
-    } else if (!VK_OK(vk_result)) {
+        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!vk_ok(vk_result)) {
         nob_log(NOB_ERROR, "failed to present queue");
         nob_return_defer(false);
     }
@@ -459,7 +459,7 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     bool result = true;
     VkCommandBufferBeginInfo beginInfo = {0};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    VK_CHK(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
+    vk_chk(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
 
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -483,7 +483,7 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
-    VK_CHK(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
+    vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
 
 defer:
     return result;
@@ -504,9 +504,9 @@ bool recreate_swpchain()
 
     cleanup_swpchain();
 
-    CVR_CHK(create_swpchain(), "failed to recreate swapchain");
-    CVR_CHK(create_img_views(), "failed to recreate image views");
-    CVR_CHK(create_frame_buffs(), "failed to recreate frame buffers");
+    cvr_chk(create_swpchain(), "failed to recreate swapchain");
+    cvr_chk(create_img_views(), "failed to recreate image views");
+    cvr_chk(create_frame_buffs(), "failed to recreate frame buffers");
 
 defer:
     return result;

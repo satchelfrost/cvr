@@ -23,13 +23,13 @@ typedef struct {
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
     VkCommandPool cmd_pool;
-    Vec(VkCommandBuffer) cmd_buffers;
-    Vec(VkSemaphore) img_available_sems;
-    Vec(VkSemaphore) render_finished_sems;
-    Vec(VkFence) fences;
-    Vec(VkImage) swpchain_imgs;
-    Vec(VkImageView) swpchain_img_views;
-    Vec(VkFramebuffer) frame_buffs;
+    vec(VkCommandBuffer) cmd_buffers;
+    vec(VkSemaphore) img_available_sems;
+    vec(VkSemaphore) render_finished_sems;
+    vec(VkFence) fences;
+    vec(VkImage) swpchain_imgs;
+    vec(VkImageView) swpchain_img_views;
+    vec(VkFramebuffer) frame_buffs;
     bool frame_buff_resized;
 } App;
 

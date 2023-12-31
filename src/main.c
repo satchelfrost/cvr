@@ -39,7 +39,7 @@ bool main_loop()
     bool result = true;
     while(!glfwWindowShouldClose(app.window)) {
         glfwPollEvents();
-        CVR_CHK(draw(), "failed to draw frame");
+        cvr_chk(draw(), "failed to draw frame");
     }
 
 defer:
@@ -51,21 +51,21 @@ bool init_vulkan()
 {
     bool result = true;
     init_ext_managner();
-    CVR_CHK(create_instance(), "failed to create instance");
+    cvr_chk(create_instance(), "failed to create instance");
 #ifdef ENABLE_VALIDATION
-    CVR_CHK(setup_debug_msgr(), "failed to setup debug messenger");
+    cvr_chk(setup_debug_msgr(), "failed to setup debug messenger");
 #endif
-    CVR_CHK(create_surface(), "failed to create vulkan surface");
-    CVR_CHK(pick_phys_device(), "failed to find suitable GPU");
-    CVR_CHK(create_device(), "failed to create logical device");
-    CVR_CHK(create_swpchain(), "failed to create swapchain");
-    CVR_CHK(create_img_views(), "failed to create image views");
-    CVR_CHK(create_render_pass(), "failed to create render pass");
-    CVR_CHK(create_gfx_pipeline(), "failed to create graphics pipelin");
-    CVR_CHK(create_frame_buffs(), "failed to create frame buffers");
-    CVR_CHK(create_cmd_pool(), "failed to create command pool");
-    CVR_CHK(create_cmd_buff(), "failed to create command buffers");
-    CVR_CHK(create_syncs(), "failed to create synchronization objects");
+    cvr_chk(create_surface(), "failed to create vulkan surface");
+    cvr_chk(pick_phys_device(), "failed to find suitable GPU");
+    cvr_chk(create_device(), "failed to create logical device");
+    cvr_chk(create_swpchain(), "failed to create swapchain");
+    cvr_chk(create_img_views(), "failed to create image views");
+    cvr_chk(create_render_pass(), "failed to create render pass");
+    cvr_chk(create_gfx_pipeline(), "failed to create graphics pipelin");
+    cvr_chk(create_frame_buffs(), "failed to create frame buffers");
+    cvr_chk(create_cmd_pool(), "failed to create command pool");
+    cvr_chk(create_cmd_buff(), "failed to create command buffers");
+    cvr_chk(create_syncs(), "failed to create synchronization objects");
 
 defer:
     return result;
@@ -89,7 +89,7 @@ bool cleanup()
     vkDestroyRenderPass(app.device, app.render_pass, NULL);
     vkDestroyDevice(app.device, NULL);
 #ifdef ENABLE_VALIDATION
-    LOAD_PFN(vkDestroyDebugUtilsMessengerEXT);
+    load_pfn(vkDestroyDebugUtilsMessengerEXT);
     if (vkDestroyDebugUtilsMessengerEXT)
         vkDestroyDebugUtilsMessengerEXT(app.instance, app.debug_msgr, NULL);
 #endif
@@ -103,8 +103,8 @@ bool cleanup()
 
 static void frame_buff_resized(GLFWwindow* window, int width, int height)
 {
-    UNUSED(width);
-    UNUSED(height);
+    unused(width);
+    unused(height);
     App *app = (App*)(glfwGetWindowUserPointer(window));
     app->frame_buff_resized = true;
 }
