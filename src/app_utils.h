@@ -12,11 +12,6 @@ typedef struct {
 } QueueFamilyIndices;
 
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
-// static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
-//     VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity,
-//     VkDebugUtilsMessageTypeFlagsEXT msg_type,
-//     const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data,
-//     void* p_user_data);
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 bool setup_debug_msgr();
 QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
@@ -26,8 +21,8 @@ bool swpchain_adequate(VkPhysicalDevice phys_device);
 VkSurfaceFormatKHR choose_swpchain_fmt();
 VkPresentModeKHR choose_present_mode();
 VkExtent2D choose_swp_extent();
-
 bool is_device_suitable(VkPhysicalDevice phys_device);
 bool pick_phys_device();
+void cleanup_swpchain();
 
 #endif // VK_UTILS_H_

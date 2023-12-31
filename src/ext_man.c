@@ -24,6 +24,11 @@ void init_ext_managner()
 
 void destroy_ext_manager()
 {
+    if (!ext_manager.inited) {
+        nob_log(NOB_WARNING, "extension manager was not initialized");
+        return;
+    }
+
     nob_da_free(ext_manager.validation_layers);
     nob_da_free(ext_manager.device_exts);
     nob_da_free(ext_manager.inst_exts);

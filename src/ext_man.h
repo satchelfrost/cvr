@@ -4,12 +4,12 @@
 #include "common.h"
 #include <vulkan/vulkan.h>
 
-typedef Vec(const char*) RequiredStrs;
+typedef Vec(const char*) Extensions;
 
 typedef struct {
-    RequiredStrs validation_layers;
-    RequiredStrs device_exts;
-    RequiredStrs inst_exts;
+    Extensions validation_layers;
+    Extensions device_exts;
+    Extensions inst_exts;
     int inited;
 } ExtManager;
 

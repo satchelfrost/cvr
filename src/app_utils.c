@@ -186,3 +186,12 @@ VkExtent2D choose_swp_extent()
         return extent;
     }
 }
+
+void cleanup_swpchain()
+{
+    for (size_t i = 0; i < app.frame_buffs.count; i++)
+        vkDestroyFramebuffer(app.device, app.frame_buffs.items[i], NULL);
+    for (size_t i = 0; i < app.swpchain_img_views.count; i++)
+        vkDestroyImageView(app.device, app.swpchain_img_views.items[i], NULL);
+    vkDestroySwapchainKHR(app.device, app.swpchain, NULL);
+}

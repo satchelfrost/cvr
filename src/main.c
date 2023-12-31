@@ -10,6 +10,7 @@ bool init_window();
 bool init_vulkan();
 bool main_loop();
 bool cleanup();
+static void frame_buff_resized(GLFWwindow* window, int width, int height);
 
 int main()
 {
@@ -27,8 +28,9 @@ bool init_window()
 {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     app.window = glfwCreateWindow(800, 600, "C Vulkan Renderer", NULL, NULL);
+    glfwSetWindowUserPointer(app.window, &app);
+    glfwSetFramebufferSizeCallback(app.window, frame_buff_resized);
     return true;
 }
 
@@ -71,6 +73,10 @@ defer:
 
 bool cleanup()
 {
+    cleanup_swpchain();
+    nob_da_free(app.frame_buffs);
+    nob_da_free(app.swpchain_img_views);
+    nob_da_free(app.swpchain_imgs);
     for (size_t i = 0; i < app.img_available_sems.count; i++)
         vkDestroySemaphore(app.device, app.img_available_sems.items[i], NULL);
     for (size_t i = 0; i < app.render_finished_sems.count; i++)
@@ -78,17 +84,9 @@ bool cleanup()
     for (size_t i = 0; i < app.fences.count; i++)
         vkDestroyFence(app.device, app.fences.items[i], NULL);
     vkDestroyCommandPool(app.device, app.cmd_pool, NULL);
-    for (size_t i = 0; i < app.frame_buffs.count; i++)
-        vkDestroyFramebuffer(app.device, app.frame_buffs.items[i], NULL);
-    nob_da_free(app.frame_buffs);
     vkDestroyPipeline(app.device, app.pipeline, NULL);
     vkDestroyPipelineLayout(app.device, app.pipeline_layout, NULL);
     vkDestroyRenderPass(app.device, app.render_pass, NULL);
-    for (size_t i = 0; i < app.swpchain_img_views.count; i++)
-        vkDestroyImageView(app.device, app.swpchain_img_views.items[i], NULL);
-    nob_da_free(app.swpchain_img_views);
-    vkDestroySwapchainKHR(app.device, app.swpchain, NULL);
-    nob_da_free(app.swpchain_imgs);
     vkDestroyDevice(app.device, NULL);
 #ifdef ENABLE_VALIDATION
     LOAD_PFN(vkDestroyDebugUtilsMessengerEXT);
@@ -101,4 +99,12 @@ bool cleanup()
     glfwTerminate();
     destroy_ext_manager();
     return true;
+}
+
+static void frame_buff_resized(GLFWwindow* window, int width, int height)
+{
+    UNUSED(width);
+    UNUSED(height);
+    App *app = (App*)(glfwGetWindowUserPointer(window));
+    app->frame_buff_resized = true;
 }

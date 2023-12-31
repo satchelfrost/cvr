@@ -30,6 +30,7 @@ typedef struct {
     Vec(VkImage) swpchain_imgs;
     Vec(VkImageView) swpchain_img_views;
     Vec(VkFramebuffer) frame_buffs;
+    bool frame_buff_resized;
 } App;
 
 bool create_instance();
@@ -44,6 +45,7 @@ bool create_frame_buffs();
 bool create_cmd_pool();
 bool create_cmd_buff();
 bool create_syncs();
+bool recreate_swpchain();
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);

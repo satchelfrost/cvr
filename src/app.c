@@ -395,7 +395,6 @@ bool draw()
 
     VkResult vk_result = vkWaitForFences(app.device, 1, &app.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
     VK_CHK(vk_result, "failed to wait for fences");
-    VK_CHK(vkResetFences(app.device, 1, &app.fences.items[curr_frame]), "failed to reset fences");
 
     uint32_t img_idx = 0;
     vk_result = vkAcquireNextImageKHR(app.device,
@@ -405,8 +404,16 @@ bool draw()
         VK_NULL_HANDLE,
         &img_idx
     );
-    VK_CHK(vk_result, "failed to acquire next image");
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
+        CVR_CHK(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!VK_OK(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
+        nob_log(NOB_ERROR, "failed to acquire swapchain image");
+        nob_return_defer(false);
+    } else if (vk_result == VK_SUBOPTIMAL_KHR) {
+        nob_log(NOB_WARNING, "suboptimal swapchain image");
+    }
 
+    VK_CHK(vkResetFences(app.device, 1, &app.fences.items[curr_frame]), "failed to reset fences");
     VK_CHK(vkResetCommandBuffer(app.cmd_buffers.items[curr_frame], 0), "failed to reset cmd buffer");
     rec_cmds(img_idx, app.cmd_buffers.items[curr_frame]);
 
@@ -432,7 +439,14 @@ bool draw()
     present.pSwapchains = &app.swpchain;
     present.pImageIndices = &img_idx;
 
-    VK_CHK(vkQueuePresentKHR(app.present_queue, &present), "failed to present queue");
+    vk_result = vkQueuePresentKHR(app.present_queue, &present);
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || app.frame_buff_resized) {
+        app.frame_buff_resized = false;
+        CVR_CHK(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!VK_OK(vk_result)) {
+        nob_log(NOB_ERROR, "failed to present queue");
+        nob_return_defer(false);
+    }
 
     curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
@@ -470,6 +484,29 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
 
     vkCmdEndRenderPass(cmd_buffer);
     VK_CHK(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
+
+defer:
+    return result;
+}
+
+bool recreate_swpchain()
+{
+    bool result = true;
+
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(app.window, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(app.window, &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(app.device);
+
+    cleanup_swpchain();
+
+    CVR_CHK(create_swpchain(), "failed to recreate swapchain");
+    CVR_CHK(create_img_views(), "failed to recreate image views");
+    CVR_CHK(create_frame_buffs(), "failed to recreate frame buffers");
 
 defer:
     return result;
