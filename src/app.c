@@ -1,6 +1,14 @@
 #include "app.h"
 #include "app_utils.h"
 #include "ext_man.h"
+#include "ext/raylib-5.0/raymath.h"
+#include "vertex.h"
+
+static const Vertex vertices[] = {
+    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
+};
 
 /* Define the main application */
 App app = {0};
@@ -193,6 +201,13 @@ bool create_gfx_pipeline()
 
     VkPipelineVertexInputStateCreateInfo vertex_input_ci = {0};
     vertex_input_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VtxAttrDescs vert_attrs = {0};
+    get_attr_descs(&vert_attrs);
+    VkVertexInputBindingDescription binding_desc = get_binding_desc();
+    vertex_input_ci.vertexBindingDescriptionCount = 1;
+    vertex_input_ci.pVertexBindingDescriptions = &binding_desc;
+    vertex_input_ci.vertexAttributeDescriptionCount = vert_attrs.count;
+    vertex_input_ci.pVertexAttributeDescriptions = vert_attrs.items;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {0};
     input_assembly_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -261,6 +276,7 @@ bool create_gfx_pipeline()
 defer:
     vkDestroyShaderModule(app.device, frag_ci.module, NULL);
     vkDestroyShaderModule(app.device, vert_ci.module, NULL);
+    nob_da_free(vert_attrs);
     return result;
 }
 
@@ -480,7 +496,11 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     VkRect2D scissor = {0};
     scissor.extent = app.extent;
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
-    vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
+
+    VkBuffer vtx_buffers[] = {app.vtx_buffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, vtx_buffers, offsets);
+    vkCmdDraw(cmd_buffer, NOB_ARRAY_LEN(vertices), 1, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
@@ -507,6 +527,40 @@ bool recreate_swpchain()
     cvr_chk(create_swpchain(), "failed to recreate swapchain");
     cvr_chk(create_img_views(), "failed to recreate image views");
     cvr_chk(create_frame_buffs(), "failed to recreate frame buffers");
+
+defer:
+    return result;
+}
+
+bool create_vtx_buffer()
+{
+    bool result = true;
+
+    VkBufferCreateInfo buffer_ci = {0};
+    buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_ci.size = sizeof(vertices);
+    buffer_ci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    vk_chk(vkCreateBuffer(app.device, &buffer_ci, NULL, &app.vtx_buffer), "failed to create buffer");
+
+    VkMemoryRequirements mem_reqs = {0};
+    vkGetBufferMemoryRequirements(app.device, app.vtx_buffer, &mem_reqs);
+
+
+    VkMemoryAllocateInfo alloc_ci = {0};
+    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_ci.allocationSize = mem_reqs.size;
+    bool mem_suitable = find_mem_type_idx(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &alloc_ci.memoryTypeIndex);
+    cvr_chk(mem_suitable, "Memory not suitable based on memory requirements");
+    VkResult vk_result = vkAllocateMemory(app.device, &alloc_ci, NULL, &app.vtx_buff_mem);
+    vk_chk(vk_result, "failed to allocate vertex buffer memory!");
+  
+    vk_chk(vkBindBufferMemory(app.device, app.vtx_buffer, app.vtx_buff_mem, 0), "failed to bind buffer memory");
+    void* data;
+    vk_chk(vkMapMemory(app.device, app.vtx_buff_mem, 0, buffer_ci.size, 0, &data), "failed to map memory");
+    memcpy(data, vertices, (size_t) buffer_ci.size);
+    vkUnmapMemory(app.device, app.vtx_buff_mem);
 
 defer:
     return result;

@@ -1,11 +1,12 @@
 #define NOB_IMPLEMENTATION
-#include "src/nob.h"
+#include "src/ext/nob/nob.h"
 
 const char *cvr[] = {
     "main",
     "app",
     "app_utils",
     "ext_man",
+    "vertex",
 };
 
 bool build_cvr()
@@ -44,7 +45,7 @@ bool build_cvr()
             nob_cmd_append(&cmd, input_path);
         }
         nob_cmd_append(&cmd, "-o", exec_path);
-        nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi");
+        nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi", "-lm");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
 

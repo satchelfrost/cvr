@@ -24,5 +24,6 @@ VkExtent2D choose_swp_extent();
 bool is_device_suitable(VkPhysicalDevice phys_device);
 bool pick_phys_device();
 void cleanup_swpchain();
+bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 
 #endif // VK_UTILS_H_

@@ -1,5 +1,5 @@
 #include "app_utils.h"
-#include "nob.h"
+#include "common.h"
 #include "app.h"
 #include "ext_man.h"
 
@@ -194,4 +194,18 @@ void cleanup_swpchain()
     for (size_t i = 0; i < app.swpchain_img_views.count; i++)
         vkDestroyImageView(app.device, app.swpchain_img_views.items[i], NULL);
     vkDestroySwapchainKHR(app.device, app.swpchain, NULL);
+}
+
+bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx)
+{
+    VkPhysicalDeviceMemoryProperties mem_properites = {0};
+    vkGetPhysicalDeviceMemoryProperties(app.phys_device, &mem_properites);
+    for (uint32_t i = 0; i < mem_properites.memoryTypeCount; i++) {
+        if (type & (1 << i) && (mem_properites.memoryTypes[i].propertyFlags & properties) == properties) {
+            *idx = i;
+            return true;
+        }
+    }
+
+    return false;
 }

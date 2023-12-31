@@ -9,6 +9,8 @@
         "ext_man.h": "c",
         "vk_utils.h": "c",
         "nob_ext.h": "c",
-        "app_utils.h": "c"
+        "app_utils.h": "c",
+        "raymath.h": "c",
+        "glfw3.h": "c"
     }
 }

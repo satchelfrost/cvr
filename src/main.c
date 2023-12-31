@@ -3,8 +3,11 @@
 #include "ext_man.h"
 
 #define NOB_IMPLEMENTATION
-#include "nob.h"
+#include "ext/nob/nob.h"
 #include "nob_ext.h"
+
+#define RAYMATH_IMPLEMENTATION
+#include "ext/raylib-5.0/raymath.h"
 
 bool init_window();
 bool init_vulkan();
@@ -64,6 +67,7 @@ bool init_vulkan()
     cvr_chk(create_gfx_pipeline(), "failed to create graphics pipelin");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(create_cmd_pool(), "failed to create command pool");
+    cvr_chk(create_vtx_buffer(), "failed to create vertex buffer");
     cvr_chk(create_cmd_buff(), "failed to create command buffers");
     cvr_chk(create_syncs(), "failed to create synchronization objects");
 
@@ -77,6 +81,8 @@ bool cleanup()
     nob_da_free(app.frame_buffs);
     nob_da_free(app.swpchain_img_views);
     nob_da_free(app.swpchain_imgs);
+    vkDestroyBuffer(app.device, app.vtx_buffer, NULL);
+    vkFreeMemory(app.device, app.vtx_buff_mem, NULL);
     for (size_t i = 0; i < app.img_available_sems.count; i++)
         vkDestroySemaphore(app.device, app.img_available_sems.items[i], NULL);
     for (size_t i = 0; i < app.render_finished_sems.count; i++)
