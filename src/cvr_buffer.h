@@ -6,18 +6,21 @@
 
 typedef struct {
     VkDevice device;
+    size_t size;
+    size_t count;
     VkBuffer buff;
     VkDeviceMemory buff_mem;
 } CVR_Buffer;
 
+/* CVR_Buffer must be set with device & size prior to calling this constructor */
 bool buffer_ctor(
     CVR_Buffer *buffer,
-    VkDevice device,
-    VkDeviceSize size,
     VkBufferUsageFlags usage,
     VkMemoryPropertyFlags properties
 );
 void buffer_dtor(CVR_Buffer buffer);
-bool copy_buff(VkQueue queue, VkBuffer src, VkBuffer dst, VkDeviceSize size);
+
+/* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
+bool copy_buff(VkQueue queue, CVR_Buffer src, CVR_Buffer dst, VkDeviceSize size);
 
 #endif // CVR_BUFFER_H_

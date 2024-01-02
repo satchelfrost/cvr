@@ -500,7 +500,7 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &app.vtx.buff, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, app.idx.buff, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdDrawIndexed(cmd_buffer, NOB_ARRAY_LEN(indices), 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd_buffer, app.idx.count, 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
@@ -536,31 +536,29 @@ bool create_vtx_buffer()
 {
     bool result = true;
     CVR_Buffer stg;
-    VkDeviceSize buff_size = sizeof(vertices);
+    app.vtx.device = stg.device = app.device;
+    app.vtx.size   = stg.size   = sizeof(vertices);
+    app.vtx.count  = stg.size   = NOB_ARRAY_LEN(vertices);
     result = buffer_ctor(
         &stg,
-        app.device,
-        buff_size,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     cvr_chk(result, "failed to create staging buffer");
 
     void* data;
-    vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, buff_size, 0, &data), "failed to map memory");
-    memcpy(data, vertices, (size_t) buff_size);
+    vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, stg.size, 0, &data), "failed to map memory");
+    memcpy(data, vertices, stg.size);
     vkUnmapMemory(app.device, stg.buff_mem);
 
     result = buffer_ctor(
         &app.vtx,
-        app.device,
-        buff_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     cvr_chk(result, "failed to create vertex buffer");
 
-    copy_buff(app.gfx_queue, stg.buff, app.vtx.buff, buff_size);
+    copy_buff(app.gfx_queue, stg, app.vtx, 0);
 
 defer:
     buffer_dtor(stg);
@@ -571,31 +569,29 @@ bool create_idx_buffer()
 {
     bool result = true;
     CVR_Buffer stg;
-    VkDeviceSize buff_size = sizeof(indices);
+    app.idx.device = stg.device = app.device;
+    app.idx.size   = stg.size   = sizeof(indices);
+    app.idx.count  = stg.count  = NOB_ARRAY_LEN(indices);
     result = buffer_ctor(
         &stg,
-        app.device,
-        buff_size,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     cvr_chk(result, "failed to create staging buffer");
 
     void* data;
-    vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, buff_size, 0, &data), "failed to map memory");
-    memcpy(data, indices, (size_t) buff_size);
+    vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, stg.size, 0, &data), "failed to map memory");
+    memcpy(data, indices, stg.size);
     vkUnmapMemory(app.device, stg.buff_mem);
 
     result = buffer_ctor(
         &app.idx,
-        app.device,
-        buff_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     cvr_chk(result, "failed to create index buffer");
 
-    copy_buff(app.gfx_queue, stg.buff, app.idx.buff, buff_size);
+    copy_buff(app.gfx_queue, stg, app.idx, 0);
 
 defer:
     buffer_dtor(stg);
