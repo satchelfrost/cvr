@@ -189,11 +189,15 @@ VkExtent2D choose_swp_extent()
 
 void cleanup_swpchain()
 {
-    for (size_t i = 0; i < app.frame_buffs.count; i++)
-        vkDestroyFramebuffer(app.device, app.frame_buffs.items[i], NULL);
-    for (size_t i = 0; i < app.swpchain_img_views.count; i++)
-        vkDestroyImageView(app.device, app.swpchain_img_views.items[i], NULL);
-    vkDestroySwapchainKHR(app.device, app.swpchain, NULL);
+    for (size_t i = 0; i < app.swpchain.buffs.count; i++)
+        vkDestroyFramebuffer(app.device, app.swpchain.buffs.items[i], NULL);
+    for (size_t i = 0; i < app.swpchain.img_views.count; i++)
+        vkDestroyImageView(app.device, app.swpchain.img_views.items[i], NULL);
+    vkDestroySwapchainKHR(app.device, app.swpchain.handle, NULL);
+
+    nob_da_reset(app.swpchain.buffs);
+    nob_da_reset(app.swpchain.img_views);
+    nob_da_reset(app.swpchain.imgs);
 }
 
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx)

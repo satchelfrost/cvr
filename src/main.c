@@ -78,18 +78,8 @@ defer:
 bool cleanup()
 {
     cleanup_swpchain();
-    nob_da_free(app.frame_buffs);
-    nob_da_free(app.swpchain_img_views);
-    nob_da_free(app.swpchain_imgs);
-    vkDestroyBuffer(app.device, app.vtx_buffer, NULL);
-    vkFreeMemory(app.device, app.vtx_buff_mem, NULL);
-    for (size_t i = 0; i < app.img_available_sems.count; i++)
-        vkDestroySemaphore(app.device, app.img_available_sems.items[i], NULL);
-    for (size_t i = 0; i < app.render_finished_sems.count; i++)
-        vkDestroySemaphore(app.device, app.render_finished_sems.items[i], NULL);
-    for (size_t i = 0; i < app.fences.count; i++)
-        vkDestroyFence(app.device, app.fences.items[i], NULL);
-    vkDestroyCommandPool(app.device, app.cmd_pool, NULL);
+    destroy_buffer(app.vtx);
+    destroy_cmd(app.cmd);
     vkDestroyPipeline(app.device, app.pipeline, NULL);
     vkDestroyPipelineLayout(app.device, app.pipeline_layout, NULL);
     vkDestroyRenderPass(app.device, app.render_pass, NULL);
@@ -112,5 +102,5 @@ static void frame_buff_resized(GLFWwindow* window, int width, int height)
     unused(width);
     unused(height);
     App *app = (App*)(glfwGetWindowUserPointer(window));
-    app->frame_buff_resized = true;
+    app->swpchain.buff_resized = true;
 }

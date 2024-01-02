@@ -11,6 +11,7 @@
         "nob_ext.h": "c",
         "app_utils.h": "c",
         "raymath.h": "c",
-        "glfw3.h": "c"
+        "glfw3.h": "c",
+        "vertex.h": "c"
     }
 }

@@ -1,7 +1,6 @@
 #include "app.h"
 #include "app_utils.h"
 #include "ext_man.h"
-#include "ext/raylib-5.0/raymath.h"
 #include "vertex.h"
 
 static const Vertex vertices[] = {
@@ -139,11 +138,11 @@ bool create_swpchain()
     swpchain_ci.presentMode = choose_present_mode();
     swpchain_ci.preTransform = capabilities.currentTransform;
 
-    if (vk_ok(vkCreateSwapchainKHR(app.device, &swpchain_ci, NULL, &app.swpchain))) {
+    if (vk_ok(vkCreateSwapchainKHR(app.device, &swpchain_ci, NULL, &app.swpchain.handle))) {
         uint32_t img_count = 0;
-        vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, NULL);
-        nob_da_resize(&app.swpchain_imgs, img_count);
-        vkGetSwapchainImagesKHR(app.device, app.swpchain, &img_count, app.swpchain_imgs.items);
+        vkGetSwapchainImagesKHR(app.device, app.swpchain.handle, &img_count, NULL);
+        nob_da_resize(&app.swpchain.imgs, img_count);
+        vkGetSwapchainImagesKHR(app.device, app.swpchain.handle, &img_count, app.swpchain.imgs.items);
         return true;
     } else {
         return false;
@@ -152,11 +151,11 @@ bool create_swpchain()
 
 bool create_img_views()
 {
-    nob_da_resize(&app.swpchain_img_views, app.swpchain_imgs.count);
-    for (size_t i = 0; i < app.swpchain_img_views.count; i++)  {
+    nob_da_resize(&app.swpchain.img_views, app.swpchain.imgs.count);
+    for (size_t i = 0; i < app.swpchain.img_views.count; i++)  {
         VkImageViewCreateInfo img_view_ci = {0};
         img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        img_view_ci.image = app.swpchain_imgs.items[i];
+        img_view_ci.image = app.swpchain.imgs.items[i];
         img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
         img_view_ci.format = app.surface_fmt.format;
         img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -168,7 +167,7 @@ bool create_img_views()
         img_view_ci.subresourceRange.levelCount = 1;
         img_view_ci.subresourceRange.baseArrayLayer = 0;
         img_view_ci.subresourceRange.layerCount = 1;
-        if (!vk_ok(vkCreateImageView(app.device, &img_view_ci, NULL, &app.swpchain_img_views.items[i])))
+        if (!vk_ok(vkCreateImageView(app.device, &img_view_ci, NULL, &app.swpchain.img_views.items[i])))
             return false;
     }
 
@@ -337,17 +336,17 @@ bool create_render_pass()
 
 bool create_frame_buffs()
 {
-    nob_da_resize(&app.frame_buffs, app.swpchain_img_views.count);
-    for (size_t i = 0; i < app.swpchain_img_views.count; i++) {
+    nob_da_resize(&app.swpchain.buffs, app.swpchain.img_views.count);
+    for (size_t i = 0; i < app.swpchain.img_views.count; i++) {
         VkFramebufferCreateInfo frame_buff_ci = {0};
         frame_buff_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         frame_buff_ci.renderPass = app.render_pass;
         frame_buff_ci.attachmentCount = 1;
-        frame_buff_ci.pAttachments = &app.swpchain_img_views.items[i];
+        frame_buff_ci.pAttachments = &app.swpchain.img_views.items[i];
         frame_buff_ci.width =  app.extent.width;
         frame_buff_ci.height = app.extent.height;
         frame_buff_ci.layers = 1;
-        if (!vk_ok(vkCreateFramebuffer(app.device, &frame_buff_ci, NULL, &app.frame_buffs.items[i])))
+        if (!vk_ok(vkCreateFramebuffer(app.device, &frame_buff_ci, NULL, &app.swpchain.buffs.items[i])))
             return false;
     }
 
@@ -363,7 +362,7 @@ bool create_cmd_pool()
     cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
-    vk_chk(vkCreateCommandPool(app.device, &cmd_pool_ci, NULL, &app.cmd_pool), "failed to create command pool");
+    vk_chk(vkCreateCommandPool(app.device, &cmd_pool_ci, NULL, &app.cmd.pool), "failed to create command pool");
 
 defer:
     return result;
@@ -373,11 +372,11 @@ bool create_cmd_buff()
 {
     VkCommandBufferAllocateInfo ci = {0};
     ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ci.commandPool = app.cmd_pool;
+    ci.commandPool = app.cmd.pool;
     ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    nob_da_resize(&app.cmd_buffers, MAX_FRAMES_IN_FLIGHT);
-    ci.commandBufferCount = app.cmd_buffers.count;
-    return vk_ok(vkAllocateCommandBuffers(app.device, &ci, app.cmd_buffers.items));
+    nob_da_resize(&app.cmd.buffs, MAX_FRAMES_IN_FLIGHT);
+    ci.commandBufferCount = app.cmd.buffs.count;
+    return vk_ok(vkAllocateCommandBuffers(app.device, &ci, app.cmd.buffs.items));
 }
 
 bool create_syncs()
@@ -388,16 +387,16 @@ bool create_syncs()
     VkFenceCreateInfo fence_ci = {0};
     fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    nob_da_resize(&app.img_available_sems, MAX_FRAMES_IN_FLIGHT);
-    nob_da_resize(&app.render_finished_sems, MAX_FRAMES_IN_FLIGHT);
-    nob_da_resize(&app.fences, MAX_FRAMES_IN_FLIGHT);
+    nob_da_resize(&app.cmd.img_avail_sems, MAX_FRAMES_IN_FLIGHT);
+    nob_da_resize(&app.cmd.render_finished_sems, MAX_FRAMES_IN_FLIGHT);
+    nob_da_resize(&app.cmd.fences, MAX_FRAMES_IN_FLIGHT);
     VkResult vk_result;
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.img_available_sems.items[i]);
+        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.cmd.img_avail_sems.items[i]);
         vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.render_finished_sems.items[i]);
+        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.cmd.render_finished_sems.items[i]);
         vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateFence(app.device, &fence_ci, NULL, &app.fences.items[i]);
+        vk_result = vkCreateFence(app.device, &fence_ci, NULL, &app.cmd.fences.items[i]);
         vk_chk(vk_result, "failed to create fence");
     }
 
@@ -409,14 +408,14 @@ bool draw()
 {
     bool result = true;
 
-    VkResult vk_result = vkWaitForFences(app.device, 1, &app.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
+    VkResult vk_result = vkWaitForFences(app.device, 1, &app.cmd.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
     vk_chk(vk_result, "failed to wait for fences");
 
     uint32_t img_idx = 0;
     vk_result = vkAcquireNextImageKHR(app.device,
-        app.swpchain,
+        app.swpchain.handle,
         UINT64_MAX,
-        app.img_available_sems.items[curr_frame],
+        app.cmd.img_avail_sems.items[curr_frame],
         VK_NULL_HANDLE,
         &img_idx
     );
@@ -429,35 +428,35 @@ bool draw()
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    vk_chk(vkResetFences(app.device, 1, &app.fences.items[curr_frame]), "failed to reset fences");
-    vk_chk(vkResetCommandBuffer(app.cmd_buffers.items[curr_frame], 0), "failed to reset cmd buffer");
-    rec_cmds(img_idx, app.cmd_buffers.items[curr_frame]);
+    vk_chk(vkResetFences(app.device, 1, &app.cmd.fences.items[curr_frame]), "failed to reset fences");
+    vk_chk(vkResetCommandBuffer(app.cmd.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
+    rec_cmds(img_idx, app.cmd.buffs.items[curr_frame]);
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &app.img_available_sems.items[curr_frame];
+    submit.pWaitSemaphores = &app.cmd.img_avail_sems.items[curr_frame];
     submit.pWaitDstStageMask = wait_stages;
     submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &app.cmd_buffers.items[curr_frame];
+    submit.pCommandBuffers = &app.cmd.buffs.items[curr_frame];
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &app.render_finished_sems.items[curr_frame];
+    submit.pSignalSemaphores = &app.cmd.render_finished_sems.items[curr_frame];
 
-    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, app.fences.items[curr_frame]), "failed to draw command buffer");
+    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, app.cmd.fences.items[curr_frame]), "failed to submit command");
 
     VkPresentInfoKHR present = {0};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &app.render_finished_sems.items[curr_frame];
+    present.pWaitSemaphores = &app.cmd.render_finished_sems.items[curr_frame];
     present.swapchainCount = 1;
-    present.pSwapchains = &app.swpchain;
+    present.pSwapchains = &app.swpchain.handle;
     present.pImageIndices = &img_idx;
 
     vk_result = vkQueuePresentKHR(app.present_queue, &present);
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || app.frame_buff_resized) {
-        app.frame_buff_resized = false;
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || app.swpchain.buff_resized) {
+        app.swpchain.buff_resized = false;
         cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
     } else if (!vk_ok(vk_result)) {
         nob_log(NOB_ERROR, "failed to present queue");
@@ -480,7 +479,7 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     begin_rp.renderPass = app.render_pass;
-    begin_rp.framebuffer = app.frame_buffs.items[img_idx];
+    begin_rp.framebuffer = app.swpchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = app.extent;
     VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
     begin_rp.clearValueCount = 1;
@@ -497,9 +496,8 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     scissor.extent = app.extent;
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
-    VkBuffer vtx_buffers[] = {app.vtx_buffer};
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, vtx_buffers, offsets);
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &app.vtx.buff, offsets);
     vkCmdDraw(cmd_buffer, NOB_ARRAY_LEN(vertices), 1, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
@@ -535,32 +533,67 @@ defer:
 bool create_vtx_buffer()
 {
     bool result = true;
+    VkDeviceSize buff_size = sizeof(vertices);
+    result = create_cvr_buffer(
+        &app.vtx,
+        buff_size,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create vertex buffer");
+
+    vk_chk(vkBindBufferMemory(app.device, app.vtx.buff, app.vtx.buff_mem, 0), "failed to bind buffer memory");
+    void* data;
+    vk_chk(vkMapMemory(app.device, app.vtx.buff_mem, 0, buff_size, 0, &data), "failed to map memory");
+    memcpy(data, vertices, (size_t) buff_size);
+    vkUnmapMemory(app.device, app.vtx.buff_mem);
+
+defer:
+    return result;
+}
+
+void destroy_buffer(CVR_Buffer buffer)
+{
+    vkDestroyBuffer(app.device, buffer.buff, NULL);
+    vkFreeMemory(app.device, buffer.buff_mem, NULL);
+}
+
+void destroy_cmd(CVR_Cmd cmd)
+{
+    for (size_t i = 0; i < cmd.img_avail_sems.count; i++)
+        vkDestroySemaphore(app.device, app.cmd.img_avail_sems.items[i], NULL);
+    for (size_t i = 0; i < cmd.render_finished_sems.count; i++)
+        vkDestroySemaphore(app.device, cmd.render_finished_sems.items[i], NULL);
+    for (size_t i = 0; i < cmd.fences.count; i++)
+        vkDestroyFence(app.device, cmd.fences.items[i], NULL);
+    vkDestroyCommandPool(app.device, cmd.pool, NULL);
+}
+
+bool create_cvr_buffer(
+    CVR_Buffer *buffer,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties)
+{
+    bool result = true;
 
     VkBufferCreateInfo buffer_ci = {0};
     buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_ci.size = sizeof(vertices);
-    buffer_ci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_ci.size = size;
+    buffer_ci.usage = usage;
     buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vk_chk(vkCreateBuffer(app.device, &buffer_ci, NULL, &app.vtx_buffer), "failed to create buffer");
+    vk_chk(vkCreateBuffer(app.device, &buffer_ci, NULL, &buffer->buff), "failed to create buffer");
 
     VkMemoryRequirements mem_reqs = {0};
-    vkGetBufferMemoryRequirements(app.device, app.vtx_buffer, &mem_reqs);
-
+    vkGetBufferMemoryRequirements(app.device, app.vtx.buff, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_ci = {0};
     alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_ci.allocationSize = mem_reqs.size;
-    bool mem_suitable = find_mem_type_idx(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &alloc_ci.memoryTypeIndex);
-    cvr_chk(mem_suitable, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(app.device, &alloc_ci, NULL, &app.vtx_buff_mem);
-    vk_chk(vk_result, "failed to allocate vertex buffer memory!");
-  
-    vk_chk(vkBindBufferMemory(app.device, app.vtx_buffer, app.vtx_buff_mem, 0), "failed to bind buffer memory");
-    void* data;
-    vk_chk(vkMapMemory(app.device, app.vtx_buff_mem, 0, buffer_ci.size, 0, &data), "failed to map memory");
-    memcpy(data, vertices, (size_t) buffer_ci.size);
-    vkUnmapMemory(app.device, app.vtx_buff_mem);
+    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
+    cvr_chk(result, "Memory not suitable based on memory requirements");
+    VkResult vk_result = vkAllocateMemory(app.device, &alloc_ci, NULL, &app.vtx.buff_mem);
+    vk_chk(vk_result, "failed to allocate buffer memory!");
 
 defer:
     return result;

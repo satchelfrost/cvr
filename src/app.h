@@ -5,7 +5,26 @@
 #include <GLFW/glfw3.h>
 #include "common.h"
 
-/* Data for main vulkan application */
+typedef struct {
+    VkBuffer buff;
+    VkDeviceMemory buff_mem;
+} CVR_Buffer;
+
+typedef struct {
+    VkSwapchainKHR handle;
+    vec(VkImage) imgs;
+    vec(VkImageView) img_views;
+    vec(VkFramebuffer) buffs;
+    bool buff_resized;
+} CVR_Swpchain;
+
+typedef struct {
+    VkCommandPool pool;
+    vec(VkCommandBuffer) buffs;
+    vec(VkSemaphore) img_avail_sems;
+    vec(VkSemaphore) render_finished_sems;
+    vec(VkFence) fences;
+} CVR_Cmd;
 
 typedef struct {
     GLFWwindow *window;
@@ -18,22 +37,14 @@ typedef struct {
     VkSurfaceKHR surface;
     VkSurfaceFormatKHR surface_fmt;
     VkExtent2D extent;
-    VkSwapchainKHR swpchain;
     VkRenderPass render_pass;
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
-    VkCommandPool cmd_pool;
-    vec(VkCommandBuffer) cmd_buffers;
-    vec(VkSemaphore) img_available_sems;
-    vec(VkSemaphore) render_finished_sems;
-    vec(VkFence) fences;
-    vec(VkImage) swpchain_imgs;
-    vec(VkImageView) swpchain_img_views;
-    vec(VkFramebuffer) frame_buffs;
-    bool frame_buff_resized;
-
-    VkBuffer vtx_buffer;
-    VkDeviceMemory vtx_buff_mem;
+    CVR_Swpchain swpchain;
+    CVR_Cmd cmd;
+    CVR_Buffer vtx;
+    CVR_Buffer idx;
+    CVR_Buffer stg;
 } App;
 
 bool create_instance();
@@ -49,7 +60,15 @@ bool create_cmd_pool();
 bool create_cmd_buff();
 bool create_syncs();
 bool recreate_swpchain();
+bool create_cvr_buffer(
+    CVR_Buffer *buffer,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties
+);
 bool create_vtx_buffer();
+void destroy_buffer(CVR_Buffer buffer);
+void destroy_cmd(CVR_Cmd cmd);
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);

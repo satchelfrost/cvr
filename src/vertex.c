@@ -1,11 +1,5 @@
 #include "vertex.h"
 
-// static const Vertex vertices[] = {
-//     {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-//     {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
-//     {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
-// };
-
 VkVertexInputBindingDescription get_binding_desc()
 {
     VkVertexInputBindingDescription bindingDescription = {0};
