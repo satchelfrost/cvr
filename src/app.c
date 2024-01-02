@@ -12,9 +12,13 @@ static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_D
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
 static const Vertex vertices[] = {
-    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+static const uint16_t indices[] = {
+    0, 1, 2, 2, 3, 0
 };
 
 bool app_ctor()
@@ -35,6 +39,7 @@ bool app_ctor()
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_ctor(app.device, app.phys_device, MAX_FRAMES_IN_FLIGHT), "failed to create command objects");
     cvr_chk(create_vtx_buffer(), "failed to create vertex buffer");
+    cvr_chk(create_idx_buffer(), "failed to create index buffer");
 
 defer:
     return result;
@@ -44,6 +49,7 @@ bool app_dtor()
 {
     cleanup_swpchain();
     buffer_dtor(app.vtx);
+    buffer_dtor(app.idx);
     cmd_dtor(app.device);
     vkDestroyPipeline(app.device, app.pipeline, NULL);
     vkDestroyPipelineLayout(app.device, app.pipeline_layout, NULL);
@@ -493,7 +499,8 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
 
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &app.vtx.buff, offsets);
-    vkCmdDraw(cmd_buffer, NOB_ARRAY_LEN(vertices), 1, 0, 0);
+    vkCmdBindIndexBuffer(cmd_buffer, app.idx.buff, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(cmd_buffer, NOB_ARRAY_LEN(indices), 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
@@ -558,4 +565,40 @@ bool create_vtx_buffer()
 defer:
     buffer_dtor(stg);
     return result;
+}
+
+bool create_idx_buffer()
+{
+    bool result = true;
+    CVR_Buffer stg;
+    VkDeviceSize buff_size = sizeof(indices);
+    result = buffer_ctor(
+        &stg,
+        app.device,
+        buff_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create staging buffer");
+
+    void* data;
+    vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, buff_size, 0, &data), "failed to map memory");
+    memcpy(data, indices, (size_t) buff_size);
+    vkUnmapMemory(app.device, stg.buff_mem);
+
+    result = buffer_ctor(
+        &app.idx,
+        app.device,
+        buff_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to create index buffer");
+
+    copy_buff(app.gfx_queue, stg.buff, app.idx.buff, buff_size);
+
+defer:
+    buffer_dtor(stg);
+    return result;
+
 }

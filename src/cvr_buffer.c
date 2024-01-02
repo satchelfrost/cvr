@@ -30,6 +30,7 @@ bool buffer_ctor(
     vk_chk(vk_result, "failed to allocate buffer memory!");
 
     vk_chk(vkBindBufferMemory(device, buffer->buff, buffer->buff_mem, 0), "failed to bind buffer memory");
+
 defer:
     return result;
 }
@@ -53,8 +54,10 @@ defer:
 
 void buffer_dtor(CVR_Buffer buffer)
 {
-    if (!buffer.device)
+    if (!buffer.device) {
         nob_log(NOB_WARNING, "cannot destroy null buffer");
+        return;
+    }
     vkDestroyBuffer(buffer.device, buffer.buff, NULL);
     vkFreeMemory(buffer.device, buffer.buff_mem, NULL);
 }

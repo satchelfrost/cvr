@@ -46,6 +46,7 @@ bool create_render_pass();
 bool create_frame_buffs();
 bool recreate_swpchain();
 bool create_vtx_buffer();
+bool create_idx_buffer();
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);
