@@ -3,7 +3,7 @@
 #include "ext_man.h"
 
 #define NOB_IMPLEMENTATION
-#include "ext/nob/nob.h"
+#include "ext/nob.h"
 #include "nob_ext.h"
 
 #define RAYMATH_IMPLEMENTATION

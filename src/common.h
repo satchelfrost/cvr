@@ -1,7 +1,7 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
-#include "ext/nob/nob.h"
+#include "ext/nob.h"
 #include "nob_ext.h"
 
 /* Common macro definitions */
