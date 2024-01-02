@@ -4,11 +4,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "common.h"
-
-typedef struct {
-    VkBuffer buff;
-    VkDeviceMemory buff_mem;
-} CVR_Buffer;
+#include "cvr_buffer.h"
 
 typedef struct {
     VkSwapchainKHR handle;
@@ -17,14 +13,6 @@ typedef struct {
     vec(VkFramebuffer) buffs;
     bool buff_resized;
 } CVR_Swpchain;
-
-typedef struct {
-    VkCommandPool pool;
-    vec(VkCommandBuffer) buffs;
-    vec(VkSemaphore) img_avail_sems;
-    vec(VkSemaphore) render_finished_sems;
-    vec(VkFence) fences;
-} CVR_Cmd;
 
 typedef struct {
     GLFWwindow *window;
@@ -41,11 +29,12 @@ typedef struct {
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
     CVR_Swpchain swpchain;
-    CVR_Cmd cmd;
     CVR_Buffer vtx;
     CVR_Buffer idx;
 } App;
 
+bool app_ctor();
+bool app_dtor();
 bool create_instance();
 bool create_device();
 bool create_surface();
@@ -55,24 +44,8 @@ bool create_gfx_pipeline();
 bool create_shader_module(const char *shader, VkShaderModule *module);
 bool create_render_pass();
 bool create_frame_buffs();
-bool create_cmd_pool();
-bool create_cmd_buff();
-bool create_syncs();
 bool recreate_swpchain();
-bool create_cvr_buffer(
-    CVR_Buffer *buffer,
-    VkDeviceSize size,
-    VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags properties
-);
 bool create_vtx_buffer();
-void destroy_buffer(CVR_Buffer buffer);
-void destroy_cmd(CVR_Cmd cmd);
-bool copy_buff(VkBuffer src, VkBuffer dst, VkDeviceSize size);
-
-/* Quick one-off command buffer */
-bool quick_cmd_begin(VkCommandBuffer *cmd_buff, VkCommandPool pool);
-bool quick_cmd_end(VkCommandBuffer *cmd_buff, VkCommandPool pool);
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);

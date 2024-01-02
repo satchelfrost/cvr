@@ -2,19 +2,65 @@
 #include "app_utils.h"
 #include "ext_man.h"
 #include "vertex.h"
+#include "cvr_cmd.h"
 
+extern ExtManager ext_manager; // ext_man.c
+extern CVR_Cmd cmd;            // cvr_cmd.c
+App app = {0};
+
+static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+static const size_t MAX_FRAMES_IN_FLIGHT = 2;
+static uint32_t curr_frame = 0;
 static const Vertex vertices[] = {
     {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
     {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
     {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
-/* Define the main application */
-App app = {0};
-static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-static const size_t MAX_FRAMES_IN_FLIGHT = 2;
-static uint32_t curr_frame = 0;
-extern ExtManager ext_manager; // ext_man.c
+bool app_ctor()
+{
+    bool result = true;
+    init_ext_managner();
+    cvr_chk(create_instance(), "failed to create instance");
+#ifdef ENABLE_VALIDATION
+    cvr_chk(setup_debug_msgr(), "failed to setup debug messenger");
+#endif
+    cvr_chk(create_surface(), "failed to create vulkan surface");
+    cvr_chk(pick_phys_device(), "failed to find suitable GPU");
+    cvr_chk(create_device(), "failed to create logical device");
+    cvr_chk(create_swpchain(), "failed to create swapchain");
+    cvr_chk(create_img_views(), "failed to create image views");
+    cvr_chk(create_render_pass(), "failed to create render pass");
+    cvr_chk(create_gfx_pipeline(), "failed to create graphics pipelin");
+    cvr_chk(create_frame_buffs(), "failed to create frame buffers");
+    cvr_chk(cmd_ctor(app.device, app.phys_device, MAX_FRAMES_IN_FLIGHT), "failed to create command objects");
+    cvr_chk(create_vtx_buffer(), "failed to create vertex buffer");
+
+defer:
+    return result;
+}
+
+bool app_dtor()
+{
+    cleanup_swpchain();
+    buffer_dtor(app.vtx);
+    cmd_dtor(app.device);
+    vkDestroyPipeline(app.device, app.pipeline, NULL);
+    vkDestroyPipelineLayout(app.device, app.pipeline_layout, NULL);
+    vkDestroyRenderPass(app.device, app.render_pass, NULL);
+    vkDestroyDevice(app.device, NULL);
+#ifdef ENABLE_VALIDATION
+    load_pfn(vkDestroyDebugUtilsMessengerEXT);
+    if (vkDestroyDebugUtilsMessengerEXT)
+        vkDestroyDebugUtilsMessengerEXT(app.instance, app.debug_msgr, NULL);
+#endif
+    vkDestroySurfaceKHR(app.instance, app.surface, NULL);
+    vkDestroyInstance(app.instance, NULL);
+    glfwDestroyWindow(app.window);
+    glfwTerminate();
+    destroy_ext_manager();
+    return true;
+}
 
 bool create_instance()
 {
@@ -353,69 +399,18 @@ bool create_frame_buffs()
     return true;
 }
 
-bool create_cmd_pool()
-{
-    bool result = true;
-    QueueFamilyIndices indices = find_queue_fams(app.phys_device);
-    cvr_chk(indices.has_gfx, "failed to create command pool, no graphics queue");
-    VkCommandPoolCreateInfo cmd_pool_ci = {0};
-    cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
-    vk_chk(vkCreateCommandPool(app.device, &cmd_pool_ci, NULL, &app.cmd.pool), "failed to create command pool");
-
-defer:
-    return result;
-}
-
-bool create_cmd_buff()
-{
-    VkCommandBufferAllocateInfo ci = {0};
-    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ci.commandPool = app.cmd.pool;
-    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    nob_da_resize(&app.cmd.buffs, MAX_FRAMES_IN_FLIGHT);
-    ci.commandBufferCount = app.cmd.buffs.count;
-    return vk_ok(vkAllocateCommandBuffers(app.device, &ci, app.cmd.buffs.items));
-}
-
-bool create_syncs()
-{
-    bool result = true;
-    VkSemaphoreCreateInfo sem_ci = {0};
-    sem_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VkFenceCreateInfo fence_ci = {0};
-    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    nob_da_resize(&app.cmd.img_avail_sems, MAX_FRAMES_IN_FLIGHT);
-    nob_da_resize(&app.cmd.render_finished_sems, MAX_FRAMES_IN_FLIGHT);
-    nob_da_resize(&app.cmd.fences, MAX_FRAMES_IN_FLIGHT);
-    VkResult vk_result;
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.cmd.img_avail_sems.items[i]);
-        vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateSemaphore(app.device, &sem_ci, NULL, &app.cmd.render_finished_sems.items[i]);
-        vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateFence(app.device, &fence_ci, NULL, &app.cmd.fences.items[i]);
-        vk_chk(vk_result, "failed to create fence");
-    }
-
-defer:
-    return result;
-}
-
 bool draw()
 {
     bool result = true;
 
-    VkResult vk_result = vkWaitForFences(app.device, 1, &app.cmd.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
+    VkResult vk_result = vkWaitForFences(app.device, 1, &cmd.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
     vk_chk(vk_result, "failed to wait for fences");
 
     uint32_t img_idx = 0;
     vk_result = vkAcquireNextImageKHR(app.device,
         app.swpchain.handle,
         UINT64_MAX,
-        app.cmd.img_avail_sems.items[curr_frame],
+        cmd.img_avail_sems.items[curr_frame],
         VK_NULL_HANDLE,
         &img_idx
     );
@@ -428,28 +423,28 @@ bool draw()
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    vk_chk(vkResetFences(app.device, 1, &app.cmd.fences.items[curr_frame]), "failed to reset fences");
-    vk_chk(vkResetCommandBuffer(app.cmd.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
-    rec_cmds(img_idx, app.cmd.buffs.items[curr_frame]);
+    vk_chk(vkResetFences(app.device, 1, &cmd.fences.items[curr_frame]), "failed to reset fences");
+    vk_chk(vkResetCommandBuffer(cmd.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
+    rec_cmds(img_idx, cmd.buffs.items[curr_frame]);
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &app.cmd.img_avail_sems.items[curr_frame];
+    submit.pWaitSemaphores = &cmd.img_avail_sems.items[curr_frame];
     submit.pWaitDstStageMask = wait_stages;
     submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &app.cmd.buffs.items[curr_frame];
+    submit.pCommandBuffers = &cmd.buffs.items[curr_frame];
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &app.cmd.render_finished_sems.items[curr_frame];
+    submit.pSignalSemaphores = &cmd.render_finished_sems.items[curr_frame];
 
-    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, app.cmd.fences.items[curr_frame]), "failed to submit command");
+    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, cmd.fences.items[curr_frame]), "failed to submit command");
 
     VkPresentInfoKHR present = {0};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &app.cmd.render_finished_sems.items[curr_frame];
+    present.pWaitSemaphores = &cmd.render_finished_sems.items[curr_frame];
     present.swapchainCount = 1;
     present.pSwapchains = &app.swpchain.handle;
     present.pImageIndices = &img_idx;
@@ -535,8 +530,9 @@ bool create_vtx_buffer()
     bool result = true;
     CVR_Buffer stg;
     VkDeviceSize buff_size = sizeof(vertices);
-    result = create_cvr_buffer(
+    result = buffer_ctor(
         &stg,
+        app.device,
         buff_size,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
@@ -548,119 +544,18 @@ bool create_vtx_buffer()
     memcpy(data, vertices, (size_t) buff_size);
     vkUnmapMemory(app.device, stg.buff_mem);
 
-    result = create_cvr_buffer(
+    result = buffer_ctor(
         &app.vtx,
+        app.device,
         buff_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     cvr_chk(result, "failed to create vertex buffer");
 
-    copy_buff(stg.buff, app.vtx.buff, buff_size);
+    copy_buff(app.gfx_queue, stg.buff, app.vtx.buff, buff_size);
 
 defer:
-    destroy_buffer(stg);
-    return result;
-}
-
-void destroy_buffer(CVR_Buffer buffer)
-{
-    vkDestroyBuffer(app.device, buffer.buff, NULL);
-    vkFreeMemory(app.device, buffer.buff_mem, NULL);
-}
-
-void destroy_cmd(CVR_Cmd cmd)
-{
-    for (size_t i = 0; i < cmd.img_avail_sems.count; i++)
-        vkDestroySemaphore(app.device, app.cmd.img_avail_sems.items[i], NULL);
-    for (size_t i = 0; i < cmd.render_finished_sems.count; i++)
-        vkDestroySemaphore(app.device, cmd.render_finished_sems.items[i], NULL);
-    for (size_t i = 0; i < cmd.fences.count; i++)
-        vkDestroyFence(app.device, cmd.fences.items[i], NULL);
-    vkDestroyCommandPool(app.device, cmd.pool, NULL);
-}
-
-bool create_cvr_buffer(
-    CVR_Buffer *buffer,
-    VkDeviceSize size,
-    VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags properties)
-{
-    bool result = true;
-
-    VkBufferCreateInfo buffer_ci = {0};
-    buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_ci.size = size;
-    buffer_ci.usage = usage;
-    buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vk_chk(vkCreateBuffer(app.device, &buffer_ci, NULL, &buffer->buff), "failed to create buffer");
-
-    VkMemoryRequirements mem_reqs = {0};
-    vkGetBufferMemoryRequirements(app.device, buffer->buff, &mem_reqs);
-
-    VkMemoryAllocateInfo alloc_ci = {0};
-    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_ci.allocationSize = mem_reqs.size;
-    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
-    cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(app.device, &alloc_ci, NULL, &buffer->buff_mem);
-    vk_chk(vk_result, "failed to allocate buffer memory!");
-
-    vk_chk(vkBindBufferMemory(app.device, buffer->buff, buffer->buff_mem, 0), "failed to bind buffer memory");
-defer:
-    return result;
-}
-
-bool quick_cmd_begin(VkCommandBuffer *cmd_buff, VkCommandPool pool)
-{
-    bool result = true;
-
-    VkCommandBufferAllocateInfo ci = {0};
-    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ci.commandPool = pool;
-    ci.commandBufferCount = 1;
-    vk_chk(vkAllocateCommandBuffers(app.device, &ci, cmd_buff), "failed to create quick cmd");
-
-    VkCommandBufferBeginInfo cmd_begin = {0};
-    cmd_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmd_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk_chk(vkBeginCommandBuffer(*cmd_buff, &cmd_begin), "failed to begin quick cmd");
-
-defer:
-    return result;
-}
-
-bool quick_cmd_end(VkCommandBuffer *cmd_buff, VkCommandPool pool)
-{
-    bool result = true;
-    vk_chk(vkEndCommandBuffer(*cmd_buff), "failed to end cmd buffer");
-
-    VkSubmitInfo submit = {0};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = cmd_buff;
-    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
-    vk_chk(vkQueueWaitIdle(app.gfx_queue), "failed to wait idle in quick cmd");
-
-defer:
-    vkFreeCommandBuffers(app.device, pool, 1, cmd_buff);
-    return result;
-}
-
-bool copy_buff(VkBuffer src, VkBuffer dst, VkDeviceSize size)
-{
-    bool result = true;
-
-    VkCommandBuffer cmd_buff;
-    cvr_chk(quick_cmd_begin(&cmd_buff, app.cmd.pool), "failed quick cmd begin");
-
-    VkBufferCopy copy_region = {0};
-    copy_region.size = size;
-    vkCmdCopyBuffer(cmd_buff, src, dst, 1, &copy_region);
-
-    cvr_chk(quick_cmd_end(&cmd_buff, app.cmd.pool), "failed quick cmd end");
-
-defer:
+    buffer_dtor(stg);
     return result;
 }

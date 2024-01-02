@@ -1,5 +1,5 @@
 #define NOB_IMPLEMENTATION
-#include "src/ext/nob/nob.h"
+#include "src/ext/nob.h"
 
 const char *cvr[] = {
     "main",
@@ -7,6 +7,8 @@ const char *cvr[] = {
     "app_utils",
     "ext_man",
     "vertex",
+    "cvr_cmd",
+    "cvr_buffer",
 };
 
 bool build_cvr()
