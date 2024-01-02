@@ -44,7 +44,6 @@ typedef struct {
     CVR_Cmd cmd;
     CVR_Buffer vtx;
     CVR_Buffer idx;
-    CVR_Buffer stg;
 } App;
 
 bool create_instance();
@@ -69,6 +68,11 @@ bool create_cvr_buffer(
 bool create_vtx_buffer();
 void destroy_buffer(CVR_Buffer buffer);
 void destroy_cmd(CVR_Cmd cmd);
+bool copy_buff(VkBuffer src, VkBuffer dst, VkDeviceSize size);
+
+/* Quick one-off command buffer */
+bool quick_cmd_begin(VkCommandBuffer *cmd_buff, VkCommandPool pool);
+bool quick_cmd_end(VkCommandBuffer *cmd_buff, VkCommandPool pool);
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);

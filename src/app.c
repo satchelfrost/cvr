@@ -533,22 +533,33 @@ defer:
 bool create_vtx_buffer()
 {
     bool result = true;
+    CVR_Buffer stg;
     VkDeviceSize buff_size = sizeof(vertices);
+    result = create_cvr_buffer(
+        &stg,
+        buff_size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create staging buffer");
+
+    void* data;
+    vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, buff_size, 0, &data), "failed to map memory");
+    memcpy(data, vertices, (size_t) buff_size);
+    vkUnmapMemory(app.device, stg.buff_mem);
+
     result = create_cvr_buffer(
         &app.vtx,
         buff_size,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     cvr_chk(result, "failed to create vertex buffer");
 
-    vk_chk(vkBindBufferMemory(app.device, app.vtx.buff, app.vtx.buff_mem, 0), "failed to bind buffer memory");
-    void* data;
-    vk_chk(vkMapMemory(app.device, app.vtx.buff_mem, 0, buff_size, 0, &data), "failed to map memory");
-    memcpy(data, vertices, (size_t) buff_size);
-    vkUnmapMemory(app.device, app.vtx.buff_mem);
+    copy_buff(stg.buff, app.vtx.buff, buff_size);
 
 defer:
+    destroy_buffer(stg);
     return result;
 }
 
@@ -585,15 +596,70 @@ bool create_cvr_buffer(
     vk_chk(vkCreateBuffer(app.device, &buffer_ci, NULL, &buffer->buff), "failed to create buffer");
 
     VkMemoryRequirements mem_reqs = {0};
-    vkGetBufferMemoryRequirements(app.device, app.vtx.buff, &mem_reqs);
+    vkGetBufferMemoryRequirements(app.device, buffer->buff, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_ci = {0};
     alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_ci.allocationSize = mem_reqs.size;
     result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
     cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(app.device, &alloc_ci, NULL, &app.vtx.buff_mem);
+    VkResult vk_result = vkAllocateMemory(app.device, &alloc_ci, NULL, &buffer->buff_mem);
     vk_chk(vk_result, "failed to allocate buffer memory!");
+
+    vk_chk(vkBindBufferMemory(app.device, buffer->buff, buffer->buff_mem, 0), "failed to bind buffer memory");
+defer:
+    return result;
+}
+
+bool quick_cmd_begin(VkCommandBuffer *cmd_buff, VkCommandPool pool)
+{
+    bool result = true;
+
+    VkCommandBufferAllocateInfo ci = {0};
+    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ci.commandPool = pool;
+    ci.commandBufferCount = 1;
+    vk_chk(vkAllocateCommandBuffers(app.device, &ci, cmd_buff), "failed to create quick cmd");
+
+    VkCommandBufferBeginInfo cmd_begin = {0};
+    cmd_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmd_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vk_chk(vkBeginCommandBuffer(*cmd_buff, &cmd_begin), "failed to begin quick cmd");
+
+defer:
+    return result;
+}
+
+bool quick_cmd_end(VkCommandBuffer *cmd_buff, VkCommandPool pool)
+{
+    bool result = true;
+    vk_chk(vkEndCommandBuffer(*cmd_buff), "failed to end cmd buffer");
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = cmd_buff;
+    vk_chk(vkQueueSubmit(app.gfx_queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
+    vk_chk(vkQueueWaitIdle(app.gfx_queue), "failed to wait idle in quick cmd");
+
+defer:
+    vkFreeCommandBuffers(app.device, pool, 1, cmd_buff);
+    return result;
+}
+
+bool copy_buff(VkBuffer src, VkBuffer dst, VkDeviceSize size)
+{
+    bool result = true;
+
+    VkCommandBuffer cmd_buff;
+    cvr_chk(quick_cmd_begin(&cmd_buff, app.cmd.pool), "failed quick cmd begin");
+
+    VkBufferCopy copy_region = {0};
+    copy_region.size = size;
+    vkCmdCopyBuffer(cmd_buff, src, dst, 1, &copy_region);
+
+    cvr_chk(quick_cmd_end(&cmd_buff, app.cmd.pool), "failed quick cmd end");
 
 defer:
     return result;
