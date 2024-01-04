@@ -31,6 +31,8 @@ typedef struct {
     CVR_Swpchain swpchain;
     CVR_Buffer vtx;
     CVR_Buffer idx;
+    vec(CVR_Buffer) ubos;
+    VkDescriptorSetLayout descriptor_set_layout;
 } App;
 
 bool app_ctor();
@@ -40,6 +42,7 @@ bool create_device();
 bool create_surface();
 bool create_swpchain();
 bool create_img_views();
+bool create_descriptor_set_layout();
 bool create_gfx_pipeline();
 bool create_shader_module(const char *shader, VkShaderModule *module);
 bool create_render_pass();
@@ -47,6 +50,8 @@ bool create_frame_buffs();
 bool recreate_swpchain();
 bool create_vtx_buffer();
 bool create_idx_buffer();
+bool create_ubos();
+void update_ubos(uint32_t curr_frame);
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);

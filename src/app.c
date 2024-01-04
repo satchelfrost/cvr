@@ -21,6 +21,12 @@ static const uint16_t indices[] = {
     0, 1, 2, 2, 3, 0
 };
 
+typedef struct {
+    Matrix model;
+    Matrix view;
+    Matrix proj;
+} UBO;
+
 bool app_ctor()
 {
     bool result = true;
@@ -35,11 +41,13 @@ bool app_ctor()
     cvr_chk(create_swpchain(), "failed to create swapchain");
     cvr_chk(create_img_views(), "failed to create image views");
     cvr_chk(create_render_pass(), "failed to create render pass");
-    cvr_chk(create_gfx_pipeline(), "failed to create graphics pipelin");
+    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
+    cvr_chk(create_gfx_pipeline(), "failed to create graphics pipeline");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_ctor(app.device, app.phys_device, MAX_FRAMES_IN_FLIGHT), "failed to create command objects");
     cvr_chk(create_vtx_buffer(), "failed to create vertex buffer");
     cvr_chk(create_idx_buffer(), "failed to create index buffer");
+    cvr_chk(create_ubos(), "failed to create uniform buffer objects");
 
 defer:
     return result;
@@ -48,6 +56,9 @@ defer:
 bool app_dtor()
 {
     cleanup_swpchain();
+    for (size_t i = 0; i < app.ubos.count; i++)
+        buffer_dtor(app.ubos.items[i]);
+    vkDestroyDescriptorSetLayout(app.device, app.descriptor_set_layout, NULL);
     buffer_dtor(app.vtx);
     buffer_dtor(app.idx);
     cmd_dtor(app.device);
@@ -298,6 +309,8 @@ bool create_gfx_pipeline()
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_layout_ci.pSetLayouts = &app.descriptor_set_layout;
+    pipeline_layout_ci.setLayoutCount = 1;
     VkResult vk_result = vkCreatePipelineLayout(
         app.device,
         &pipeline_layout_ci,
@@ -432,6 +445,8 @@ bool draw()
     vk_chk(vkResetFences(app.device, 1, &cmd.fences.items[curr_frame]), "failed to reset fences");
     vk_chk(vkResetCommandBuffer(cmd.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
     rec_cmds(img_idx, cmd.buffs.items[curr_frame]);
+
+    update_ubos(curr_frame);
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -597,4 +612,51 @@ defer:
     buffer_dtor(stg);
     return result;
 
+}
+
+bool create_descriptor_set_layout()
+{
+    VkDescriptorSetLayoutBinding layout = {0};
+    layout.binding = 0;
+    layout.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    layout.descriptorCount = 1;
+    layout.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {0};
+    layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_ci.bindingCount = 1;
+    layout_ci.pBindings = &layout;
+    return vk_ok(vkCreateDescriptorSetLayout(app.device, &layout_ci, NULL, &app.descriptor_set_layout));
+}
+
+bool create_ubos()
+{
+    bool result = true;
+
+    nob_da_resize(&app.ubos, MAX_FRAMES_IN_FLIGHT);
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        CVR_Buffer *buff = &app.ubos.items[i];
+        buff->size = sizeof(UBO);
+        buff->device = app.device;
+        result = buffer_ctor(
+            buff,
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        cvr_chk(result, "failed to create uniform buffer");
+        vkMapMemory(app.device, buff->buff_mem, 0, buff->size, 0, &buff->mapped);
+    }
+
+defer:
+     return result;
+}
+
+void update_ubos(uint32_t curr_image)
+{
+     UBO ubo = {0};
+     ubo.model = MatrixIdentity();
+     ubo.view  = MatrixIdentity();
+     ubo.proj  = MatrixIdentity();
+
+     memcpy(app.ubos.items[curr_image].mapped, &ubo, sizeof(ubo));
 }

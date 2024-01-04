@@ -14,6 +14,13 @@
         "glfw3.h": "c",
         "vertex.h": "c",
         "cvr_cmd.h": "c",
-        "cvr_buffer.h": "c"
+        "cvr_buffer.h": "c",
+        "hash_map": "c",
+        "bitset": "c",
+        "chrono": "c",
+        "map": "c",
+        "set": "c",
+        "unordered_map": "c",
+        "unordered_set": "c"
     }
 }

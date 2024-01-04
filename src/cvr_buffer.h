@@ -10,6 +10,7 @@ typedef struct {
     size_t count;
     VkBuffer buff;
     VkDeviceMemory buff_mem;
+    void *mapped;
 } CVR_Buffer;
 
 /* CVR_Buffer must be set with device & size prior to calling this constructor */
