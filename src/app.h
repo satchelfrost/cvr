@@ -33,6 +33,8 @@ typedef struct {
     CVR_Buffer idx;
     vec(CVR_Buffer) ubos;
     VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    vec(VkDescriptorSet) descriptor_sets;
 } App;
 
 bool app_ctor();
@@ -52,6 +54,8 @@ bool create_vtx_buffer();
 bool create_idx_buffer();
 bool create_ubos();
 void update_ubos(uint32_t curr_frame);
+bool create_descriptor_pool();
+bool create_descriptor_sets();
 
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);

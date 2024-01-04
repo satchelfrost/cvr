@@ -41,13 +41,15 @@ bool app_ctor()
     cvr_chk(create_swpchain(), "failed to create swapchain");
     cvr_chk(create_img_views(), "failed to create image views");
     cvr_chk(create_render_pass(), "failed to create render pass");
-    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
+    // cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
     cvr_chk(create_gfx_pipeline(), "failed to create graphics pipeline");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_ctor(app.device, app.phys_device, MAX_FRAMES_IN_FLIGHT), "failed to create command objects");
     cvr_chk(create_vtx_buffer(), "failed to create vertex buffer");
     cvr_chk(create_idx_buffer(), "failed to create index buffer");
-    cvr_chk(create_ubos(), "failed to create uniform buffer objects");
+    // cvr_chk(create_ubos(), "failed to create uniform buffer objects");
+    // cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
+    // cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
 
 defer:
     return result;
@@ -56,9 +58,10 @@ defer:
 bool app_dtor()
 {
     cleanup_swpchain();
-    for (size_t i = 0; i < app.ubos.count; i++)
-        buffer_dtor(app.ubos.items[i]);
-    vkDestroyDescriptorSetLayout(app.device, app.descriptor_set_layout, NULL);
+    // for (size_t i = 0; i < app.ubos.count; i++)
+    //     buffer_dtor(app.ubos.items[i]);
+    // vkDestroyDescriptorPool(app.device, app.descriptor_pool, NULL);
+    // vkDestroyDescriptorSetLayout(app.device, app.descriptor_set_layout, NULL);
     buffer_dtor(app.vtx);
     buffer_dtor(app.idx);
     cmd_dtor(app.device);
@@ -292,6 +295,8 @@ bool create_gfx_pipeline()
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer_ci.lineWidth = 1.0f;
+    rasterizer_ci.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer_ci.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
     multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -309,8 +314,8 @@ bool create_gfx_pipeline()
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_layout_ci.pSetLayouts = &app.descriptor_set_layout;
-    pipeline_layout_ci.setLayoutCount = 1;
+    // pipeline_layout_ci.pSetLayouts = &app.descriptor_set_layout;
+    // pipeline_layout_ci.setLayoutCount = 1;
     VkResult vk_result = vkCreatePipelineLayout(
         app.device,
         &pipeline_layout_ci,
@@ -442,11 +447,11 @@ bool draw()
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
+    // update_ubos(curr_frame);
+
     vk_chk(vkResetFences(app.device, 1, &cmd.fences.items[curr_frame]), "failed to reset fences");
     vk_chk(vkResetCommandBuffer(cmd.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
     rec_cmds(img_idx, cmd.buffs.items[curr_frame]);
-
-    update_ubos(curr_frame);
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -515,6 +520,11 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &app.vtx.buff, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, app.idx.buff, 0, VK_INDEX_TYPE_UINT16);
+    // vkCmdBindDescriptorSets(
+    //     cmd_buffer,
+    //     VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //     app.pipeline_layout, 0, 1, &app.descriptor_sets.items[curr_frame], 0, NULL
+    // );
     vkCmdDrawIndexed(cmd_buffer, app.idx.count, 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
@@ -655,8 +665,65 @@ void update_ubos(uint32_t curr_image)
 {
      UBO ubo = {0};
      ubo.model = MatrixIdentity();
-     ubo.view  = MatrixIdentity();
-     ubo.proj  = MatrixIdentity();
+     ubo.view  = MatrixLookAt((Vector3) {2.0f, 2.0f, 2.0f}, Vector3Zero(), (Vector3) {0.0f, 0.0f, 1.0f});
+     ubo.proj  = MatrixPerspective(45.0f * DEG2RAD, app.extent.width / (float) app.extent.height, 0.1f, 10.0f);
 
      memcpy(app.ubos.items[curr_image].mapped, &ubo, sizeof(ubo));
+}
+
+bool create_descriptor_pool()
+{
+    VkDescriptorPoolSize pool_size = {0};
+    pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_size.descriptorCount = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPoolCreateInfo pool_ci = {0};
+    pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_ci.poolSizeCount = 1;
+    pool_ci.pPoolSizes = &pool_size;
+    pool_ci.maxSets = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+
+    return vk_ok(vkCreateDescriptorPool(app.device, &pool_ci, NULL, &app.descriptor_pool));
+}
+
+bool create_descriptor_sets()
+{
+    bool result = true;
+
+    vec(VkDescriptorSetLayout) layouts = {0};
+    nob_da_resize(&layouts, MAX_FRAMES_IN_FLIGHT);
+    for (size_t i = 0; i < layouts.count; i++)
+        layouts.items[i] = app.descriptor_set_layout;
+
+    VkDescriptorSetAllocateInfo alloc = {0};
+    alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc.descriptorPool = app.descriptor_pool;
+    alloc.descriptorSetCount = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+    alloc.pSetLayouts = layouts.items;
+
+    nob_da_resize(&app.descriptor_sets, MAX_FRAMES_IN_FLIGHT);
+    VkResult vk_result = vkAllocateDescriptorSets(app.device, &alloc, app.descriptor_sets.items);
+    vk_chk(vk_result, "failed to allocate descriptor sets");
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorBufferInfo buff_info = {0};
+        buff_info.buffer = app.ubos.items[i].buff;
+        buff_info.offset = 0;
+        buff_info.range = sizeof(UBO);
+
+        VkWriteDescriptorSet descriptor_write = {0};
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet = app.descriptor_sets.items[i];
+        descriptor_write.dstBinding = 0;
+        descriptor_write.dstArrayElement = 0;
+
+        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_write.descriptorCount = 1;
+        descriptor_write.pBufferInfo = &buff_info;
+        vkUpdateDescriptorSets(app.device, 1, &descriptor_write, 0, NULL);
+    }
+
+defer:
+    nob_da_free(layouts);
+    return result;
 }

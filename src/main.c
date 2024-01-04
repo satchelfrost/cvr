@@ -53,5 +53,6 @@ static void frame_buff_resized(GLFWwindow* window, int width, int height)
     unused(width);
     unused(height);
     App *app = (App*)(glfwGetWindowUserPointer(window));
-    app->swpchain.buff_resized = true;
+    if (app)
+        app->swpchain.buff_resized = true;
 }
