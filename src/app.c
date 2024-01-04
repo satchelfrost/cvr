@@ -538,7 +538,7 @@ bool create_vtx_buffer()
     CVR_Buffer stg;
     app.vtx.device = stg.device = app.device;
     app.vtx.size   = stg.size   = sizeof(vertices);
-    app.vtx.count  = stg.size   = NOB_ARRAY_LEN(vertices);
+    app.vtx.count  = stg.count  = NOB_ARRAY_LEN(vertices);
     result = buffer_ctor(
         &stg,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
