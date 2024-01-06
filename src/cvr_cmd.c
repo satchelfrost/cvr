@@ -25,6 +25,11 @@ void cmd_dtor()
     for (size_t i = 0; i < cmd.fences.count; i++)
         vkDestroyFence(cmd.device, cmd.fences.items[i], NULL);
     vkDestroyCommandPool(cmd.device, cmd.pool, NULL);
+
+    nob_da_reset(cmd.buffs);
+    nob_da_reset(cmd.img_avail_sems);
+    nob_da_reset(cmd.render_finished_sems);
+    nob_da_reset(cmd.fences);
 }
 
 bool cmd_pool_create()

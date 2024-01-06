@@ -29,9 +29,9 @@ void destroy_ext_manager()
         return;
     }
 
-    nob_da_free(ext_manager.validation_layers);
-    nob_da_free(ext_manager.device_exts);
-    nob_da_free(ext_manager.inst_exts);
+    nob_da_reset(ext_manager.validation_layers);
+    nob_da_reset(ext_manager.device_exts);
+    nob_da_reset(ext_manager.inst_exts);
 }
 
 bool inst_exts_satisfied()
