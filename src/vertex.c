@@ -14,7 +14,7 @@ void get_attr_descs(VtxAttrDescs *attr_descs)
     VkVertexInputAttributeDescription desc = {0};
     desc.binding = 0;
     desc.location = 0;
-    desc.format = VK_FORMAT_R32G32_SFLOAT;
+    desc.format = VK_FORMAT_R32G32B32_SFLOAT;
     desc.offset = offsetof(Vertex, pos);
     nob_da_append(attr_descs, desc);
 

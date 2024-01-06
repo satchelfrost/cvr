@@ -6,7 +6,7 @@
 #include <time.h>
 
 
-/* Tetrahedron for later, but I need a depth buffer I think */
+// /* Tetrahedron for later, but I need a depth buffer I think */
 // static const Vertex vertices[] = {
 //     {{0.0f, -0.333f, 0.943f}, {0.0f, 0.0f, 1.0f}},
 //     {{0.816f, -0.333f, -0.471f}, {0.0f, 1.0f, 0.0f}},
@@ -21,22 +21,51 @@
 //     3, 2, 1, // Back Face
 // };
 
-// #define Red 1, 0, 0
-// #define DarkRed 0.25f, 0, 0
-// #define Green 0, 1, 0
-// #define DarkGreen 0, 0.25f, 0
-// #define Blue 0, 0, 1
-// #define DarkBlue 0, 0, 0.25f
+#define Red 1, 0, 0
+#define DarkRed 0.25f, 0, 0
+#define Green 0, 1, 0
+#define DarkGreen 0, 0.25f, 0
+#define Blue 0, 0, 1
+#define DarkBlue 0, 0, 0.25f
 
 // Vertices for a 1x1x1 meter cube. (Left/Right, Top/Bottom, Front/Back)
-// #define  LBB -0.5f, -0.5f, -0.5f
-// #define  LBF -0.5f, -0.5f, 0.5f
-// #define  LTB -0.5f, 0.5f, -0.5f
-// #define  LTF -0.5f, 0.5f, 0.5f
-// #define  RBB 0.5f, -0.5f, -0.5f
-// #define  RBF 0.5f, -0.5f, 0.5f
-// #define  RTB 0.5f, 0.5f, -0.5f
-// #define  RTF 0.5f, 0.5f, 0.5f
+#define  LBB -0.5f, -0.5f, -0.5f
+#define  LBF -0.5f, -0.5f, 0.5f
+#define  LTB -0.5f, 0.5f, -0.5f
+#define  LTF -0.5f, 0.5f, 0.5f
+#define  RBB 0.5f, -0.5f, -0.5f
+#define  RBF 0.5f, -0.5f, 0.5f
+#define  RTB 0.5f, 0.5f, -0.5f
+#define  RTF 0.5f, 0.5f, 0.5f
+
+#define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}}, {{V2}, {COLOR}}, {{V3}, {COLOR}}, {{V4}, {COLOR}}, {{V5}, {COLOR}}, {{V6}, {COLOR}},
+
+static const Vertex vertices[] = {
+    CUBE_SIDE(LTB, LBF, LBB, LTB, LTF, LBF, DarkRed)    // -X
+    CUBE_SIDE(RTB, RBB, RBF, RTB, RBF, RTF, Red)        // +X
+    CUBE_SIDE(LBB, LBF, RBF, LBB, RBF, RBB, DarkGreen)  // -Y
+    CUBE_SIDE(LTB, RTB, RTF, LTB, RTF, LTF, Green)      // +Y
+    CUBE_SIDE(LBB, RBB, RTB, LBB, RTB, LTB, DarkBlue)   // -Z
+    CUBE_SIDE(LBF, LTF, RTF, LBF, RTF, RBF, Blue)       // +Z
+};
+
+// Winding order is clockwise. Each side uses a different color.
+static const uint16_t indices[] = {
+    0,  1,  2,  3,  4,  5,   // -X
+    6,  7,  8,  9,  10, 11,  // +X
+    12, 13, 14, 15, 16, 17,  // -Y
+    18, 19, 20, 21, 22, 23,  // +Y
+    24, 25, 26, 27, 28, 29,  // -Z
+    30, 31, 32, 33, 34, 35,  // +Z
+};
+
+extern ExtManager ext_manager; // ext_man.c
+extern CVR_Cmd cmd;            // cvr_cmd.c
+App app = {0};
+
+static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+static const size_t MAX_FRAMES_IN_FLIGHT = 2;
+static uint32_t curr_frame = 0;
 // static const Vertex vertices[] = {
 //     {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
 //     {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
@@ -46,44 +75,6 @@
 // static const uint16_t indices[] = {
 //     0, 1, 2, 2, 3, 0
 // };
-
-// #define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}}, {{V2}, {COLOR}}, {{V3}, {COLOR}}, {{V4}, {COLOR}}, {{V5}, {COLOR}}, {{V6}, {COLOR}},
-
-// static const Vertex c_cubeVertices[] = {
-//     CUBE_SIDE(LTB, LBF, LBB, LTB, LTF, LBF, DarkRed)    // -X
-//     CUBE_SIDE(RTB, RBB, RBF, RTB, RBF, RTF, Red)        // +X
-//     CUBE_SIDE(LBB, LBF, RBF, LBB, RBF, RBB, DarkGreen)  // -Y
-//     CUBE_SIDE(LTB, RTB, RTF, LTB, RTF, LTF, Green)      // +Y
-//     CUBE_SIDE(LBB, RBB, RTB, LBB, RTB, LTB, DarkBlue)   // -Z
-//     CUBE_SIDE(LBF, LTF, RTF, LBF, RTF, RBF, Blue)       // +Z
-// };
-
-// // Winding order is clockwise. Each side uses a different color.
-// static const uint16_t c_cubeIndices[] = {
-//     0,  1,  2,  3,  4,  5,   // -X
-//     6,  7,  8,  9,  10, 11,  // +X
-//     12, 13, 14, 15, 16, 17,  // -Y
-//     18, 19, 20, 21, 22, 23,  // +Y
-//     24, 25, 26, 27, 28, 29,  // -Z
-//     30, 31, 32, 33, 34, 35,  // +Z
-// };
-
-extern ExtManager ext_manager; // ext_man.c
-extern CVR_Cmd cmd;            // cvr_cmd.c
-App app = {0};
-
-static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-static const size_t MAX_FRAMES_IN_FLIGHT = 2;
-static uint32_t curr_frame = 0;
-static const Vertex vertices[] = {
-    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}}
-};
-static const uint16_t indices[] = {
-    0, 1, 2, 2, 3, 0
-};
 
 clock_t time_begin;
 
@@ -364,6 +355,10 @@ bool create_gfx_pipeline()
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer_ci.lineWidth = 1.0f;
+    rasterizer_ci.cullMode = VK_CULL_MODE_FRONT_BIT;
+    // rasterizer_ci.cullMode = VK_CULL_MODE_BACK_BIT;
+    // rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
+    rasterizer_ci.lineWidth = VK_FRONT_FACE_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
     multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -733,14 +728,20 @@ void update_ubos(uint32_t curr_image)
     clock_t curr_time = clock();
     double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 
+    unused(time_spent);
     Matrix model = MatrixRotateY(-time_spent * 2.0f);
+    // Matrix model = MatrixRotateY(45.0f);
     Matrix view  = MatrixLookAt((Vector3) {0.0f, 2.0f, 5.0f}, Vector3Zero(), (Vector3) {0.0f, 1.0f, 0.0f});
     Matrix proj  = MatrixPerspective(45.0f * DEG2RAD, app.extent.width / (float) app.extent.height, 0.1f, 10.0f);
+
 
     UBO ubo = {
         .model = MatrixToFloatV(model),
         .view  = MatrixToFloatV(view),
         .proj  = MatrixToFloatV(proj),
+        // .model = MatrixToFloatV(MatrixIdentity()),
+        // .view  = MatrixToFloatV(MatrixIdentity()),
+        // .proj  = MatrixToFloatV(MatrixIdentity()),
     };
 
     ubo.proj.v[5] *= -1.0f;
