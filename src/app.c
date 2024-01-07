@@ -4,79 +4,18 @@
 #include "vertex.h"
 #include "cvr_cmd.h"
 #include <time.h>
+#include "geometry.h"
 
-
-// /* Tetrahedron for later, but I need a depth buffer I think */
-// static const Vertex vertices[] = {
-//     {{0.0f, -0.333f, 0.943f}, {0.0f, 0.0f, 1.0f}},
-//     {{0.816f, -0.333f, -0.471f}, {0.0f, 1.0f, 0.0f}},
-//     {{-0.816f, -0.333f, -0.471f}, {0.0f, 0.0f, 0.25f}},
-//     {{0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}
-// };
-
-// static const uint16_t indices[] = {
-//     0, 3, 1, // Front Right Face
-//     0, 2, 3, // Front Left Face
-//     0, 1, 2, // Bottom Face
-//     3, 2, 1, // Back Face
-// };
-
-#define Red 1, 0, 0
-#define DarkRed 0.25f, 0, 0
-#define Green 0, 1, 0
-#define DarkGreen 0, 0.25f, 0
-#define Blue 0, 0, 1
-#define DarkBlue 0, 0, 0.25f
-
-// Vertices for a 1x1x1 meter cube. (Left/Right, Top/Bottom, Front/Back)
-#define  LBB -0.5f, -0.5f, -0.5f
-#define  LBF -0.5f, -0.5f, 0.5f
-#define  LTB -0.5f, 0.5f, -0.5f
-#define  LTF -0.5f, 0.5f, 0.5f
-#define  RBB 0.5f, -0.5f, -0.5f
-#define  RBF 0.5f, -0.5f, 0.5f
-#define  RTB 0.5f, 0.5f, -0.5f
-#define  RTF 0.5f, 0.5f, 0.5f
-
-#define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}}, {{V2}, {COLOR}}, {{V3}, {COLOR}}, {{V4}, {COLOR}}, {{V5}, {COLOR}}, {{V6}, {COLOR}},
-
-static const Vertex vertices[] = {
-    CUBE_SIDE(LTB, LBF, LBB, LTB, LTF, LBF, DarkRed)    // -X
-    CUBE_SIDE(RTB, RBB, RBF, RTB, RBF, RTF, Red)        // +X
-    CUBE_SIDE(LBB, LBF, RBF, LBB, RBF, RBB, DarkGreen)  // -Y
-    CUBE_SIDE(LTB, RTB, RTF, LTB, RTF, LTF, Green)      // +Y
-    CUBE_SIDE(LBB, RBB, RTB, LBB, RTB, LTB, DarkBlue)   // -Z
-    CUBE_SIDE(LBF, LTF, RTF, LBF, RTF, RBF, Blue)       // +Z
-};
-
-// Winding order is clockwise. Each side uses a different color.
-static const uint16_t indices[] = {
-    0,  1,  2,  3,  4,  5,   // -X
-    6,  7,  8,  9,  10, 11,  // +X
-    12, 13, 14, 15, 16, 17,  // -Y
-    18, 19, 20, 21, 22, 23,  // +Y
-    24, 25, 26, 27, 28, 29,  // -Z
-    30, 31, 32, 33, 34, 35,  // +Z
-};
+#define PRIMITIVE_VERTS    cube_verts
+#define PRIMITIVE_INDICES  cube_indices
 
 extern ExtManager ext_manager; // ext_man.c
 extern CVR_Cmd cmd;            // cvr_cmd.c
 App app = {0};
 
-static const VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
-// static const Vertex vertices[] = {
-//     {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-//     {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-//     {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}},
-//     {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}}
-// };
-// static const uint16_t indices[] = {
-//     0, 1, 2, 2, 3, 0
-// };
-
-clock_t time_begin;
+static clock_t time_begin;
 
 typedef struct {
     float16 model;
@@ -115,16 +54,16 @@ defer:
 
 bool app_dtor()
 {
+    cmd_dtor(app.device);
     cleanup_swpchain();
     for (size_t i = 0; i < app.ubos.count; i++)
         buffer_dtor(app.ubos.items[i]);
-    nob_da_reset(app.ubos);
+    nob_da_free(app.ubos);
     vkDestroyDescriptorPool(app.device, app.descriptor_pool, NULL);
     vkDestroyDescriptorSetLayout(app.device, app.descriptor_set_layout, NULL);
-    nob_da_reset(app.descriptor_sets);
+    nob_da_free(app.descriptor_sets);
     buffer_dtor(app.vtx);
     buffer_dtor(app.idx);
-    cmd_dtor(app.device);
     vkDestroyPipeline(app.device, app.pipeline, NULL);
     vkDestroyPipelineLayout(app.device, app.pipeline_layout, NULL);
     vkDestroyRenderPass(app.device, app.render_pass, NULL);
@@ -223,7 +162,7 @@ bool create_device()
     }
 
 defer:
-    nob_da_reset(queue_cis);
+    nob_da_free(queue_cis);
     return result;
 }
 
@@ -321,6 +260,7 @@ bool create_gfx_pipeline()
 
     VkPipelineDynamicStateCreateInfo dynamic_state_ci = {0};
     dynamic_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     dynamic_state_ci.dynamicStateCount = NOB_ARRAY_LEN(dynamic_states);
     dynamic_state_ci.pDynamicStates = dynamic_states;
 
@@ -407,7 +347,7 @@ bool create_gfx_pipeline()
 defer:
     vkDestroyShaderModule(app.device, frag_ci.module, NULL);
     vkDestroyShaderModule(app.device, vert_ci.module, NULL);
-    nob_da_reset(vert_attrs);
+    nob_da_free(vert_attrs);
     return result;
 }
 
@@ -624,8 +564,8 @@ bool create_vtx_buffer()
     bool result = true;
     CVR_Buffer stg;
     app.vtx.device = stg.device = app.device;
-    app.vtx.size   = stg.size   = sizeof(vertices);
-    app.vtx.count  = stg.count  = NOB_ARRAY_LEN(vertices);
+    app.vtx.size   = stg.size   = sizeof(PRIMITIVE_VERTS);
+    app.vtx.count  = stg.count  = NOB_ARRAY_LEN(PRIMITIVE_VERTS);
     result = buffer_ctor(
         &stg,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -635,7 +575,7 @@ bool create_vtx_buffer()
 
     void* data;
     vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, stg.size, 0, &data), "failed to map memory");
-    memcpy(data, vertices, stg.size);
+    memcpy(data, PRIMITIVE_VERTS, stg.size);
     vkUnmapMemory(app.device, stg.buff_mem);
 
     result = buffer_ctor(
@@ -657,8 +597,8 @@ bool create_idx_buffer()
     bool result = true;
     CVR_Buffer stg;
     app.idx.device = stg.device = app.device;
-    app.idx.size   = stg.size   = sizeof(indices);
-    app.idx.count  = stg.count  = NOB_ARRAY_LEN(indices);
+    app.idx.size   = stg.size   = sizeof(PRIMITIVE_INDICES);
+    app.idx.count  = stg.count  = NOB_ARRAY_LEN(PRIMITIVE_INDICES);
     result = buffer_ctor(
         &stg,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -668,7 +608,7 @@ bool create_idx_buffer()
 
     void* data;
     vk_chk(vkMapMemory(app.device, stg.buff_mem, 0, stg.size, 0, &data), "failed to map memory");
-    memcpy(data, indices, stg.size);
+    memcpy(data, PRIMITIVE_INDICES, stg.size);
     vkUnmapMemory(app.device, stg.buff_mem);
 
     result = buffer_ctor(
@@ -728,20 +668,14 @@ void update_ubos(uint32_t curr_image)
     clock_t curr_time = clock();
     double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 
-    unused(time_spent);
     Matrix model = MatrixRotateY(-time_spent * 2.0f);
-    // Matrix model = MatrixRotateY(45.0f);
     Matrix view  = MatrixLookAt((Vector3) {0.0f, 2.0f, 5.0f}, Vector3Zero(), (Vector3) {0.0f, 1.0f, 0.0f});
     Matrix proj  = MatrixPerspective(45.0f * DEG2RAD, app.extent.width / (float) app.extent.height, 0.1f, 10.0f);
-
 
     UBO ubo = {
         .model = MatrixToFloatV(model),
         .view  = MatrixToFloatV(view),
         .proj  = MatrixToFloatV(proj),
-        // .model = MatrixToFloatV(MatrixIdentity()),
-        // .view  = MatrixToFloatV(MatrixIdentity()),
-        // .proj  = MatrixToFloatV(MatrixIdentity()),
     };
 
     ubo.proj.v[5] *= -1.0f;
@@ -802,6 +736,6 @@ bool create_descriptor_sets()
     }
 
 defer:
-    nob_da_reset(layouts);
+    nob_da_free(layouts);
     return result;
 }

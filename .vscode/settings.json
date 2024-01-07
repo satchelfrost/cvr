@@ -21,6 +21,7 @@
         "map": "c",
         "set": "c",
         "unordered_map": "c",
-        "unordered_set": "c"
+        "unordered_set": "c",
+        "geometry.h": "c"
     }
 }

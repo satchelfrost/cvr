@@ -9,6 +9,11 @@ bool is_device_suitable(VkPhysicalDevice phys_device)
 {
     bool result = true;
     QueueFamilyIndices indices = find_queue_fams(phys_device);
+    VkPhysicalDeviceProperties props;
+    VkPhysicalDeviceFeatures features;
+    vkGetPhysicalDeviceProperties(phys_device, &props);
+    vkGetPhysicalDeviceFeatures(phys_device, &features);
+    result &= (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && features.geometryShader);
     cvr_chk(indices.has_gfx && indices.has_present, "requested indices not present");
     cvr_chk(device_exts_supported(phys_device), "device extensions not supported");
     cvr_chk(swpchain_adequate(phys_device), "swapchain was not adequate");

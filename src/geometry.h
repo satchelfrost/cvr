@@ -1,0 +1,70 @@
+#ifndef GEOMETRY_H_
+#define GEOMETRY_H_
+
+#include "vertex.h"
+
+#define Red 1, 0, 0
+#define DarkRed 0.25f, 0, 0
+#define Green 0, 1, 0
+#define DarkGreen 0, 0.25f, 0
+#define Blue 0, 0, 1
+#define DarkBlue 0, 0, 0.25f
+
+static const Vertex tetrahedron_verts[] = {
+    {{0.0f, -0.333f, 0.943f}, {0.0f, 0.0f, 1.0f}},
+    {{0.816f, -0.333f, -0.471f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.816f, -0.333f, -0.471f}, {0.0f, 0.0f, 0.25f}},
+    {{0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}
+};
+
+/* clockwise winding order */
+static const uint16_t tetrahedron_indices[] = {
+    0, 3, 1,
+    0, 2, 3,
+    0, 1, 2,
+    3, 2, 1,
+};
+
+#define  LBB -0.5f, -0.5f, -0.5f
+#define  LBF -0.5f, -0.5f,  0.5f
+#define  LTB -0.5f,  0.5f, -0.5f
+#define  LTF -0.5f,  0.5f,  0.5f
+#define  RBB  0.5f, -0.5f, -0.5f
+#define  RBF  0.5f, -0.5f,  0.5f
+#define  RTB  0.5f,  0.5f, -0.5f
+#define  RTF  0.5f,  0.5f,  0.5f
+
+#define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}}, {{V2}, {COLOR}}, {{V3}, {COLOR}}, {{V4}, {COLOR}}, {{V5}, {COLOR}}, {{V6}, {COLOR}},
+
+static const Vertex cube_verts[] = {
+    CUBE_SIDE(LTB, LBF, LBB, LTB, LTF, LBF, DarkRed)
+    CUBE_SIDE(RTB, RBB, RBF, RTB, RBF, RTF, Red)
+    CUBE_SIDE(LBB, LBF, RBF, LBB, RBF, RBB, DarkGreen)
+    CUBE_SIDE(LTB, RTB, RTF, LTB, RTF, LTF, Green)
+    CUBE_SIDE(LBB, RBB, RTB, LBB, RTB, LTB, DarkBlue)
+    CUBE_SIDE(LBF, LTF, RTF, LBF, RTF, RBF, Blue)
+};
+
+/* clockwise winding order */
+static const uint16_t cube_indices[] = {
+    0,  1,  2,  3,  4,  5,
+    6,  7,  8,  9,  10, 11,
+    12, 13, 14, 15, 16, 17,
+    18, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29,
+    30, 31, 32, 33, 34, 35,
+};
+
+static const Vertex quad_verts[] = {
+    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+    {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+};
+
+/* clockwise winding order */
+static const uint16_t quad_indices[] = {
+    0, 1, 2, 2, 3, 0
+};
+
+#endif
