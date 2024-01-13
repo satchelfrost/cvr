@@ -1,8 +1,6 @@
-#ifndef CVR_RENDER_H_
-#define CVR_RENDER_H_
+#ifndef CVR_CONTEXT_H_
+#define CVR_CONTEXT_H_
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
 #include "common.h"
 #include "cvr_buffer.h"
 
@@ -22,7 +20,6 @@ typedef struct {
 } CVR_Swpchain;
 
 typedef struct {
-    GLFWwindow *window;
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_msgr;
     VkPhysicalDevice phys_device;
@@ -42,11 +39,11 @@ typedef struct {
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     vec(VkDescriptorSet) descriptor_sets;
-} App;
+} CVR_Context;
 
 /* CVR render functions */
-bool app_ctor();
-bool app_dtor();
+bool cvr_init();
+bool cvr_destroy();
 bool create_instance();
 bool create_device();
 bool create_surface();
@@ -64,7 +61,7 @@ bool create_ubos();
 void update_ubos(uint32_t curr_frame);
 bool create_descriptor_pool();
 bool create_descriptor_sets();
-bool draw();
+bool cvr_draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);
 
 /* Utilities */
@@ -83,4 +80,4 @@ bool pick_phys_device();
 void cleanup_swpchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 
-#endif // CVR_RENDER_H_
+#endif // CVR_CONTEXT_H_

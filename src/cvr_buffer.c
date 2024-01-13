@@ -1,5 +1,5 @@
 #include "cvr_buffer.h"
-#include "cvr_render.h"
+#include "cvr_context.h"
 #include "cvr_cmd.h"
 
 bool buffer_ctor(

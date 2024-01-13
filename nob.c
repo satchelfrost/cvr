@@ -3,11 +3,13 @@
 
 const char *cvr[] = {
     "main",
-    "cvr_render",
+    "cvr_core",
+    "cvr_context",
     "ext_man",
     "vertex",
     "cvr_cmd",
     "cvr_buffer",
+    "cvr_window",
 };
 
 bool build_cvr()

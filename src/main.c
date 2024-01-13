@@ -1,52 +1,10 @@
-#include "cvr_render.h"
-
-#define NOB_IMPLEMENTATION
-#include "ext/nob.h"
-
-bool init_window();
-bool main_loop();
-void frame_buff_resized(GLFWwindow* window, int width, int height);
-
-extern App app; // app.c
-
-bool init_window()
-{
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    app.window = glfwCreateWindow(800, 600, "C Vulkan Renderer", NULL, NULL);
-    glfwSetWindowUserPointer(app.window, &app);
-    glfwSetFramebufferSizeCallback(app.window, frame_buff_resized);
-    return true;
-}
-
-bool main_loop()
-{
-    bool result = true;
-    while(!glfwWindowShouldClose(app.window)) {
-        glfwPollEvents();
-        cvr_chk(draw(), "failed to draw frame");
-    }
-
-defer:
-    vkDeviceWaitIdle(app.device);
-    return result;
-}
-
-void frame_buff_resized(GLFWwindow* window, int width, int height)
-{
-    unused(width);
-    unused(height);
-    App *app = (App*)(glfwGetWindowUserPointer(window));
-    if (app)
-        app->swpchain.buff_resized = true;
-}
+#include "cvr.h"
 
 int main()
 {
-    if (!init_window()) return 1;
-    if (!app_ctor()) return 1;
-    if (!main_loop()) return 1;
-    if (!app_dtor()) return 1;
-
+    init_window(800, 600, "Spinning Shapes");
+    while (!window_should_close() && draw())
+        ;
+    close_window();
     return 0;
 }

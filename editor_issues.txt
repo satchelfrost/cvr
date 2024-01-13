@@ -2,3 +2,5 @@ issues
 * go to definition not working
 * excessive warnings
 * set relative number
+* Lookup prototype docstring
+* Show whitespace

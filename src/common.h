@@ -5,7 +5,7 @@
 #include "nob_ext.h"
 
 /* Common macro definitions */
-#define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(app.instance, #pfn)
+#define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(ctx.instance, #pfn)
 #define unused(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
 #define vk_ok(x) ((x) == VK_SUCCESS)
