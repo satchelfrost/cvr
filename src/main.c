@@ -1,10 +1,7 @@
-#include "app.h"
+#include "cvr_render.h"
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
-
-#define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
 
 bool init_window();
 bool main_loop();

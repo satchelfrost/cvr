@@ -3,8 +3,7 @@
 
 const char *cvr[] = {
     "main",
-    "app",
-    "app_utils",
+    "cvr_render",
     "ext_man",
     "vertex",
     "cvr_cmd",
@@ -93,10 +92,28 @@ defer:
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
+
+    Nob_Cmd cmd = {0};
+    int flag;
+    while (--argc > 0 && (*++argv)[0] == '-') {
+        while (flag = *++argv[0]) {
+            switch (flag) {
+            case 'c':
+                nob_log(NOB_INFO, "clean build requested, removing build folder");
+                nob_cmd_append(&cmd, "rm", "build", "-r");
+                if (!nob_cmd_run_sync(cmd)) return 1;
+                break;
+            default:
+                nob_log(NOB_ERROR, "unrecognized flag %c", flag);
+                return 1;
+            }
+        }
+    }
+
+    cmd.count = 0;
     if (!nob_mkdir_if_not_exists("build")) return 1;
     if (!compile_shaders()) return 1;
     if (!build_cvr()) return 1;
-    Nob_Cmd cmd = {0};
     nob_cmd_append(&cmd, "./build/cvr");
     if (!nob_cmd_run_sync(cmd)) return 1;
     nob_cmd_free(cmd);

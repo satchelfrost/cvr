@@ -1,10 +1,17 @@
-#ifndef APP_H_
-#define APP_H_
+#ifndef CVR_RENDER_H_
+#define CVR_RENDER_H_
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "common.h"
 #include "cvr_buffer.h"
+
+typedef struct {
+    uint32_t gfx_idx;
+    bool has_gfx;
+    uint32_t present_idx;
+    bool has_present;
+} QueueFamilyIndices;
 
 typedef struct {
     VkSwapchainKHR handle;
@@ -37,6 +44,7 @@ typedef struct {
     vec(VkDescriptorSet) descriptor_sets;
 } App;
 
+/* CVR render functions */
 bool app_ctor();
 bool app_dtor();
 bool create_instance();
@@ -56,8 +64,23 @@ bool create_ubos();
 void update_ubos(uint32_t curr_frame);
 bool create_descriptor_pool();
 bool create_descriptor_sets();
-
 bool draw();
 bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);
 
-#endif // APP_H_
+/* Utilities */
+void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
+Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
+bool setup_debug_msgr();
+QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
+typedef vec(uint32_t) U32_Set;
+void populate_set(int arr[], size_t arr_size, U32_Set *set);
+bool swpchain_adequate(VkPhysicalDevice phys_device);
+VkSurfaceFormatKHR choose_swpchain_fmt();
+VkPresentModeKHR choose_present_mode();
+VkExtent2D choose_swp_extent();
+bool is_device_suitable(VkPhysicalDevice phys_device);
+bool pick_phys_device();
+void cleanup_swpchain();
+bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
+
+#endif // CVR_RENDER_H_

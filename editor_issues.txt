@@ -1,0 +1,4 @@
+issues
+* go to definition not working
+* excessive warnings
+* set relative number
