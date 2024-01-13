@@ -1,27 +1,14 @@
 #include "app.h"
-#include "app_utils.h"
-#include "ext_man.h"
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
-#include "nob_ext.h"
 
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
 
 bool init_window();
 bool main_loop();
-static void frame_buff_resized(GLFWwindow* window, int width, int height);
-
-int main()
-{
-    if (!init_window()) return 1;
-    if (!app_ctor()) return 1;
-    if (!main_loop()) return 1;
-    if (!app_dtor()) return 1;
-
-    return 0;
-}
+void frame_buff_resized(GLFWwindow* window, int width, int height);
 
 extern App app; // app.c
 
@@ -48,11 +35,21 @@ defer:
     return result;
 }
 
-static void frame_buff_resized(GLFWwindow* window, int width, int height)
+void frame_buff_resized(GLFWwindow* window, int width, int height)
 {
     unused(width);
     unused(height);
     App *app = (App*)(glfwGetWindowUserPointer(window));
     if (app)
         app->swpchain.buff_resized = true;
+}
+
+int main()
+{
+    if (!init_window()) return 1;
+    if (!app_ctor()) return 1;
+    if (!main_loop()) return 1;
+    if (!app_dtor()) return 1;
+
+    return 0;
 }

@@ -8,7 +8,7 @@ bool cmd_ctor(VkDevice device, VkPhysicalDevice phys_device, size_t num_cmd_objs
     bool result = true;
     cmd.device = device;
     cmd.phys_device = phys_device;
-    cvr_chk(cmd_pool_create(phys_device), "failed to create command pool");
+    cvr_chk(cmd_pool_create(), "failed to create command pool");
     cvr_chk(cmd_buff_create(num_cmd_objs), "failed to create cmd buffers");
     cvr_chk(cmd_syncs_create(num_cmd_objs), "failed to create cmd sync objects");
 

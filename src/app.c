@@ -6,8 +6,8 @@
 #include <time.h>
 #include "geometry.h"
 
-#define PRIMITIVE_VERTS    cube_verts
-#define PRIMITIVE_INDICES  cube_indices
+#define PRIMITIVE_VERTS   tetrahedron_verts
+#define PRIMITIVE_INDICES tetrahedron_indices
 
 extern ExtManager ext_manager; // ext_man.c
 extern CVR_Cmd cmd;            // cvr_cmd.c
@@ -54,7 +54,7 @@ defer:
 
 bool app_dtor()
 {
-    cmd_dtor(app.device);
+    cmd_dtor();
     cleanup_swpchain();
     for (size_t i = 0; i < app.ubos.count; i++)
         buffer_dtor(app.ubos.items[i]);
