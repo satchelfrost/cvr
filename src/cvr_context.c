@@ -252,14 +252,14 @@ bool create_gfx_pipeline()
     vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vert_ci.pName = "main";
-    if (!create_shader_module("./build/shaders/shader.vert.spv", &vert_ci.module))
+    if (!create_shader_module("./build/examples/3d-primitives/shaders/shader.vert.spv", &vert_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo frag_ci = {0};
     frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_ci.pName = "main";
-    if (!create_shader_module("./build/shaders/shader.frag.spv", &frag_ci.module))
+    if (!create_shader_module("./build/examples/3d-primitives/shaders/shader.frag.spv", &frag_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
@@ -773,7 +773,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     unused(p_user_data);
     Nob_Log_Level log_lvl = translate_msg_severity(msg_severity);
     if (log_lvl < MIN_SEVERITY) return VK_FALSE;
-    nob_log(log_lvl, p_callback_data->pMessage);
+    nob_log(log_lvl, "[Vulkan Validation] %s", p_callback_data->pMessage);
     return VK_FALSE;
 }
 
