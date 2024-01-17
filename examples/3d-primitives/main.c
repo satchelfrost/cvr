@@ -1,5 +1,4 @@
 #include "cvr.h"
-#include "ext/raylib-5.0/raylib.h"
 
 #define FOVY_PERSPECTIVE    45.0f
 #define WIDTH_ORTHOGRAPHIC  10.0f
