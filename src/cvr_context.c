@@ -1,7 +1,10 @@
+#include "cvr_context.h"
+#include "ext/raylib-5.0/raylib.h"
+#include <vulkan/vulkan_core.h>
+
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
 
-#include "cvr_context.h"
 #include "ext_man.h"
 #include "vertex.h"
 #include "cvr_cmd.h"
@@ -10,8 +13,11 @@
 
 #include <time.h>
 
-#define PRIMITIVE_VERTS   tetrahedron_verts
-#define PRIMITIVE_INDICES tetrahedron_indices
+#define PRIMITIVE_VERTS   cube_verts
+#define PRIMITIVE_INDICES cube_indices
+#define Z_NEAR 0.01
+// #define Z_FAR 15.0
+#define Z_FAR 1000.0
 
 extern ExtManager ext_manager; // ext_man.c
 extern CVR_Cmd cmd;            // cvr_cmd.c
@@ -305,6 +311,7 @@ bool create_gfx_pipeline()
     // rasterizer_ci.cullMode = VK_CULL_MODE_BACK_BIT;
     // rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
     rasterizer_ci.lineWidth = VK_FRONT_FACE_CLOCKWISE;
+    // rasterizer_ci.lineWidth = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
     multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -510,7 +517,11 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     begin_rp.renderPass = ctx.render_pass;
     begin_rp.framebuffer = ctx.swpchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = ctx.extent;
-    VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    VkClearValue clear_color = {0};
+    clear_color.color.float32[0] = ctx.state.clear_color.r / 255.0f;
+    clear_color.color.float32[1] = ctx.state.clear_color.g / 255.0f;
+    clear_color.color.float32[2] = ctx.state.clear_color.b / 255.0f;
+    clear_color.color.float32[3] = ctx.state.clear_color.a / 255.0f;
     begin_rp.clearValueCount = 1;
     begin_rp.pClearValues = &clear_color;
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
@@ -671,12 +682,30 @@ defer:
 
 void update_ubos(uint32_t curr_image)
 {
-    clock_t curr_time = clock();
-    double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
+    // clock_t curr_time = clock();
+    // double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 
-    Matrix model = MatrixRotateY(-time_spent * 2.0f);
-    Matrix view  = MatrixLookAt((Vector3) {0.0f, 2.0f, 5.0f}, Vector3Zero(), (Vector3) {0.0f, 1.0f, 0.0f});
-    Matrix proj  = MatrixPerspective(45.0f * DEG2RAD, ctx.extent.width / (float) ctx.extent.height, 0.1f, 10.0f);
+    // Matrix model = MatrixIdentity();
+    // Matrix model = MatrixRotateY(-time_spent * 2.0f);
+    Matrix model = MatrixTranslate(-4.0, 0.0f, 2.0f);
+    model = MatrixMultiply(MatrixScale(2.0f, 5.0f, 2.0f), model);
+    Matrix view  = MatrixLookAt(ctx.state.camera.position, ctx.state.camera.target, ctx.state.camera.up);
+
+    Matrix proj = {0};
+    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double top = ctx.state.camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (ctx.state.camera.projection) {
+    case CAMERA_PERSPECTIVE:
+        proj  = MatrixPerspective(ctx.state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case CAMERA_ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, Z_NEAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
 
     UBO ubo = {
         .model = MatrixToFloatV(model),

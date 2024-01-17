@@ -1,6 +1,7 @@
 #include "cvr.h"
 #include "cvr_context.h"
 #include "cvr_window.h"
+#include "ext/raylib-5.0/raylib.h"
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
@@ -37,4 +38,14 @@ bool draw()
     cvr_chk(cvr_draw(), "failed to draw frame");
 defer:
     return result;
+}
+
+void clear_background(Color color)
+{
+    ctx.state.clear_color = color;
+}
+
+void begin_mode_3d(Camera3D camera)
+{
+    ctx.state.camera = camera;
 }

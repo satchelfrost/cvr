@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "cvr_buffer.h"
+#include "ext/raylib-5.0/raylib.h"
 
 typedef struct {
     uint32_t gfx_idx;
@@ -18,6 +19,11 @@ typedef struct {
     vec(VkFramebuffer) buffs;
     bool buff_resized;
 } CVR_Swpchain;
+
+typedef struct {
+    Color clear_color;
+    Camera camera;
+} RenderState;
 
 typedef struct {
     VkInstance instance;
@@ -39,6 +45,7 @@ typedef struct {
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     vec(VkDescriptorSet) descriptor_sets;
+    RenderState state;
 } CVR_Context;
 
 /* CVR render functions */

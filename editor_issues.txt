@@ -4,3 +4,5 @@ issues
 * set relative number
 * Lookup prototype docstring
 * Show whitespace
+* Show line lengt
+* Stop highlighting on search
