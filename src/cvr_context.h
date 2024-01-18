@@ -3,7 +3,8 @@
 
 #include "common.h"
 #include "cvr_buffer.h"
-#include "ext/raylib-5.0/raylib.h"
+#include "color.h"
+#include "cvr_camera.h"
 
 typedef struct {
     uint32_t gfx_idx;
@@ -22,7 +23,7 @@ typedef struct {
 
 typedef struct {
     Color clear_color;
-    Camera camera;
+    CVR_Camera camera;
 } RenderState;
 
 typedef struct {

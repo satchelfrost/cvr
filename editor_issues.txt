@@ -6,3 +6,4 @@ issues
 * Show whitespace
 * Show line lengt
 * Stop highlighting on search
+* Stop automatically including headers

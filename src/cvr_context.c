@@ -1,10 +1,7 @@
-#include "cvr_context.h"
-#include "ext/raylib-5.0/raylib.h"
-#include <vulkan/vulkan_core.h>
-
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
 
+#include "cvr_context.h"
 #include "ext_man.h"
 #include "vertex.h"
 #include "cvr_cmd.h"
@@ -16,7 +13,6 @@
 #define PRIMITIVE_VERTS   cube_verts
 #define PRIMITIVE_INDICES cube_indices
 #define Z_NEAR 0.01
-// #define Z_FAR 15.0
 #define Z_FAR 1000.0
 
 extern ExtManager ext_manager; // ext_man.c
@@ -696,11 +692,11 @@ void update_ubos(uint32_t curr_image)
     double top = ctx.state.camera.fovy / 2.0;
     double right = top * aspect;
     switch (ctx.state.camera.projection) {
-    case CAMERA_PERSPECTIVE:
+    case PERSPECTIVE:
         proj  = MatrixPerspective(ctx.state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
         break;
-    case CAMERA_ORTHOGRAPHIC:
-        proj  = MatrixOrtho(-right, right, -top, top, Z_NEAR, Z_FAR);
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
         break;
     default:
         assert(0 && "unrecognized camera mode");

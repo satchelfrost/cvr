@@ -135,8 +135,8 @@ bool build_example(const char *example_path, CFiles c_files)
     const char *libcvr_path = nob_temp_sprintf("./build/cvr/libcvr.a");
     const char *exec_path = nob_temp_sprintf("./build/%s/main", example_path);
     bool obj_updated = nob_needs_rebuild(exec_path, obj_files.items, obj_files.count);
-    bool lib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
-    if (obj_updated || lib_updated) {
+    bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
+    if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
