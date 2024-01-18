@@ -5,15 +5,15 @@
 
 int main()
 {
-    CVR_Camera camera = {
-        .position   = {0.0f, 10.0f, 10.0f},
+    Camera camera = {
+        .position   = {0.0f, 0.0f, 10.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = FOVY_PERSPECTIVE,
         .projection = PERSPECTIVE,
     };
 
-    init_window(800, 450, "Spinning Shapes");
+    init_window(800, 600, "Spinning Shapes");
     clear_background(BLUE);
     while (!window_should_close()) {
         if (is_key_pressed(KEY_SPACE)) {

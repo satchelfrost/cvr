@@ -4,12 +4,7 @@
 
 static const char *cvr[] = {
     "cvr_core",
-    "cvr_context",
-    "ext_man",
     "vertex",
-    "cvr_cmd",
-    "cvr_buffer",
-    "cvr_window",
 };
 
 bool build_cvr()
@@ -173,8 +168,6 @@ typedef struct {
     const Shaders shaders;
     const CFiles c_files;
 } Example;
-
-
 
 static Example examples[] = {
     {

@@ -1,24 +1,175 @@
-#define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
+#ifndef CVR_VK_H_
+#define CVR_VK_H_
 
-#include "cvr_context.h"
-#include "ext_man.h"
-#include "vertex.h"
-#include "cvr_cmd.h"
+#include "common.h"
 #include "geometry.h"
-#include "cvr_window.h"
-
 #include <time.h>
+
+/* Note this includes <vulkan/vulkan.h> */
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 
 #define PRIMITIVE_VERTS   cube_verts
 #define PRIMITIVE_INDICES cube_indices
 #define Z_NEAR 0.01
 #define Z_FAR 1000.0
 
-extern ExtManager ext_manager; // ext_man.c
-extern CVR_Cmd cmd;            // cvr_cmd.c
-extern CVR_Window window;      // cvr_window.c
-CVR_Context ctx = {0};
+typedef struct {
+    uint32_t gfx_idx;
+    bool has_gfx;
+    uint32_t present_idx;
+    bool has_present;
+} QueueFamilyIndices;
+
+typedef struct {
+    VkSwapchainKHR handle;
+    vec(VkImage) imgs;
+    vec(VkImageView) img_views;
+    vec(VkFramebuffer) buffs;
+    bool buff_resized;
+} CVR_Swpchain;
+
+/* Manage vulkan buffer info */
+typedef struct {
+    VkDevice device;
+    size_t size;
+    size_t count;
+    VkBuffer buff;
+    VkDeviceMemory buff_mem;
+    void *mapped;
+} CVR_Buffer;
+
+/* CVR_Buffer must be set with device & size prior to calling this constructor */
+bool buffer_ctor(CVR_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
+void buffer_dtor(CVR_Buffer buffer);
+
+/* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
+bool copy_buff(VkQueue queue, CVR_Buffer src, CVR_Buffer dst, VkDeviceSize size);
+
+/* Vulkan Context */
+typedef struct {
+    VkInstance instance;
+    VkDebugUtilsMessengerEXT debug_msgr;
+    VkPhysicalDevice phys_device;
+    VkDevice device;
+    VkQueue gfx_queue;
+    VkQueue present_queue;
+    VkSurfaceKHR surface;
+    VkSurfaceFormatKHR surface_fmt;
+    VkExtent2D extent;
+    VkRenderPass render_pass;
+    VkPipelineLayout pipeline_layout;
+    VkPipeline pipeline;
+    CVR_Swpchain swpchain;
+    CVR_Buffer vtx;
+    CVR_Buffer idx;
+    vec(CVR_Buffer) ubos;
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    vec(VkDescriptorSet) descriptor_sets;
+} CVR_Context;
+
+/* CVR render functions */
+bool cvr_init();
+bool cvr_destroy();
+bool create_instance();
+bool create_device();
+bool create_surface();
+bool create_swpchain();
+bool create_img_views();
+bool create_descriptor_set_layout();
+bool create_gfx_pipeline();
+bool create_shader_module(const char *shader, VkShaderModule *module);
+bool create_render_pass();
+bool create_frame_buffs();
+bool recreate_swpchain();
+bool create_vtx_buffer();
+bool create_idx_buffer();
+bool create_ubos();
+void update_ubos(uint32_t curr_frame);
+bool create_descriptor_pool();
+bool create_descriptor_sets();
+bool cvr_draw();
+bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer);
+
+/* Utilities */
+void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
+Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
+bool setup_debug_msgr();
+QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
+typedef vec(uint32_t) U32_Set;
+void populate_set(int arr[], size_t arr_size, U32_Set *set);
+bool swpchain_adequate(VkPhysicalDevice phys_device);
+VkSurfaceFormatKHR choose_swpchain_fmt();
+VkPresentModeKHR choose_present_mode();
+VkExtent2D choose_swp_extent();
+bool is_device_suitable(VkPhysicalDevice phys_device);
+bool pick_phys_device();
+void cleanup_swpchain();
+bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
+
+/* Manage vulkan extensions*/
+typedef vec(const char*) Extensions;
+typedef struct {
+    Extensions validation_layers;
+    Extensions device_exts;
+    Extensions inst_exts;
+    int inited;
+} ExtManager;
+
+void init_ext_managner();
+void destroy_ext_manager();
+bool inst_exts_satisfied();
+bool chk_validation_support();
+bool device_exts_supported(VkPhysicalDevice phys_device);
+
+/* Manage vulkan command info */
+typedef struct {
+    VkPhysicalDevice phys_device;
+    VkDevice device;
+    VkCommandPool pool;
+    vec(VkCommandBuffer) buffs;
+    vec(VkSemaphore) img_avail_sems;
+    vec(VkSemaphore) render_finished_sems;
+    vec(VkFence) fences;
+} CVR_Cmd;
+
+bool cmd_ctor(VkDevice device, VkPhysicalDevice phys_device, size_t num_cmd_objs);
+void cmd_dtor();
+bool cmd_buff_create(size_t num_cmd_buffs);
+bool cmd_syncs_create(size_t num_syncs);
+bool cmd_pool_create();
+
+/* Quick one-off command buffer */
+bool cmd_quick_begin(VkCommandBuffer *cmd_buff);
+bool cmd_quick_end(VkQueue queue, VkCommandBuffer *cmd_buff);
+
+typedef struct {
+    GLFWwindow *handle;
+} CVR_Window;
+
+void frame_buff_resized(GLFWwindow* window, int width, int height);
+
+typedef struct {
+    Color clear_color;
+    Camera camera;
+} Core_State;
+
+#endif // CVR_VK_H_
+
+/* CVR Implementation */
+
+#ifdef CVR_IMPLEMENTATION
+
+static CVR_Context ctx = {0};
+static ExtManager ext_manager = {0};
+static CVR_Cmd cmd = {0};
+static CVR_Window window = {0};
+static Core_State core_state = {0};
+
+/* Add various static extensions & validation layers here */
+static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
+static const char *device_exts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
@@ -514,10 +665,10 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     begin_rp.framebuffer = ctx.swpchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = ctx.extent;
     VkClearValue clear_color = {0};
-    clear_color.color.float32[0] = ctx.state.clear_color.r / 255.0f;
-    clear_color.color.float32[1] = ctx.state.clear_color.g / 255.0f;
-    clear_color.color.float32[2] = ctx.state.clear_color.b / 255.0f;
-    clear_color.color.float32[3] = ctx.state.clear_color.a / 255.0f;
+    clear_color.color.float32[0] = core_state.clear_color.r / 255.0f;
+    clear_color.color.float32[1] = core_state.clear_color.g / 255.0f;
+    clear_color.color.float32[2] = core_state.clear_color.b / 255.0f;
+    clear_color.color.float32[3] = core_state.clear_color.a / 255.0f;
     begin_rp.clearValueCount = 1;
     begin_rp.pClearValues = &clear_color;
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
@@ -678,22 +829,23 @@ defer:
 
 void update_ubos(uint32_t curr_image)
 {
-    // clock_t curr_time = clock();
-    // double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
+    clock_t curr_time = clock();
+    double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 
-    // Matrix model = MatrixIdentity();
+    Matrix model = MatrixRotateZ(PI / 4);
     // Matrix model = MatrixRotateY(-time_spent * 2.0f);
-    Matrix model = MatrixTranslate(-4.0, 0.0f, 2.0f);
-    model = MatrixMultiply(MatrixScale(2.0f, 5.0f, 2.0f), model);
-    Matrix view  = MatrixLookAt(ctx.state.camera.position, ctx.state.camera.target, ctx.state.camera.up);
+    // Matrix model = MatrixTranslate(-4.0, 0.0f, 2.0f);
+    model = MatrixMultiply(model, MatrixRotateY(-time_spent * 0.5f));
+    model = MatrixMultiply(MatrixScale(2.0f, 2.0f, 7.0f), model);
+    Matrix view  = MatrixLookAt(core_state.camera.position, core_state.camera.target, core_state.camera.up);
 
     Matrix proj = {0};
     double aspect = ctx.extent.width / (double) ctx.extent.height;
-    double top = ctx.state.camera.fovy / 2.0;
+    double top = core_state.camera.fovy / 2.0;
     double right = top * aspect;
-    switch (ctx.state.camera.projection) {
+    switch (core_state.camera.projection) {
     case PERSPECTIVE:
-        proj  = MatrixPerspective(ctx.state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        proj  = MatrixPerspective(core_state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
         break;
     case ORTHOGRAPHIC:
         proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
@@ -986,3 +1138,289 @@ bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t
 
     return false;
 }
+
+bool buffer_ctor(
+    CVR_Buffer *buffer,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties)
+{
+    bool result = true;
+    VkBufferCreateInfo buffer_ci = {0};
+    buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    cvr_chk(buffer->size, "CVR_Buffer must be set with size before calling constructor");
+    buffer_ci.size = (VkDeviceSize) buffer->size;
+    buffer_ci.usage = usage;
+    buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    cvr_chk(buffer->device, "CVR_Buffer must be set with device before calling constructor");
+    vk_chk(vkCreateBuffer(buffer->device, &buffer_ci, NULL, &buffer->buff), "failed to create buffer");
+
+    VkMemoryRequirements mem_reqs = {0};
+    vkGetBufferMemoryRequirements(buffer->device, buffer->buff, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_ci = {0};
+    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_ci.allocationSize = mem_reqs.size;
+    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
+    cvr_chk(result, "Memory not suitable based on memory requirements");
+    VkResult vk_result = vkAllocateMemory(buffer->device, &alloc_ci, NULL, &buffer->buff_mem);
+    vk_chk(vk_result, "failed to allocate buffer memory!");
+
+    vk_chk(vkBindBufferMemory(buffer->device, buffer->buff, buffer->buff_mem, 0), "failed to bind buffer memory");
+
+defer:
+    return result;
+}
+
+bool copy_buff(VkQueue queue, CVR_Buffer src, CVR_Buffer dst, VkDeviceSize size)
+{
+    bool result = true;
+
+    VkCommandBuffer cmd_buff;
+    cvr_chk(cmd_quick_begin(&cmd_buff), "failed quick cmd begin");
+
+    VkBufferCopy copy_region = {0};
+    if (size) {
+        copy_region.size = size;
+        cvr_chk(size <= dst.size, "Cannot copy buffer, size > dst buffer");
+        cvr_chk(size <= src.size, "Cannot copy buffer, size > src buffer");
+    } else {
+        cvr_chk(dst.size >= src.size, "Cannot copy buffer, dst buffer < src buffer");
+        copy_region.size = src.size;
+    }
+
+    vkCmdCopyBuffer(cmd_buff, src.buff, dst.buff, 1, &copy_region);
+
+    cvr_chk(cmd_quick_end(queue, &cmd_buff), "failed quick cmd end");
+
+defer:
+    return result;
+}
+
+void buffer_dtor(CVR_Buffer buffer)
+{
+    if (!buffer.device) {
+        nob_log(NOB_WARNING, "cannot destroy null buffer");
+        return;
+    }
+    vkDestroyBuffer(buffer.device, buffer.buff, NULL);
+    vkFreeMemory(buffer.device, buffer.buff_mem, NULL);
+}
+
+void init_ext_managner()
+{
+    if (ext_manager.inited) {
+        nob_log(NOB_WARNING, "extension manager already initialized");
+        return;
+    }
+
+    for (size_t i = 0; i < NOB_ARRAY_LEN(validation_layers); i++)
+        nob_da_append(&ext_manager.validation_layers, validation_layers[i]);
+
+    for (size_t i = 0; i < NOB_ARRAY_LEN(device_exts); i++)
+        nob_da_append(&ext_manager.device_exts, device_exts[i]);
+
+    ext_manager.inited = true;
+}
+
+void destroy_ext_manager()
+{
+    if (!ext_manager.inited) {
+        nob_log(NOB_WARNING, "extension manager was not initialized");
+        return;
+    }
+
+    nob_da_reset(ext_manager.validation_layers);
+    nob_da_reset(ext_manager.device_exts);
+    nob_da_reset(ext_manager.inst_exts);
+}
+
+bool inst_exts_satisfied()
+{
+    uint32_t avail_ext_count = 0;
+    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
+    VkExtensionProperties avail_exts[avail_ext_count];
+    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
+    size_t unsatisfied_exts = ext_manager.inst_exts.count;
+    for (size_t i = 0; i < ext_manager.inst_exts.count; i++) {
+        for (size_t j = 0; j < avail_ext_count; j++) {
+            if (strcmp(ext_manager.inst_exts.items[i], avail_exts[j].extensionName) == 0) {
+                if (--unsatisfied_exts == 0)
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool chk_validation_support()
+{
+    uint32_t layer_count = 0;
+    vkEnumerateInstanceLayerProperties(&layer_count, NULL);
+    VkLayerProperties avail_layers[layer_count];
+    vkEnumerateInstanceLayerProperties(&layer_count, avail_layers);
+    size_t unsatisfied_layers = ext_manager.validation_layers.count;
+    for (size_t i = 0; i < ext_manager.validation_layers.count; i++) {
+        for (size_t j = 0; j < layer_count; j++) {
+            if (strcmp(ext_manager.validation_layers.items[i], avail_layers[j].layerName) == 0) {
+                if (--unsatisfied_layers == 0)
+                    return true;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool device_exts_supported(VkPhysicalDevice phys_device)
+{
+    uint32_t avail_ext_count = 0;
+    vkEnumerateDeviceExtensionProperties(phys_device, NULL, &avail_ext_count, NULL);
+    VkExtensionProperties avail_exts[avail_ext_count];
+    vkEnumerateDeviceExtensionProperties(phys_device, NULL, &avail_ext_count, avail_exts);
+    uint32_t unsatisfied_exts = ext_manager.device_exts.count; 
+    for (size_t i = 0; i < ext_manager.device_exts.count; i++) {
+        for (size_t j = 0; j < avail_ext_count; j++) {
+            if (strcmp(ext_manager.device_exts.items[i], avail_exts[j].extensionName) == 0) {
+                if (--unsatisfied_exts == 0)
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool cmd_ctor(VkDevice device, VkPhysicalDevice phys_device, size_t num_cmd_objs)
+{
+    bool result = true;
+    cmd.device = device;
+    cmd.phys_device = phys_device;
+    cvr_chk(cmd_pool_create(), "failed to create command pool");
+    cvr_chk(cmd_buff_create(num_cmd_objs), "failed to create cmd buffers");
+    cvr_chk(cmd_syncs_create(num_cmd_objs), "failed to create cmd sync objects");
+
+defer:
+    return result;
+}
+
+void cmd_dtor()
+{
+    for (size_t i = 0; i < cmd.img_avail_sems.count; i++)
+        vkDestroySemaphore(cmd.device, cmd.img_avail_sems.items[i], NULL);
+    for (size_t i = 0; i < cmd.render_finished_sems.count; i++)
+        vkDestroySemaphore(cmd.device, cmd.render_finished_sems.items[i], NULL);
+    for (size_t i = 0; i < cmd.fences.count; i++)
+        vkDestroyFence(cmd.device, cmd.fences.items[i], NULL);
+    vkDestroyCommandPool(cmd.device, cmd.pool, NULL);
+
+    nob_da_reset(cmd.buffs);
+    nob_da_reset(cmd.img_avail_sems);
+    nob_da_reset(cmd.render_finished_sems);
+    nob_da_reset(cmd.fences);
+}
+
+bool cmd_pool_create()
+{
+    bool result = true;
+    QueueFamilyIndices indices = find_queue_fams(cmd.phys_device);
+    cvr_chk(indices.has_gfx, "failed to create command pool, no graphics queue");
+    VkCommandPoolCreateInfo cmd_pool_ci = {0};
+    cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
+    vk_chk(vkCreateCommandPool(cmd.device, &cmd_pool_ci, NULL, &cmd.pool), "failed to create command pool");
+
+defer:
+    return result;
+}
+
+bool cmd_buff_create(size_t num_cmd_buffs)
+{
+    VkCommandBufferAllocateInfo ci = {0};
+    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ci.commandPool = cmd.pool;
+    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    nob_da_resize(&cmd.buffs, num_cmd_buffs);
+    ci.commandBufferCount = cmd.buffs.count;
+    return vk_ok(vkAllocateCommandBuffers(cmd.device, &ci, cmd.buffs.items));
+}
+
+bool cmd_syncs_create(size_t num_syncs)
+{
+    bool result = true;
+    VkSemaphoreCreateInfo sem_ci = {0};
+    sem_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    VkFenceCreateInfo fence_ci = {0};
+    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    nob_da_resize(&cmd.img_avail_sems, num_syncs);
+    nob_da_resize(&cmd.render_finished_sems, num_syncs);
+    nob_da_resize(&cmd.fences, num_syncs);
+    VkResult vk_result;
+    for (size_t i = 0; i < num_syncs; i++) {
+        vk_result = vkCreateSemaphore(cmd.device, &sem_ci, NULL, &cmd.img_avail_sems.items[i]);
+        vk_chk(vk_result, "failed to create semaphore");
+        vk_result = vkCreateSemaphore(cmd.device, &sem_ci, NULL, &cmd.render_finished_sems.items[i]);
+        vk_chk(vk_result, "failed to create semaphore");
+        vk_result = vkCreateFence(cmd.device, &fence_ci, NULL, &cmd.fences.items[i]);
+        vk_chk(vk_result, "failed to create fence");
+    }
+
+defer:
+    return result;
+}
+
+bool cmd_quick_begin(VkCommandBuffer *cmd_buff)
+{
+    bool result = true;
+
+    VkCommandBufferAllocateInfo ci = {0};
+    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ci.commandPool = cmd.pool;
+    ci.commandBufferCount = 1;
+    vk_chk(vkAllocateCommandBuffers(cmd.device, &ci, cmd_buff), "failed to create quick cmd");
+
+    VkCommandBufferBeginInfo cmd_begin = {0};
+    cmd_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmd_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vk_chk(vkBeginCommandBuffer(*cmd_buff, &cmd_begin), "failed to begin quick cmd");
+
+defer:
+    return result;
+}
+
+bool cmd_quick_end(VkQueue queue, VkCommandBuffer *cmd_buff)
+{
+    bool result = true;
+    vk_chk(vkEndCommandBuffer(*cmd_buff), "failed to end cmd buffer");
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = cmd_buff;
+    vk_chk(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
+    vk_chk(vkQueueWaitIdle(queue), "failed to wait idle in quick cmd");
+
+defer:
+    vkFreeCommandBuffers(cmd.device, cmd.pool, 1, cmd_buff);
+    return result;
+}
+
+void frame_buff_resized(GLFWwindow* window, int width, int height)
+{
+    unused(window);
+    unused(width);
+    unused(height);
+    ctx.swpchain.buff_resized = true;
+}
+
+void close_window()
+{
+    cvr_destroy();
+    glfwDestroyWindow(window.handle);
+    glfwTerminate();
+}
+
+#endif // CVR_IMPLEMENTATION

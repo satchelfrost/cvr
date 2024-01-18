@@ -1,12 +1,13 @@
 #include "cvr.h"
-#include "cvr_context.h"
-#include "cvr_window.h"
+
+#define RAYMATH_IMPLEMENTATION
+#include "ext/raylib-5.0/raymath.h"
+
+#define CVR_IMPLEMENTATION
+#include "cvr_vk.h"
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
-
-extern CVR_Window window; // cvr_window.c
-extern CVR_Context ctx;   // cvr_context.c
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
@@ -25,7 +26,7 @@ typedef struct {
 
 Keyboard keyboard = {0};
 
-static void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
+static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 
 bool init_window(int width, int height, const char *title)
 {
@@ -37,7 +38,7 @@ bool init_window(int width, int height, const char *title)
     glfwSetWindowUserPointer(window.handle, &ctx);
     glfwSetFramebufferSizeCallback(window.handle, frame_buff_resized);
 
-    glfwSetKeyCallback(window.handle, KeyCallback);
+    glfwSetKeyCallback(window.handle, key_callback);
 
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
 
@@ -62,12 +63,12 @@ defer:
 
 void clear_background(Color color)
 {
-    ctx.state.clear_color = color;
+    core_state.clear_color = color;
 }
 
-void begin_mode_3d(CVR_Camera camera)
+void begin_mode_3d(Camera camera)
 {
-    ctx.state.camera = camera;
+    core_state.camera = camera;
 }
 
 bool is_key_pressed(int key)
@@ -93,7 +94,7 @@ void poll_input_events()
     }
 }
 
-static void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
+static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     unused(scancode);
     if (key < 0) return;
