@@ -117,3 +117,10 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
     if ((key == keyboard.exit_key) && (action == GLFW_PRESS)) glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
+
+void set_cube_color(Color color)
+{
+    core_state.cube_color.x = color.r / (float)255.0f;
+    core_state.cube_color.y = color.g / (float)255.0f;
+    core_state.cube_color.z = color.b / (float)255.0f;
+}

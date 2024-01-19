@@ -21,9 +21,11 @@ int main()
             if (camera.projection == PERSPECTIVE) {
                 camera.fovy = WIDTH_ORTHOGRAPHIC;
                 camera.projection = ORTHOGRAPHIC;
+                set_cube_color(GREEN);
             } else {
                 camera.fovy = FOVY_PERSPECTIVE;
                 camera.projection = PERSPECTIVE;
+                set_cube_color(YELLOW);
             }
         }
 

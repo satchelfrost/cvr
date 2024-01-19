@@ -2,12 +2,48 @@
 #define NOB_IMPLEMENTATION
 #include "src/ext/nob.h"
 
+/* Whether or not to use the compilation database available with clang */
+bool gen_comp_db = false;
+
+typedef struct {
+    const char **names;
+    size_t count;
+} CFiles;
+
+typedef struct {
+    const char **names;
+    size_t count;
+} Shaders;
+
+/* Data necessary for compiling an example */
+typedef struct {
+    const char *name;
+    const Shaders shaders;
+    const CFiles c_files;
+} Example;
+
+static const char *default_shader_names[] = {"shader.vert", "shader.frag"};
+static const char *default_c_file_names[] = {"main"};
+
+static Example examples[] = {
+    {
+        .name = "3d-primitives",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
+};
+
 static const char *cvr[] = {
     "cvr",
     "ext_man",
     "vertex",
     "vk_buffer",
-    "vk_cmd_man",
     "vk_cmd_man",
     "vk_ctx",
 };
@@ -27,10 +63,16 @@ bool build_cvr()
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
+        const char *comp_db = nob_temp_sprintf("build/compilation_database/%s.o.json", cvr[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, "cc");
+            if (gen_comp_db) {
+                nob_cmd_append(&cmd, "clang");
+                nob_cmd_append(&cmd, "-MJ", comp_db);
+            } else {
+                nob_cmd_append(&cmd, "cc");
+            }
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -59,11 +101,6 @@ defer:
     nob_cmd_free(obj_files);
     return result;
 }
-
-typedef struct {
-    const char **names;
-    size_t count;
-} Shaders;
 
 bool compile_shaders(const char *example_path, Shaders shaders)
 {
@@ -97,13 +134,11 @@ defer:
     return result;
 }
 
-typedef struct {
-    const char **names;
-    size_t count;
-} CFiles;
 
-bool build_example(const char *example_path, CFiles c_files)
+bool build_example(Example *example)
 {
+    const char *example_path = nob_temp_sprintf("examples/%s", example->name);
+    const char **c_files = example->c_files.names;
     bool result = true;
     Nob_Cmd cmd = {0};
     Nob_Procs procs = {0};
@@ -114,13 +149,19 @@ bool build_example(const char *example_path, CFiles c_files)
     const char *build_path = nob_temp_sprintf("build/%s", example_path);
     if (!nob_mkdir_if_not_exists(build_path)) return 1;
 
-    for (size_t i = 0; i < c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("build/%s/%s.o", example_path, c_files.names[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files.names[i]);
+    for (size_t i = 0; i < example->c_files.count; i++) {
+        const char *output_path = nob_temp_sprintf("build/%s/%s.o", example_path, c_files[i]);
+        const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
+        const char *comp_db = nob_temp_sprintf("build/compilation_database/%s.o.json", example->name);
         nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, c_files.count)) {
+        if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, "cc");
+            if (gen_comp_db) {
+                nob_cmd_append(&cmd, "clang");
+                nob_cmd_append(&cmd, "-MJ", comp_db);
+            } else {
+                nob_cmd_append(&cmd, "cc");
+            }
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -133,12 +174,12 @@ bool build_example(const char *example_path, CFiles c_files)
     if (!nob_procs_wait(procs)) nob_return_defer(false);
 
     const char *libcvr_path = nob_temp_sprintf("./build/cvr/libcvr.a");
-    const char *exec_path = nob_temp_sprintf("./build/%s/main", example_path);
+    const char *exec_path = nob_temp_sprintf("%s/%s", build_path, example->name);
     bool obj_updated = nob_needs_rebuild(exec_path, obj_files.items, obj_files.count);
     bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
-        nob_cmd_append(&cmd, "cc");
+        nob_cmd_append(&cmd, (gen_comp_db) ? "clang" : "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
@@ -158,41 +199,22 @@ defer:
     return result;
 }
 
-static const char *default_shader_names[] = {
-    "shader.vert",
-    "shader.frag"
-};
-
-static const char *default_c_file_name[] = {
-    "main",
-};
-
-/* Data necessary for compiling an example */
-typedef struct {
-    const char *name;
-    const Shaders shaders;
-    const CFiles c_files;
-} Example;
-
-static Example examples[] = {
-    {
-        .name    = "3d-primitives",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_name,
-            .count = NOB_ARRAY_LEN(default_c_file_name) 
-        }
-    },
-};
-
 void log_usage(const char *program)
 {
     nob_log(NOB_ERROR, "usage: %s <flags> <optional_input>", program);
     nob_log(NOB_ERROR, "    -c clean build");
     nob_log(NOB_ERROR, "    -e <example_name> optional example");
+}
+
+bool create_compile_commands()
+{
+    bool result = true;
+    Nob_Cmd cmd = {0};
+    nob_da_append(&cmd, "sed -e '1s/^/[\\n/' -e '$s/,$/\\n]/' build/compilation_database/*.o.json > compile_commands.json");
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+defer:
+    return result;
 }
 
 // Heroic sed command for concatenating json "sed -e '1s/^/[\n/' -e '$s/,$/\n]/' *.o.json > compile_commands.json"
@@ -220,6 +242,10 @@ int main(int argc, char **argv)
                 }
                 example = nob_shift_args(&argc, &argv);
                 break;
+            case 'd':
+                nob_log(NOB_INFO, "compilation database requested (requires clang)");
+                gen_comp_db = true;
+                break;
             case 'h':
                 log_usage(program);
                 return 1;
@@ -234,6 +260,9 @@ int main(int argc, char **argv)
 
     cmd.count = 0;
     if (!nob_mkdir_if_not_exists("build")) return 1;
+    if (gen_comp_db) {
+        if (!nob_mkdir_if_not_exists("build/compilation_database")) return 1;
+    }
     if (!build_cvr()) return 1;
 
     if (!nob_mkdir_if_not_exists("build/examples")) return 1;
@@ -251,21 +280,25 @@ int main(int argc, char **argv)
             return 1;
         }
         const char *example_path = nob_temp_sprintf("examples/%s", examples[i].name);
-        if (!build_example(example_path, examples[i].c_files)) return 1;
+        if (!build_example(&examples[i])) return 1;
         if (!compile_shaders(example_path, examples[i].shaders)) return 1;
 
         /* run example after building */
         nob_log(NOB_INFO, "running example %s", example);
-        const char *build_path = nob_temp_sprintf("build/%s/main", example_path);
+        const char *build_path = nob_temp_sprintf("build/%s/%s", example_path, examples[i].name);
         nob_cmd_append(&cmd, build_path);
         if (!nob_cmd_run_sync(cmd)) return 1;
     } else {
         nob_log(NOB_INFO, "building all examples");
         for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
             const char *example_path = nob_temp_sprintf("examples/%s", examples[i].name);
-            if (!build_example(example_path, examples[i].c_files)) return 1;
+            if (!build_example(&examples[i])) return 1;
             if (!compile_shaders(example_path, examples[i].shaders)) return 1;
         }
+    }
+
+    if (gen_comp_db) {
+        if (!create_compile_commands()) return 1;
     }
 
     nob_cmd_free(cmd);

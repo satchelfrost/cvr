@@ -1,6 +1,7 @@
 #include "cvr.h"
 #include "ext_man.h"
 #include "vk_cmd_man.h"
+#include <vulkan/vulkan_core.h>
 
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
@@ -334,7 +335,7 @@ bool create_gfx_pipeline()
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
-        .size = sizeof(Color),
+        .size = sizeof(Vector3),
     };
     pipeline_layout_ci.pPushConstantRanges = &pk_range;
     pipeline_layout_ci.pushConstantRangeCount = 1;
@@ -551,6 +552,14 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
         ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
     );
 
+    vkCmdPushConstants(
+        cmd_buffer,
+        ctx.pipeline_layout,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(Vector3),
+        &core_state.cube_color
+    );
 
     vkCmdDrawIndexed(cmd_buffer, ctx.idx.count, 1, 0, 0, 0);
 

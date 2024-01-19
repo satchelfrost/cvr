@@ -108,6 +108,7 @@ typedef struct Color {
 
 typedef struct {
     Color clear_color;
+    Vector3 cube_color;
     Camera camera;
 } Core_State;
 
