@@ -71,6 +71,11 @@ void begin_mode_3d(Camera camera)
     core_state.camera = camera;
 }
 
+void end_mode_3d()
+{
+    poll_input_events();
+}
+
 bool is_key_pressed(int key)
 {
     bool pressed = false;

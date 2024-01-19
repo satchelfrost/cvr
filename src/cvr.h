@@ -193,5 +193,6 @@ void begin_mode_3d(Camera camera);
 void end_mode_3d();
 bool is_key_pressed(int key);
 void poll_input_events();
+void draw_cube(Vector3 position, float width, float height, float length, Color color);
 
 #endif // CVR_H_

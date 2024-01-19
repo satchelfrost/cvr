@@ -13,6 +13,7 @@ int main()
         .projection = PERSPECTIVE,
     };
 
+
     init_window(800, 600, "Spinning Shapes");
     clear_background(BLUE);
     while (!window_should_close()) {
@@ -25,9 +26,10 @@ int main()
                 camera.projection = PERSPECTIVE;
             }
         }
+
         begin_mode_3d(camera);
-        draw();
-        poll_input_events();
+            draw();
+        end_mode_3d();
     }
     close_window();
     return 0;

@@ -5,7 +5,7 @@
 #include "geometry.h"
 #include <time.h>
 
-/* Note this includes <vulkan/vulkan.h> */
+#include <vulkan/vulkan.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -478,6 +478,13 @@ bool create_gfx_pipeline()
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_ci.pSetLayouts = &ctx.descriptor_set_layout;
     pipeline_layout_ci.setLayoutCount = 1;
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(Color),
+    };
+    pipeline_layout_ci.pPushConstantRanges = &pk_range;
+    pipeline_layout_ci.pushConstantRangeCount = 1;
     VkResult vk_result = vkCreatePipelineLayout(
         ctx.device,
         &pipeline_layout_ci,
@@ -691,6 +698,9 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
         VK_PIPELINE_BIND_POINT_GRAPHICS,
         ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
     );
+
+    vkCmdPushConstatns(cmd_buffer, ctx.pipeline_layout)
+
     vkCmdDrawIndexed(cmd_buffer, ctx.idx.count, 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
