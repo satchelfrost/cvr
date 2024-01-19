@@ -7,3 +7,4 @@ issues
 * Show line lengt
 * Stop highlighting on search
 * Stop automatically including headers
+* Enter normal mode with Ctrl-C, because that also copies apparently 

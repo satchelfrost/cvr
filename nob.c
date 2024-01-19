@@ -3,8 +3,13 @@
 #include "src/ext/nob.h"
 
 static const char *cvr[] = {
-    "cvr_core",
+    "cvr",
+    "ext_man",
     "vertex",
+    "vk_buffer",
+    "vk_cmd_man",
+    "vk_cmd_man",
+    "vk_ctx",
 };
 
 bool build_cvr()
@@ -190,6 +195,7 @@ void log_usage(const char *program)
     nob_log(NOB_ERROR, "    -e <example_name> optional example");
 }
 
+// Heroic sed command for concatenating json "sed -e '1s/^/[\n/' -e '$s/,$/\n]/' *.o.json > compile_commands.json"
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);

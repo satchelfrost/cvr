@@ -1,10 +1,5 @@
 #include "cvr.h"
-
-#define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
-
-#define CVR_IMPLEMENTATION
-#include "cvr_vk.h"
+#include "vk_ctx.h"
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
@@ -25,6 +20,8 @@ typedef struct {
 } Keyboard;
 
 Keyboard keyboard = {0};
+extern Core_State core_state;
+extern Vk_Context ctx;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 
@@ -34,11 +31,11 @@ bool init_window(int width, int height, const char *title)
 
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    window.handle = glfwCreateWindow(width, height, title, NULL, NULL);
-    glfwSetWindowUserPointer(window.handle, &ctx);
-    glfwSetFramebufferSizeCallback(window.handle, frame_buff_resized);
+    ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
+    glfwSetWindowUserPointer(ctx.window, &ctx);
+    glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
 
-    glfwSetKeyCallback(window.handle, key_callback);
+    glfwSetKeyCallback(ctx.window, key_callback);
 
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
 
@@ -48,7 +45,7 @@ defer:
 
 bool window_should_close()
 {
-    bool result = glfwWindowShouldClose(window.handle);
+    bool result = glfwWindowShouldClose(ctx.window);
     glfwPollEvents();
     return result;
 }

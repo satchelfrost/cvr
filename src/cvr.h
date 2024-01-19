@@ -43,6 +43,7 @@
 #define BLANK      (Color){ 0, 0, 0, 0 }
 #define MAGENTA    (Color){ 255, 0, 255, 255 }
 
+#define CVR_COLOR
 typedef struct Color {
     unsigned char r;
     unsigned char g;
@@ -148,7 +149,7 @@ typedef enum {
     KEY_KP_5            = 325,
     KEY_KP_6            = 326,
     KEY_KP_7            = 327,
-    KEY_KP_8            = 328,
+KEY_KP_8            = 328,
     KEY_KP_9            = 329,
     KEY_KP_DECIMAL      = 330,
     KEY_KP_DIVIDE       = 331,
@@ -169,13 +170,13 @@ typedef enum {
 } Camera_Projection;
 
 #define RL_VECTOR3_TYPE
-
 typedef struct Vector3 {
     float x;
     float y;
     float z;
 } Vector3;
 
+#define CVR_CAMERA
 typedef struct {
     Vector3 position;
     Vector3 target;
