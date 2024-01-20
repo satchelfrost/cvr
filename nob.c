@@ -3,7 +3,7 @@
 #include "src/ext/nob.h"
 
 /* Whether or not to use the compilation database available with clang */
-bool gen_comp_db = false;
+bool using_comp_db = false;
 
 typedef struct {
     const char **names;
@@ -67,7 +67,7 @@ bool build_cvr()
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1)) {
             cmd.count = 0;
-            if (gen_comp_db) {
+            if (using_comp_db) {
                 nob_cmd_append(&cmd, "clang");
                 nob_cmd_append(&cmd, "-MJ", comp_db);
             } else {
@@ -134,7 +134,6 @@ defer:
     return result;
 }
 
-
 bool build_example(Example *example)
 {
     const char *example_path = nob_temp_sprintf("examples/%s", example->name);
@@ -156,7 +155,7 @@ bool build_example(Example *example)
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
-            if (gen_comp_db) {
+            if (using_comp_db) {
                 nob_cmd_append(&cmd, "clang");
                 nob_cmd_append(&cmd, "-MJ", comp_db);
             } else {
@@ -179,7 +178,7 @@ bool build_example(Example *example)
     bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
-        nob_cmd_append(&cmd, (gen_comp_db) ? "clang" : "cc");
+        nob_cmd_append(&cmd, (using_comp_db) ? "clang" : "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
@@ -204,20 +203,33 @@ void log_usage(const char *program)
     nob_log(NOB_ERROR, "usage: %s <flags> <optional_input>", program);
     nob_log(NOB_ERROR, "    -c clean build");
     nob_log(NOB_ERROR, "    -e <example_name> optional example");
+    nob_log(NOB_ERROR, "    -d generate compilation database (requires clang)");
 }
 
-bool create_compile_commands()
+bool create_comp_db()
 {
     bool result = true;
-    Nob_Cmd cmd = {0};
-    nob_da_append(&cmd, "sed -e '1s/^/[\\n/' -e '$s/,$/\\n]/' build/compilation_database/*.o.json > compile_commands.json");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    Nob_File_Paths paths = {0};
+    nob_read_entire_dir("build/compilation_database", &paths);
+    Nob_String_Builder sb = {0};
+    nob_sb_append_cstr(&sb, "[\n");
+    for (size_t i = 0; i < paths.count; i++) {
+        if (strstr(paths.items[i], ".json") != 0) {
+            const char *path = nob_temp_sprintf("build/compilation_database/%s", paths.items[i]);
+            if (!nob_read_entire_file(path, &sb)) nob_return_defer(false);
+        }
+    }
+    sb.count -= 2; // erase last two chars from file to be json compliant for newly concatenated file
+    nob_sb_append_cstr(&sb, "\n]");
+    nob_sb_append_null(&sb); // add back in the '\0'
+    if (!nob_write_entire_file("build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
+
+    nob_log(NOB_INFO, "created compilation database, you may need to restart your LSP");
 
 defer:
     return result;
 }
 
-// Heroic sed command for concatenating json "sed -e '1s/^/[\n/' -e '$s/,$/\n]/' *.o.json > compile_commands.json"
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
@@ -225,10 +237,10 @@ int main(int argc, char **argv)
     Nob_Cmd cmd = {0};
     const char *program = nob_shift_args(&argc, &argv);
     char *example = NULL;
-    if (argc > 0) {
+    while (argc > 0) {
         char flag;
         char *flags = nob_shift_args(&argc, &argv);
-        while (flag = (++flags)[0]) {
+        while (flag = (++flags)[0]) { // ignores '-'
             switch (flag) {
             case 'c':
                 nob_log(NOB_INFO, "clean build requested, removing build folder");
@@ -244,7 +256,7 @@ int main(int argc, char **argv)
                 break;
             case 'd':
                 nob_log(NOB_INFO, "compilation database requested (requires clang)");
-                gen_comp_db = true;
+                using_comp_db = true;
                 break;
             case 'h':
                 log_usage(program);
@@ -260,8 +272,17 @@ int main(int argc, char **argv)
 
     cmd.count = 0;
     if (!nob_mkdir_if_not_exists("build")) return 1;
-    if (gen_comp_db) {
+    if (using_comp_db) {
         if (!nob_mkdir_if_not_exists("build/compilation_database")) return 1;
+    } else {
+        // test if compilation database was previously used to ensure clang
+        Nob_File_Paths paths = {0};
+        if (!nob_read_entire_dir("build", &paths)) return 1;
+        for (size_t i = 0; i < paths.count; i++) {
+            if (strstr(paths.items[i], "compile_commands.json") != 0) {
+                using_comp_db = true;
+            }
+        }
     }
     if (!build_cvr()) return 1;
 
@@ -297,8 +318,8 @@ int main(int argc, char **argv)
         }
     }
 
-    if (gen_comp_db) {
-        if (!create_compile_commands()) return 1;
+    if (using_comp_db) {
+        if (!create_comp_db()) return 1;
     }
 
     nob_cmd_free(cmd);

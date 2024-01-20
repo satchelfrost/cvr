@@ -7,50 +7,41 @@ Vulkan & GLFW
 
 ### Using apt
 ```bash
-sudo apt install vulkan-tools
-```
-```bash
-sudo apt install libvulkan-dev
-```
-```bash
-sudo apt install vulkan-validationlayers-dev spirv-tools
-```
-```bash
-sudo apt install libglfw3-dev
+sudo apt install vulkan-tools libvulkan-dev vulkan-validationlayers-dev spirv-tools libglfw3-dev
 ```
 
 Download glslc from [here](https://github.com/google/shaderc/blob/main/downloads.md) and copy (or symlink) it to your /usr/local/bin.
 
 For more in depth instructions visit [here](https://vulkan-tutorial.com/Development_environment#page_Linux)
 
+## Build system: `nob`
+Instead of using scripts, make, cmake, or some other alternative, this project uses nob (short for "no build"). Nob is a bootstrapping build system that only requires a C compiler. The header file (`nob.h`) was developed by Alexey Kutepov (a.k.a Tsoding), but the implementation (`nob.c`) is specific to each individual project.
+
+Here's how it works, build `nob.c` once,
+
+```bash
+cc -o nob nob.c
+```
+and you never need to directly build it again. Even if you make changes to `nob.c`, that will be detected and nob will recompile itself.
+
+For usage options of this project type the following command
+```bash
+./nob -h
+```
 
 ## Compilation Database (Optional)
-Note about potentially using a compilation database for clangd (i.e. autocompletion, squigglies, etc.). For now I'm not making clang, and the users shell a dependency; however I'm noting the steps so I don't forget, and in case I want to do this later.
-
-To manually generate a compilation database I followed the steps outlined [here](https://sarcasm.github.io/notes/dev/compilation-database.html#clang), I want to mention it somewhere so I don't forget.
-
-First use clang to compile, and use the "-MJ" flag to generate compilation database files e.g.
+If you're using the clangd language server for better autocomplete/go-to-definitions, then there's an option to generate a compilation database (compile_commands.json) in the build folder. It should be noted that this requires the clang compiler. After generating the database once, all future invokations of `nob` should use clang automatically (otherwise the default compiler is `cc`). To generate the db simply run:
 
 ```bash
-clang -MJ a.o.json -o a.o -c a.c
-clang -MJ b.o.json -o b.o -c b.c
+./nob -d
 ```
-You can also modify `nob.c` just change `cc` -> `clang`, and after that add an additional nob_cmd_append(&cmd, "-MJ", example.o.json)
-
-These json files can be concatenated using the following sed command:
+To clean the build folder and generate the database (for example if `cc` was run previously and you want to be consistent with compilers) run:
 
 ```bash
-sed -e '1s/^/[\n/' -e '$s/,$/\n]/' *.o.json > compile_commands.json
+./nob -d -c
 ```
+or simply
 
-Then the original `*.o.json` can be deleted. Now, having the compile_commands.json at the root directory should enable clangd to workout things like included files.
-
-If all you need is include files then simply making a `.clangd` file with the following will suffice:
-
-```yaml
-CompileFlags:
-  Add: [-I/full/path/to/cvr/src]
+```bash
+./nob -dc
 ```
-
-For anything more complex, a compilation database may be required for better autocompletion etc.
-

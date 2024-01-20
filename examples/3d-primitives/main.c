@@ -13,7 +13,6 @@ int main()
         .projection = PERSPECTIVE,
     };
 
-
     init_window(800, 600, "Spinning Shapes");
     clear_background(BLUE);
     while (!window_should_close()) {
