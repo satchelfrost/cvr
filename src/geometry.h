@@ -10,7 +10,8 @@
 #define Blue 0, 0, 1
 #define DarkBlue 0, 0, 0.25f
 
-static const Vertex tetrahedron_verts[] = {
+#define TETRAHEDRON_VERTS 4
+static const Vertex tetrahedron_verts[TETRAHEDRON_VERTS] = {
     {{0.0f, -0.333f, 0.943f}, {0.0f, 0.0f, 1.0f}},
     {{0.816f, -0.333f, -0.471f}, {0.0f, 1.0f, 0.0f}},
     {{-0.816f, -0.333f, -0.471f}, {0.0f, 0.0f, 0.25f}},
@@ -18,7 +19,8 @@ static const Vertex tetrahedron_verts[] = {
 };
 
 /* clockwise winding order */
-static const uint16_t tetrahedron_indices[] = {
+#define TETRAHEDRON_IDXS 12
+static const uint16_t tetrahedron_indices[TETRAHEDRON_IDXS] = {
     0, 3, 1,
     0, 2, 3,
     0, 1, 2,
@@ -36,7 +38,8 @@ static const uint16_t tetrahedron_indices[] = {
 
 #define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}}, {{V2}, {COLOR}}, {{V3}, {COLOR}}, {{V4}, {COLOR}}, {{V5}, {COLOR}}, {{V6}, {COLOR}},
 
-static const Vertex cube_verts[] = {
+#define CUBE_VERTS 36
+static const Vertex cube_verts[CUBE_VERTS] = {
     CUBE_SIDE(LTB, LBF, LBB, LTB, LTF, LBF, DarkRed)
     CUBE_SIDE(RTB, RBB, RBF, RTB, RBF, RTF, Red)
     CUBE_SIDE(LBB, LBF, RBF, LBB, RBF, RBB, DarkGreen)
@@ -46,7 +49,8 @@ static const Vertex cube_verts[] = {
 };
 
 /* clockwise winding order */
-static const uint16_t cube_indices[] = {
+#define CUBE_IDXS 36
+static const uint16_t cube_indices[CUBE_IDXS] = {
     0,  1,  2,  3,  4,  5,
     6,  7,  8,  9,  10, 11,
     12, 13, 14, 15, 16, 17,
@@ -55,7 +59,8 @@ static const uint16_t cube_indices[] = {
     30, 31, 32, 33, 34, 35,
 };
 
-static const Vertex quad_verts[] = {
+#define QUAD_VERTS 4
+static const Vertex quad_verts[QUAD_VERTS] = {
     {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
     {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
     {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
@@ -63,8 +68,14 @@ static const Vertex quad_verts[] = {
 };
 
 /* clockwise winding order */
-static const uint16_t quad_indices[] = {
+#define QUAD_IDXS 6
+static const uint16_t quad_indices[QUAD_IDXS] = {
     0, 1, 2, 2, 3, 0
 };
+
+#define SHAPE_LIST \
+    X(QUAD, quad)  \
+    X(CUBE, cube)  \
+    X(TETRAHEDRON, tetrahedron)
 
 #endif

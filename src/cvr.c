@@ -24,6 +24,7 @@ extern Core_State core_state;
 extern Vk_Context ctx;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
+void poll_input_events();
 
 bool init_window(int width, int height, const char *title)
 {
@@ -50,10 +51,13 @@ bool window_should_close()
     return result;
 }
 
-bool draw()
+bool draw_shape(Shape_Type shape_type)
 {
     bool result = true;
-    cvr_chk(cvr_draw(), "failed to draw frame");
+    if (!ctx.pipelines.shape) create_shape_pipeline();
+    if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
+    cvr_chk(cvr_draw_shape(shape_type), "failed to draw frame");
+
 defer:
     return result;
 }

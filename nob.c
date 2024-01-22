@@ -3,7 +3,8 @@
 #include "src/ext/nob.h"
 
 /* Whether or not to use the compilation database available with clang */
-bool using_comp_db = false;
+bool gen_comp_db = false;
+bool using_clang = false;
 
 typedef struct {
     const char **names;
@@ -67,12 +68,8 @@ bool build_cvr()
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1)) {
             cmd.count = 0;
-            if (using_comp_db) {
-                nob_cmd_append(&cmd, "clang");
-                nob_cmd_append(&cmd, "-MJ", comp_db);
-            } else {
-                nob_cmd_append(&cmd, "cc");
-            }
+            nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
+            if (gen_comp_db && using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -155,12 +152,8 @@ bool build_example(Example *example)
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
-            if (using_comp_db) {
-                nob_cmd_append(&cmd, "clang");
-                nob_cmd_append(&cmd, "-MJ", comp_db);
-            } else {
-                nob_cmd_append(&cmd, "cc");
-            }
+            nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
+            if (gen_comp_db && using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -178,7 +171,7 @@ bool build_example(Example *example)
     bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
-        nob_cmd_append(&cmd, (using_comp_db) ? "clang" : "cc");
+        nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
@@ -221,7 +214,7 @@ bool create_comp_db()
     }
     sb.count -= 2; // erase last two chars from file to be json compliant for newly concatenated file
     nob_sb_append_cstr(&sb, "\n]");
-    nob_sb_append_null(&sb); // add back in the '\0'
+    nob_sb_append_null(&sb);
     if (!nob_write_entire_file("build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
 
     nob_log(NOB_INFO, "created compilation database, you may need to restart your LSP");
@@ -240,7 +233,7 @@ int main(int argc, char **argv)
     while (argc > 0) {
         char flag;
         char *flags = nob_shift_args(&argc, &argv);
-        while (flag = (++flags)[0]) { // ignores '-'
+        while ((flag = (++flags)[0])) { // ignores '-'
             switch (flag) {
             case 'c':
                 nob_log(NOB_INFO, "clean build requested, removing build folder");
@@ -256,7 +249,7 @@ int main(int argc, char **argv)
                 break;
             case 'd':
                 nob_log(NOB_INFO, "compilation database requested (requires clang)");
-                using_comp_db = true;
+                using_clang = gen_comp_db = true;
                 break;
             case 'h':
                 log_usage(program);
@@ -272,7 +265,7 @@ int main(int argc, char **argv)
 
     cmd.count = 0;
     if (!nob_mkdir_if_not_exists("build")) return 1;
-    if (using_comp_db) {
+    if (gen_comp_db) {
         if (!nob_mkdir_if_not_exists("build/compilation_database")) return 1;
     } else {
         // test if compilation database was previously used to ensure clang
@@ -280,7 +273,7 @@ int main(int argc, char **argv)
         if (!nob_read_entire_dir("build", &paths)) return 1;
         for (size_t i = 0; i < paths.count; i++) {
             if (strstr(paths.items[i], "compile_commands.json") != 0) {
-                using_comp_db = true;
+                using_clang = true;
             }
         }
     }
@@ -318,7 +311,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (using_comp_db) {
+    if (gen_comp_db) {
         if (!create_comp_db()) return 1;
     }
 

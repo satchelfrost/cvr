@@ -185,16 +185,22 @@ typedef struct {
     int projection;
 } Camera;
 
+#define SHAPE_TYPE
+typedef enum {
+    SHAPE_CUBE = 0,
+    SHAPE_QUAD,
+    SHAPE_TETRAHEDRON,
+    SHAPE_COUNT,
+} Shape_Type;
+
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
-bool draw();
-void clear_background(Color color);
+bool draw_shape(Shape_Type shape_type);
 void begin_mode_3d(Camera camera);
 void end_mode_3d();
 bool is_key_pressed(int key);
-void poll_input_events();
-void draw_cube(Vector3 position, float width, float height, float length, Color color);
 void set_cube_color(Color color);
+void clear_background(Color color);
 
 #endif // CVR_H_

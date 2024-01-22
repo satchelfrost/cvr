@@ -2,6 +2,7 @@
 #include "ext_man.h"
 #include "vk_cmd_man.h"
 #include <vulkan/vulkan_core.h>
+#include "common.h"
 
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
@@ -12,8 +13,6 @@
 #include "geometry.h"
 #include <time.h>
 
-#define PRIMITIVE_VERTS   cube_verts
-#define PRIMITIVE_INDICES cube_indices
 #define Z_NEAR 0.01
 #define Z_FAR 1000.0
 
@@ -50,14 +49,11 @@ bool cvr_init()
     cvr_chk(create_img_views(), "failed to create image views");
     cvr_chk(create_render_pass(), "failed to create render pass");
     cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
-    cvr_chk(create_gfx_pipeline(), "failed to create graphics pipeline");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cmd_man.phys_device = ctx.phys_device;
     cmd_man.device = ctx.device;
     cmd_man.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
     cvr_chk(cmd_man_init(&cmd_man), "failed to create vulkan command manager");
-    cvr_chk(create_vtx_buffer(), "failed to create vertex buffer");
-    cvr_chk(create_idx_buffer(), "failed to create index buffer");
     cvr_chk(create_ubos(), "failed to create uniform buffer objects");
     cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
     cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
@@ -77,9 +73,14 @@ bool cvr_destroy()
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
     vkDestroyDescriptorSetLayout(ctx.device, ctx.descriptor_set_layout, NULL);
     nob_da_free(ctx.descriptor_sets);
-    vk_buff_destroy(ctx.vtx);
-    vk_buff_destroy(ctx.idx);
-    vkDestroyPipeline(ctx.device, ctx.pipeline, NULL);
+    for (size_t i = 0; i < SHAPE_COUNT; i++) {
+        if (ctx.shapes[i].vtx_buff.handle)
+            vk_buff_destroy(ctx.shapes[i].vtx_buff);
+        if (ctx.shapes[i].idx_buff.handle)
+            vk_buff_destroy(ctx.shapes[i].idx_buff);
+    }
+    vkDestroyPipeline(ctx.device, ctx.pipelines.shape, NULL);
+    ctx.pipelines.shape = NULL;
     vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layout, NULL);
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
@@ -156,6 +157,7 @@ bool create_device()
     VkDeviceCreateInfo device_ci = {0};
     device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     VkPhysicalDeviceFeatures features = {0};
+    features.fillModeNonSolid = VK_TRUE;
     device_ci.pEnabledFeatures = &features;
     device_ci.pQueueCreateInfos = queue_cis.items;
     device_ci.queueCreateInfoCount = queue_cis.count;
@@ -252,7 +254,7 @@ bool create_img_views()
     return true;
 }
 
-bool create_gfx_pipeline()
+bool create_shape_pipeline()
 {
     bool result = true;
     VkPipelineShaderStageCreateInfo vert_ci = {0};
@@ -306,11 +308,12 @@ bool create_gfx_pipeline()
 
     VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
+    // rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer_ci.polygonMode = VK_POLYGON_MODE_LINE;
     rasterizer_ci.lineWidth = 1.0f;
-    rasterizer_ci.cullMode = VK_CULL_MODE_FRONT_BIT;
+    // rasterizer_ci.cullMode = VK_CULL_MODE_FRONT_BIT;
     // rasterizer_ci.cullMode = VK_CULL_MODE_BACK_BIT;
-    // rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
+    rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
     rasterizer_ci.lineWidth = VK_FRONT_FACE_CLOCKWISE;
     // rasterizer_ci.lineWidth = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
@@ -362,7 +365,7 @@ bool create_gfx_pipeline()
     pipeline_ci.renderPass = ctx.render_pass;
     pipeline_ci.subpass = 0;
 
-    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipeline);
+    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines.shape);
     vk_chk(vk_result, "failed to create pipeline");
 
 defer:
@@ -446,7 +449,7 @@ bool create_frame_buffs()
     return true;
 }
 
-bool cvr_draw()
+bool cvr_draw_shape(Shape_Type shape_type)
 {
     bool result = true;
     VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
@@ -473,7 +476,7 @@ bool cvr_draw()
 
     vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
     vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
-    rec_cmds(img_idx, cmd_man.buffs.items[curr_frame]);
+    rec_cmds(img_idx, cmd_man.buffs.items[curr_frame], shape_type);
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -512,7 +515,7 @@ defer:
     return result;
 }
 
-bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
+bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer, Shape_Type shape_type)
 {
     bool result = true;
     VkCommandBufferBeginInfo beginInfo = {0};
@@ -533,7 +536,7 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     begin_rp.pClearValues = &clear_color;
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipeline);
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines.shape);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
     viewport.height =(float)ctx.extent.height;
@@ -543,9 +546,12 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
     scissor.extent = ctx.extent;
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
+    Vk_Buffer vtx_buff = ctx.shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = ctx.shapes[shape_type].idx_buff;
+
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &ctx.vtx.buff, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, ctx.idx.buff, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
     vkCmdBindDescriptorSets(
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -561,7 +567,7 @@ bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer)
         &core_state.cube_color
     );
 
-    vkCmdDrawIndexed(cmd_buffer, ctx.idx.count, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
@@ -593,69 +599,69 @@ defer:
     return result;
 }
 
-bool create_vtx_buffer()
+bool create_shape_vtx_buffer(Shape *shape)
 {
     bool result = true;
-    Vk_Buffer stg;
-    ctx.vtx.device = stg.device = ctx.device;
-    ctx.vtx.size   = stg.size   = sizeof(PRIMITIVE_VERTS);
-    ctx.vtx.count  = stg.count  = NOB_ARRAY_LEN(PRIMITIVE_VERTS);
+    Vk_Buffer stg_buff;
+    shape->vtx_buff.device = stg_buff.device = ctx.device;
+    shape->vtx_buff.size   = stg_buff.size   = shape->vert_size * shape->vert_count;
+    shape->vtx_buff.count  = stg_buff.count  = shape->vert_count;
     result = vk_buff_init(
-        &stg,
+        &stg_buff,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     cvr_chk(result, "failed to create staging buffer");
 
     void* data;
-    vk_chk(vkMapMemory(ctx.device, stg.buff_mem, 0, stg.size, 0, &data), "failed to map memory");
-    memcpy(data, PRIMITIVE_VERTS, stg.size);
-    vkUnmapMemory(ctx.device, stg.buff_mem);
+    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
+    memcpy(data, shape->verts, stg_buff.size);
+    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
 
     result = vk_buff_init(
-        &ctx.vtx,
+        &shape->vtx_buff,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     cvr_chk(result, "failed to create vertex buffer");
 
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg, ctx.vtx, 0);
+    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->vtx_buff, 0);
 
 defer:
-    vk_buff_destroy(stg);
+    vk_buff_destroy(stg_buff);
     return result;
 }
 
-bool create_idx_buffer()
+bool create_shape_idx_buffer(Shape *shape)
 {
     bool result = true;
-    Vk_Buffer stg;
-    ctx.idx.device = stg.device = ctx.device;
-    ctx.idx.size   = stg.size   = sizeof(PRIMITIVE_INDICES);
-    ctx.idx.count  = stg.count  = NOB_ARRAY_LEN(PRIMITIVE_INDICES);
+    Vk_Buffer stg_buff;
+    shape->idx_buff.device = stg_buff.device = ctx.device;
+    shape->idx_buff.size   = stg_buff.size   = shape->idx_size * shape->idx_count;
+    shape->idx_buff.count  = stg_buff.count  = shape->idx_count;
     result = vk_buff_init(
-        &stg,
+        &stg_buff,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     cvr_chk(result, "failed to create staging buffer");
 
     void* data;
-    vk_chk(vkMapMemory(ctx.device, stg.buff_mem, 0, stg.size, 0, &data), "failed to map memory");
-    memcpy(data, PRIMITIVE_INDICES, stg.size);
-    vkUnmapMemory(ctx.device, stg.buff_mem);
+    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
+    memcpy(data, shape->idxs, stg_buff.size);
+    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
 
     result = vk_buff_init(
-        &ctx.idx,
+        &shape->idx_buff,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     cvr_chk(result, "failed to create index buffer");
 
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg, ctx.idx, 0);
+    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->idx_buff, 0);
 
 defer:
-    vk_buff_destroy(stg);
+    vk_buff_destroy(stg_buff);
     return result;
 
 }
@@ -703,10 +709,9 @@ void update_ubos(uint32_t curr_image)
     double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 
     Matrix model = MatrixRotateZ(PI / 4);
-    // Matrix model = MatrixRotateY(-time_spent * 2.0f);
-    // Matrix model = MatrixTranslate(-4.0, 0.0f, 2.0f);
     model = MatrixMultiply(model, MatrixRotateY(-time_spent * 0.5f));
-    model = MatrixMultiply(MatrixScale(2.0f, 2.0f, 7.0f), model);
+    // model = MatrixMultiply(MatrixScale(2.0f, 2.0f, 7.0f), model);
+
     Matrix view  = MatrixLookAt(core_state.camera.position, core_state.camera.target, core_state.camera.up);
 
     Matrix proj = {0};
@@ -772,7 +777,7 @@ bool create_descriptor_sets()
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo buff_info = {0};
-        buff_info.buffer = ctx.ubos.items[i].buff;
+        buff_info.buffer = ctx.ubos.items[i].handle;
         buff_info.offset = 0;
         buff_info.range = sizeof(UBO);
 
@@ -1022,4 +1027,46 @@ void close_window()
     cvr_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
+}
+
+bool alloc_shape_res(Shape_Type shape_type)
+{
+    bool result = true;
+
+    if (is_shape_res_alloc(shape_type)) {
+        nob_log(NOB_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
+        nob_return_defer(false);
+    }
+
+    Shape *shape = &ctx.shapes[shape_type];
+    switch (shape_type) {
+#define X(CONST_NAME, array_name)                        \
+    case SHAPE_ ## CONST_NAME:                           \
+    shape->vert_count = CONST_NAME ## _VERTS;            \
+    shape->vert_size = sizeof(array_name ## _verts[0]);  \
+    shape->verts = array_name ## _verts;                 \
+    shape->idx_count = CONST_NAME ## _IDXS;              \
+    shape->idx_size = sizeof(array_name ## _indices[0]); \
+    shape->idxs = array_name ## _indices;                \
+    break;
+    SHAPE_LIST
+#undef X
+    default:
+        nob_log(NOB_ERROR, "unrecognized shape %d", shape_type);
+        nob_return_defer(false);
+    }
+
+    if ((!create_shape_vtx_buffer(shape)) || (!create_shape_idx_buffer(shape))) {
+        nob_log(NOB_ERROR, "failed to allocate resources for shape %d", shape_type);
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
+bool is_shape_res_alloc(Shape_Type shape_type)
+{
+    assert((shape_type >= 0 && shape_type < SHAPE_COUNT) && "invalid shape");
+    return (ctx.shapes[shape_type].vtx_buff.handle || ctx.shapes[shape_type].idx_buff.handle);
 }

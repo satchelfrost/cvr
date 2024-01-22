@@ -3,15 +3,18 @@
 #define FOVY_PERSPECTIVE    45.0f
 #define WIDTH_ORTHOGRAPHIC  10.0f
 
+
 int main()
 {
     Camera camera = {
-        .position   = {0.0f, 0.0f, 10.0f},
+        .position   = {0.0f, 0.0f, 5.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = FOVY_PERSPECTIVE,
         .projection = PERSPECTIVE,
     };
+
+    Shape_Type shape = SHAPE_CUBE;
 
     init_window(800, 600, "Spinning Shapes");
     clear_background(BLUE);
@@ -28,8 +31,10 @@ int main()
             }
         }
 
+        if (is_key_pressed(KEY_C)) shape = (shape + 1) % SHAPE_COUNT;
+
         begin_mode_3d(camera);
-            draw();
+            draw_shape(shape);
         end_mode_3d();
     }
     close_window();
