@@ -1,6 +1,7 @@
 #include "cvr.h"
 #include "ext_man.h"
 #include "vk_cmd_man.h"
+#include <stdint.h>
 #include <vulkan/vulkan_core.h>
 #include "common.h"
 
@@ -23,6 +24,7 @@ extern Ext_Manager ext_manager;
 
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
+static uint32_t img_idx = 0;
 static clock_t time_begin;
 
 typedef struct {
@@ -452,70 +454,11 @@ bool create_frame_buffs()
 bool cvr_draw_shape(Shape_Type shape_type)
 {
     bool result = true;
-    VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
-    vk_chk(vk_result, "failed to wait for fences");
-
-    uint32_t img_idx = 0;
-    vk_result = vkAcquireNextImageKHR(ctx.device,
-        ctx.swpchain.handle,
-        UINT64_MAX,
-        cmd_man.img_avail_sems.items[curr_frame],
-        VK_NULL_HANDLE,
-        &img_idx
-    );
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
-        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
-    } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
-        nob_log(NOB_ERROR, "failed to acquire swapchain image");
-        nob_return_defer(false);
-    } else if (vk_result == VK_SUBOPTIMAL_KHR) {
-        nob_log(NOB_WARNING, "suboptimal swapchain image");
-    }
-
-    update_ubos(curr_frame);
-
-    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
-    vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
-    rec_cmds(img_idx, cmd_man.buffs.items[curr_frame], shape_type);
-
-    VkSubmitInfo submit = {0};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &cmd_man.img_avail_sems.items[curr_frame];
-    submit.pWaitDstStageMask = wait_stages;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd_man.buffs.items[curr_frame];
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
-
-    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fences.items[curr_frame]), "failed to submit command");
-
-    VkPresentInfoKHR present = {0};
-    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
-    present.swapchainCount = 1;
-    present.pSwapchains = &ctx.swpchain.handle;
-    present.pImageIndices = &img_idx;
-
-    vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swpchain.buff_resized) {
-        ctx.swpchain.buff_resized = false;
-        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
-    } else if (!vk_ok(vk_result)) {
-        nob_log(NOB_ERROR, "failed to present queue");
-        nob_return_defer(false);
-    }
-
-    curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-
-defer:
+    rec_cmds(cmd_man.buffs.items[curr_frame], shape_type);
     return result;
 }
 
-bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer, Shape_Type shape_type)
+bool rec_cmds(VkCommandBuffer cmd_buffer, Shape_Type shape_type)
 {
     bool result = true;
     VkCommandBufferBeginInfo beginInfo = {0};
@@ -1069,4 +1012,76 @@ bool is_shape_res_alloc(Shape_Type shape_type)
 {
     assert((shape_type >= 0 && shape_type < SHAPE_COUNT) && "invalid shape");
     return (ctx.shapes[shape_type].vtx_buff.handle || ctx.shapes[shape_type].idx_buff.handle);
+}
+
+bool begin_draw()
+{
+    bool result = true;
+    VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
+    vk_chk(vk_result, "failed to wait for fences");
+
+    vk_result = vkAcquireNextImageKHR(ctx.device,
+        ctx.swpchain.handle,
+        UINT64_MAX,
+        cmd_man.img_avail_sems.items[curr_frame],
+        VK_NULL_HANDLE,
+        &img_idx
+    );
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
+        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
+        nob_log(NOB_ERROR, "failed to acquire swapchain image");
+        nob_return_defer(false);
+    } else if (vk_result == VK_SUBOPTIMAL_KHR) {
+        nob_log(NOB_WARNING, "suboptimal swapchain image");
+    }
+
+    update_ubos(curr_frame);
+
+    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
+    vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
+
+defer:
+    return result;
+}
+
+bool end_draw()
+{
+    bool result = true;
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = &cmd_man.img_avail_sems.items[curr_frame];
+    submit.pWaitDstStageMask = wait_stages;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd_man.buffs.items[curr_frame];
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
+
+    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fences.items[curr_frame]), "failed to submit command");
+
+    VkPresentInfoKHR present = {0};
+    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
+    present.swapchainCount = 1;
+    present.pSwapchains = &ctx.swpchain.handle;
+    present.pImageIndices = &img_idx;
+
+    VkResult vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swpchain.buff_resized) {
+        ctx.swpchain.buff_resized = false;
+        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!vk_ok(vk_result)) {
+        nob_log(NOB_ERROR, "failed to present queue");
+        nob_return_defer(false);
+    }
+
+    curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+defer:
+    return result;
 }

@@ -70,10 +70,12 @@ void clear_background(Color color)
 void begin_mode_3d(Camera camera)
 {
     core_state.camera = camera;
+    begin_draw();
 }
 
 void end_mode_3d()
 {
+    end_draw();
     poll_input_events();
 }
 

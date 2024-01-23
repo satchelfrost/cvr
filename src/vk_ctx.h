@@ -6,6 +6,7 @@
 #include "vertex.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
+#include <sys/types.h>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -96,8 +97,17 @@ bool create_ubos();
 void update_ubos(uint32_t curr_frame);
 bool create_descriptor_pool();
 bool create_descriptor_sets();
+
+/* Manages synchronization info and gets ready for vulkan commands.
+ * Returns true if succeeded and false otherwise */
+bool begin_draw();
+
+/* Submits vulkan commands.
+ * Returns true if succeeded and false otherwise */
+bool end_draw();
+
 bool cvr_draw_shape(Shape_Type shape_type);
-bool rec_cmds(uint32_t img_idx, VkCommandBuffer cmd_buffer, Shape_Type shape_type);
+bool rec_cmds(VkCommandBuffer cmd_buffer, Shape_Type shape_type);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
