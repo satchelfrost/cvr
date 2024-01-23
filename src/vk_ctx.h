@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -106,8 +107,7 @@ bool begin_draw();
  * Returns true if succeeded and false otherwise */
 bool end_draw();
 
-bool cvr_draw_shape(Shape_Type shape_type);
-bool rec_cmds(VkCommandBuffer cmd_buffer, Shape_Type shape_type);
+bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);

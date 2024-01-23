@@ -1,5 +1,6 @@
 #include "cvr.h"
 #include "vk_ctx.h"
+#include <time.h>
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
@@ -22,6 +23,7 @@ typedef struct {
 Keyboard keyboard = {0};
 extern Core_State core_state;
 extern Vk_Context ctx;
+static clock_t time_begin;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void poll_input_events();
@@ -40,6 +42,8 @@ bool init_window(int width, int height, const char *title)
 
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
 
+    time_begin = clock();
+
 defer:
     return result;
 }
@@ -51,12 +55,12 @@ bool window_should_close()
     return result;
 }
 
-bool draw_shape(Shape_Type shape_type)
+bool draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
 {
     bool result = true;
     if (!ctx.pipelines.shape) create_shape_pipeline();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
-    cvr_chk(cvr_draw_shape(shape_type), "failed to draw frame");
+    cvr_chk(cvr_draw_shape(shape_type, matrices, count), "failed to draw frame");
 
 defer:
     return result;
@@ -129,4 +133,10 @@ void set_cube_color(Color color)
     core_state.cube_color.x = color.r / (float)255.0f;
     core_state.cube_color.y = color.g / (float)255.0f;
     core_state.cube_color.z = color.b / (float)255.0f;
+}
+
+double get_time()
+{
+    clock_t curr_time = clock();
+    return (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 }

@@ -2,6 +2,7 @@
 #define CVR_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -193,14 +194,23 @@ typedef enum {
     SHAPE_COUNT,
 } Shape_Type;
 
+#define RL_MATRIX_TYPE
+typedef struct Matrix {
+    float m0, m4, m8, m12;      // Matrix first row (4 components)
+    float m1, m5, m9, m13;      // Matrix second row (4 components)
+    float m2, m6, m10, m14;     // Matrix third row (4 components)
+    float m3, m7, m11, m15;     // Matrix fourth row (4 components)
+} Matrix;
+
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
-bool draw_shape(Shape_Type shape_type);
-void begin_mode_3d(Camera camera);
-void end_mode_3d();
+bool draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count);                     /* Draws the specified shape */
+void begin_mode_3d(Camera camera);                          /* Sets camera and gets vulkan ready for commands */
+void end_mode_3d();                                         /* Submits commands, presents, and polls for input */
 bool is_key_pressed(int key);
 void set_cube_color(Color color);
 void clear_background(Color color);
+double get_time();
 
 #endif // CVR_H_

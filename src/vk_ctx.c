@@ -340,7 +340,7 @@ bool create_shape_pipeline()
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
-        .size = sizeof(Vector3),
+        .size = sizeof(float16),
     };
     pipeline_layout_ci.pPushConstantRanges = &pk_range;
     pipeline_layout_ci.pushConstantRangeCount = 1;
@@ -451,16 +451,11 @@ bool create_frame_buffs()
     return true;
 }
 
-bool cvr_draw_shape(Shape_Type shape_type)
+bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
 {
     bool result = true;
-    rec_cmds(cmd_man.buffs.items[curr_frame], shape_type);
-    return result;
-}
+    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
 
-bool rec_cmds(VkCommandBuffer cmd_buffer, Shape_Type shape_type)
-{
-    bool result = true;
     VkCommandBufferBeginInfo beginInfo = {0};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vk_chk(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
@@ -501,19 +496,116 @@ bool rec_cmds(VkCommandBuffer cmd_buffer, Shape_Type shape_type)
         ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
     );
 
-    vkCmdPushConstants(
-        cmd_buffer,
-        ctx.pipeline_layout,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(Vector3),
-        &core_state.cube_color
-    );
+    Matrix view  = MatrixLookAt(core_state.camera.position, core_state.camera.target, core_state.camera.up);
+    Matrix proj = {0};
+    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double top = core_state.camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (core_state.camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(core_state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
 
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    proj.m5 *= -1.0f;
+
+    Matrix viewProj = MatrixMultiply(view, proj);
+
+    for (size_t i = 0; i < count; i++) {
+        Matrix mvp = MatrixMultiply(matrices[i], viewProj);
+        float16 mat = MatrixToFloatV(mvp);
+        vkCmdPushConstants(
+            cmd_buffer,
+            ctx.pipeline_layout,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0,
+            sizeof(float16),
+            &mat
+        );
+
+        vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
+
+defer:
+    return result;
+}
+
+bool begin_draw()
+{
+    bool result = true;
+    VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
+    vk_chk(vk_result, "failed to wait for fences");
+
+    vk_result = vkAcquireNextImageKHR(ctx.device,
+        ctx.swpchain.handle,
+        UINT64_MAX,
+        cmd_man.img_avail_sems.items[curr_frame],
+        VK_NULL_HANDLE,
+        &img_idx
+    );
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
+        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
+        nob_log(NOB_ERROR, "failed to acquire swapchain image");
+        nob_return_defer(false);
+    } else if (vk_result == VK_SUBOPTIMAL_KHR) {
+        nob_log(NOB_WARNING, "suboptimal swapchain image");
+    }
+
+    update_ubos(curr_frame);
+
+    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
+    vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
+
+defer:
+    return result;
+}
+
+bool end_draw()
+{
+    bool result = true;
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = &cmd_man.img_avail_sems.items[curr_frame];
+    submit.pWaitDstStageMask = wait_stages;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd_man.buffs.items[curr_frame];
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
+
+    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fences.items[curr_frame]), "failed to submit command");
+
+    VkPresentInfoKHR present = {0};
+    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
+    present.swapchainCount = 1;
+    present.pSwapchains = &ctx.swpchain.handle;
+    present.pImageIndices = &img_idx;
+
+    VkResult vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swpchain.buff_resized) {
+        ctx.swpchain.buff_resized = false;
+        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+    } else if (!vk_ok(vk_result)) {
+        nob_log(NOB_ERROR, "failed to present queue");
+        nob_return_defer(false);
+    }
+
+    curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
 defer:
     return result;
@@ -653,7 +745,7 @@ void update_ubos(uint32_t curr_image)
 
     Matrix model = MatrixRotateZ(PI / 4);
     model = MatrixMultiply(model, MatrixRotateY(-time_spent * 0.5f));
-    // model = MatrixMultiply(MatrixScale(2.0f, 2.0f, 7.0f), model);
+    // model = MatrixMultiply(MatrixScale(2.0f, 2.0f, 3.0f), model);
 
     Matrix view  = MatrixLookAt(core_state.camera.position, core_state.camera.target, core_state.camera.up);
 
@@ -1012,76 +1104,4 @@ bool is_shape_res_alloc(Shape_Type shape_type)
 {
     assert((shape_type >= 0 && shape_type < SHAPE_COUNT) && "invalid shape");
     return (ctx.shapes[shape_type].vtx_buff.handle || ctx.shapes[shape_type].idx_buff.handle);
-}
-
-bool begin_draw()
-{
-    bool result = true;
-    VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
-    vk_chk(vk_result, "failed to wait for fences");
-
-    vk_result = vkAcquireNextImageKHR(ctx.device,
-        ctx.swpchain.handle,
-        UINT64_MAX,
-        cmd_man.img_avail_sems.items[curr_frame],
-        VK_NULL_HANDLE,
-        &img_idx
-    );
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
-        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
-    } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
-        nob_log(NOB_ERROR, "failed to acquire swapchain image");
-        nob_return_defer(false);
-    } else if (vk_result == VK_SUBOPTIMAL_KHR) {
-        nob_log(NOB_WARNING, "suboptimal swapchain image");
-    }
-
-    update_ubos(curr_frame);
-
-    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
-    vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
-
-defer:
-    return result;
-}
-
-bool end_draw()
-{
-    bool result = true;
-
-    VkSubmitInfo submit = {0};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &cmd_man.img_avail_sems.items[curr_frame];
-    submit.pWaitDstStageMask = wait_stages;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd_man.buffs.items[curr_frame];
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
-
-    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fences.items[curr_frame]), "failed to submit command");
-
-    VkPresentInfoKHR present = {0};
-    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
-    present.swapchainCount = 1;
-    present.pSwapchains = &ctx.swpchain.handle;
-    present.pImageIndices = &img_idx;
-
-    VkResult vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swpchain.buff_resized) {
-        ctx.swpchain.buff_resized = false;
-        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
-    } else if (!vk_ok(vk_result)) {
-        nob_log(NOB_ERROR, "failed to present queue");
-        nob_return_defer(false);
-    }
-
-    curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-
-defer:
-    return result;
 }
