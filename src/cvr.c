@@ -68,7 +68,7 @@ defer:
 
 void clear_background(Color color)
 {
-    core_state.clear_color = color;
+    begin_render_pass(color);
 }
 
 void begin_mode_3d(Camera camera)
@@ -93,6 +93,17 @@ bool is_key_pressed(int key)
     }
 
     return pressed;
+}
+
+bool is_key_down(int key)
+{
+    bool down = false;
+
+    if ((key > 0) && (key < MAX_KEYBOARD_KEYS)) {
+        if (keyboard.curr_key_state[key] == 1) down = true;
+    }
+
+    return down;
 }
 
 void poll_input_events()

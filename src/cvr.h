@@ -43,6 +43,7 @@
 #define BLACK      (Color){ 0, 0, 0, 255 }
 #define BLANK      (Color){ 0, 0, 0, 0 }
 #define MAGENTA    (Color){ 255, 0, 255, 255 }
+#define RAYWHITE   (Color){ 245, 245, 245, 255 }
 
 #define CVR_COLOR
 typedef struct Color {
@@ -150,7 +151,7 @@ typedef enum {
     KEY_KP_5            = 325,
     KEY_KP_6            = 326,
     KEY_KP_7            = 327,
-KEY_KP_8            = 328,
+    KEY_KP_8            = 328,
     KEY_KP_9            = 329,
     KEY_KP_DECIMAL      = 330,
     KEY_KP_DIVIDE       = 331,
@@ -209,7 +210,7 @@ bool draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count);   
 void begin_mode_3d(Camera camera);                          /* Sets camera and gets vulkan ready for commands */
 void end_mode_3d();                                         /* Submits commands, presents, and polls for input */
 bool is_key_pressed(int key);
-void set_cube_color(Color color);
+bool is_key_down(int key);
 void clear_background(Color color);
 double get_time();
 

@@ -451,14 +451,9 @@ bool create_frame_buffs()
     return true;
 }
 
-bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
+void begin_render_pass(Color color)
 {
-    bool result = true;
     VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
-
-    VkCommandBufferBeginInfo beginInfo = {0};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vk_chk(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
 
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -466,13 +461,20 @@ bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
     begin_rp.framebuffer = ctx.swpchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = ctx.extent;
     VkClearValue clear_color = {0};
-    clear_color.color.float32[0] = core_state.clear_color.r / 255.0f;
-    clear_color.color.float32[1] = core_state.clear_color.g / 255.0f;
-    clear_color.color.float32[2] = core_state.clear_color.b / 255.0f;
-    clear_color.color.float32[3] = core_state.clear_color.a / 255.0f;
+    clear_color.color.float32[0] = color.r / 255.0f;
+    clear_color.color.float32[1] = color.g / 255.0f;
+    clear_color.color.float32[2] = color.b / 255.0f;
+    clear_color.color.float32[3] = color.a / 255.0f;
     begin_rp.clearValueCount = 1;
     begin_rp.pClearValues = &clear_color;
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
+{
+    bool result = true;
+
+    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
 
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines.shape);
     VkViewport viewport = {0};
@@ -532,10 +534,6 @@ bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
         vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
     }
 
-    vkCmdEndRenderPass(cmd_buffer);
-    vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
-
-defer:
     return result;
 }
 
@@ -566,6 +564,11 @@ bool begin_draw()
     vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
     vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
 
+    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+    VkCommandBufferBeginInfo beginInfo = {0};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    vk_chk(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
+
 defer:
     return result;
 }
@@ -573,6 +576,10 @@ defer:
 bool end_draw()
 {
     bool result = true;
+
+    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+    vkCmdEndRenderPass(cmd_buffer);
+    vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
 
     VkSubmitInfo submit = {0};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

@@ -126,6 +126,7 @@ void cleanup_swpchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 void frame_buff_resized(GLFWwindow* window, int width, int height);
 bool is_shape_res_alloc(Shape_Type shape_type);
+void begin_render_pass(Color color);
 
 #ifndef CVR_CAMERA
 typedef struct {
