@@ -14,6 +14,7 @@ typedef struct {
 
 Matrices matrices = {0};
 Color bg = BLUE;
+Shape_Type shape = SHAPE_CUBE;
 
 int main()
 {
@@ -24,8 +25,6 @@ int main()
         .fovy       = FOVY_PERSPECTIVE,
         .projection = PERSPECTIVE,
     };
-
-    Shape_Type shape = SHAPE_CUBE;
 
     init_window(800, 600, "Spinning Shapes");
     while (!window_should_close()) {
