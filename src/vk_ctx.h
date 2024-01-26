@@ -107,7 +107,7 @@ bool begin_draw();
  * Returns true if succeeded and false otherwise */
 bool end_draw();
 
-bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count);
+bool cvr_draw_shape(Shape_Type shape_type);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
@@ -126,6 +126,16 @@ void cleanup_swpchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 void frame_buff_resized(GLFWwindow* window, int width, int height);
 bool is_shape_res_alloc(Shape_Type shape_type);
+bool cvr_push_matrix();
+bool cvr_pop_matrix();
+bool cvr_translate(float x, float y, float z);
+bool cvr_rotate(Vector3 axis, float angle);
+bool cvr_rotate_x(float angle);
+bool cvr_rotate_y(float angle);
+bool cvr_rotate_z(float angle);
+bool cvr_rotate_xyz(Vector3 angle);
+bool cvr_rotate_zyx(Vector3 angle);
+bool cvr_scale(float x, float y, float z);
 
 #ifndef CVR_CAMERA
 typedef struct {

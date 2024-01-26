@@ -22,6 +22,10 @@ Core_State core_state = {0};
 static Vk_Cmd_Man cmd_man = {0};
 extern Ext_Manager ext_manager;
 
+#define MAX_MAT_STACK 1024 * 1024
+Matrix mat_stack[MAX_MAT_STACK];
+size_t mat_stack_p = 0;
+
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
 static uint32_t img_idx = 0;
@@ -470,7 +474,7 @@ void begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
+bool cvr_draw_shape(Shape_Type shape_type)
 {
     bool result = true;
 
@@ -519,20 +523,23 @@ bool cvr_draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count)
 
     Matrix viewProj = MatrixMultiply(view, proj);
 
-    for (size_t i = 0; i < count; i++) {
-        Matrix mvp = MatrixMultiply(matrices[i], viewProj);
-        float16 mat = MatrixToFloatV(mvp);
-        vkCmdPushConstants(
-            cmd_buffer,
-            ctx.pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0,
-            sizeof(float16),
-            &mat
-        );
+    // flatten matrix stack
+    Matrix model = MatrixIdentity();
+    for (size_t i = 0; i < mat_stack_p; i++)
+        model = MatrixMultiply(mat_stack[i], model);
 
-        vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
-    }
+    Matrix mvp = MatrixMultiply(model, viewProj);
+    float16 mat = MatrixToFloatV(mvp);
+    vkCmdPushConstants(
+        cmd_buffer,
+        ctx.pipeline_layout,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(float16),
+        &mat
+    );
+
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 
     return result;
 }
@@ -1111,4 +1118,94 @@ bool is_shape_res_alloc(Shape_Type shape_type)
 {
     assert((shape_type >= 0 && shape_type < SHAPE_COUNT) && "invalid shape");
     return (ctx.shapes[shape_type].vtx_buff.handle || ctx.shapes[shape_type].idx_buff.handle);
+}
+
+bool cvr_push_matrix()
+{
+    if (mat_stack_p < MAX_MAT_STACK)
+        mat_stack[mat_stack_p++] = MatrixIdentity();
+    else
+        return false;
+    return true;
+}
+
+bool cvr_pop_matrix()
+{
+    if (mat_stack_p > 0)
+        mat_stack_p--;
+    else
+        return false;
+    return true;
+}
+
+bool cvr_translate(float x, float y, float z)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixTranslate(x, y, z), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_rotate(Vector3 axis, float angle)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotate(axis, angle), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_rotate_x(float angle)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateX(angle), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_rotate_y(float angle)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateY(angle), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_rotate_z(float angle)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZ(angle), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_rotate_xyz(Vector3 angle)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateXYZ(angle), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_rotate_zyx(Vector3 angle)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZYX(angle), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
+}
+
+bool cvr_scale(float x, float y, float z)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixScale(x, y, z), mat_stack[mat_stack_p - 1]);
+    else
+      return false;
+    return true;
 }

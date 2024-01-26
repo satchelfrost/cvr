@@ -2,7 +2,6 @@
 #define CVR_H_
 
 #include <stdbool.h>
-#include <stddef.h>
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -206,12 +205,23 @@ typedef struct Matrix {
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
-bool draw_shape(Shape_Type shape_type, const Matrix *matrices, size_t count);                     /* Draws the specified shape */
+bool draw_shape(Shape_Type shape_type);
 void begin_mode_3d(Camera camera);                          /* Sets camera and gets vulkan ready for commands */
 void end_mode_3d();                                         /* Submits commands, presents, and polls for input */
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 void clear_background(Color color);
 double get_time();
+
+void push_matrix();
+void pop_matrix();
+void translate(float x, float y, float z);
+void rotate(Vector3 axis, float angle);
+void rotate_x(float angle);
+void rotate_y(float angle);
+void rotate_z(float angle);
+void rotate_xyz(Vector3 angle);
+void rotate_zyx(Vector3 angle);
+void scale(float x, float y, float z);
 
 #endif // CVR_H_
