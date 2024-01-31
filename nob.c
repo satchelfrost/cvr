@@ -38,6 +38,28 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         }
     },
+    {
+        .name = "orthographic",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
+    {
+        .name = "psychedelic",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
 };
 
 static const char *cvr[] = {
@@ -193,10 +215,19 @@ defer:
 
 void log_usage(const char *program)
 {
-    nob_log(NOB_ERROR, "usage: %s <flags> <optional_input>", program);
-    nob_log(NOB_ERROR, "    -c clean build");
-    nob_log(NOB_ERROR, "    -e <example_name> optional example");
-    nob_log(NOB_ERROR, "    -d generate compilation database (requires clang)");
+    nob_log(NOB_INFO, "usage: %s <flags> <optional_input>", program);
+    nob_log(NOB_INFO, "    -c clean build");
+    nob_log(NOB_INFO, "    -e <example_name> optional example");
+    nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
+    nob_log(NOB_INFO, "    -l list available examples");
+}
+
+void print_examples()
+{
+    nob_log(NOB_INFO, "run example with: ./nob -e <example name>");
+    nob_log(NOB_INFO, "Listing available examples:");
+    for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++)
+        nob_log(NOB_INFO, "    %s", examples[i].name);
 }
 
 bool create_comp_db()
@@ -253,7 +284,11 @@ int main(int argc, char **argv)
                 break;
             case 'h':
                 log_usage(program);
-                return 1;
+                return 0;
+                break;
+            case 'l':
+                print_examples();
+                return 0;
                 break;
             default:
                 nob_log(NOB_ERROR, "unrecognized flag %c", flag);

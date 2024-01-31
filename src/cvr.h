@@ -223,5 +223,6 @@ void rotate_z(float angle);
 void rotate_xyz(Vector3 angle);
 void rotate_zyx(Vector3 angle);
 void scale(float x, float y, float z);
+void enable_point_topology();
 
 #endif // CVR_H_

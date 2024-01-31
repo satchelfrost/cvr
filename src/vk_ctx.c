@@ -297,7 +297,7 @@ bool create_shape_pipeline()
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {0};
     input_assembly_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    input_assembly_ci.topology = core_state.topology;
 
     VkViewport viewport = {0};
     viewport.width = (float) ctx.extent.width;

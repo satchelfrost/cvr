@@ -7,6 +7,7 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
 #include <sys/types.h>
+#include <vulkan/vulkan_core.h>
 
 
 #define GLFW_INCLUDE_VULKAN
@@ -162,6 +163,7 @@ typedef struct {
     Color clear_color;
     Vector3 cube_color;
     Camera camera;
+    VkPrimitiveTopology topology;
 } Core_State;
 
 #endif // VK_CTX_H_

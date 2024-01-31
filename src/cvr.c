@@ -1,6 +1,7 @@
 #include "cvr.h"
 #include "vk_ctx.h"
 #include <time.h>
+#include <vulkan/vulkan_core.h>
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
@@ -43,6 +44,9 @@ bool init_window(int width, int height, const char *title)
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
 
     time_begin = clock();
+
+    /* Set the default topology to triangle list */
+    core_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
 defer:
     return result;
@@ -200,4 +204,9 @@ void rotate_zyx(Vector3 angle)
 void scale(float x, float y, float z)
 {
     if (!cvr_scale(x, y, z)) nob_log(NOB_ERROR, "no matrix available to scale");
+}
+
+void enable_point_topology()
+{
+    core_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 }
