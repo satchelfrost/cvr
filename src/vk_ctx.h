@@ -83,7 +83,7 @@ bool create_swpchain();
 bool create_img_views();
 bool create_descriptor_set_layout();
 bool create_shape_pipeline();
-bool create_shader_module(const char *shader, VkShaderModule *module);
+bool create_shader_module(const char *file_name, VkShaderModule *module);
 bool create_render_pass();
 bool create_frame_buffs();
 bool recreate_swpchain();

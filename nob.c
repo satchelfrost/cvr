@@ -268,7 +268,7 @@ int main(int argc, char **argv)
             switch (flag) {
             case 'c':
                 nob_log(NOB_INFO, "clean build requested, removing build folder");
-                nob_cmd_append(&cmd, "rm", "build", "-r");
+                nob_cmd_append(&cmd, "rm", "build", "-rf");
                 if (!nob_cmd_run_sync(cmd)) return 1;
                 break;
             case 'e':
@@ -332,7 +332,16 @@ int main(int argc, char **argv)
         if (!build_example(&examples[i])) return 1;
         if (!compile_shaders(example_path, examples[i].shaders)) return 1;
 
-        /* run example after building */
+        /* Linux only - for development convenience, run-after-building requires symbolic link */
+        nob_cmd_append(&cmd, "rm", "shaders", "-f");
+        if (!nob_cmd_run_sync(cmd)) return 1;
+        cmd.count = 0;
+        const char *shader_path = nob_temp_sprintf("./build/%s/shaders", example_path);
+        nob_cmd_append(&cmd, "ln", "-sf", shader_path, "shaders");
+        if (!nob_cmd_run_sync(cmd)) return 1;
+        cmd.count = 0;
+
+        /* Linx only - run example after building */
         nob_log(NOB_INFO, "running example %s", example);
         const char *build_path = nob_temp_sprintf("build/%s/%s", example_path, examples[i].name);
         nob_cmd_append(&cmd, build_path);

@@ -267,14 +267,14 @@ bool create_shape_pipeline()
     vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vert_ci.pName = "main";
-    if (!create_shader_module("./build/examples/3d-primitives/shaders/shader.vert.spv", &vert_ci.module))
+    if (!create_shader_module("./shaders/shader.vert.spv", &vert_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo frag_ci = {0};
     frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_ci.pName = "main";
-    if (!create_shader_module("./build/examples/3d-primitives/shaders/shader.frag.spv", &frag_ci.module))
+    if (!create_shader_module("./shaders/shader.frag.spv", &frag_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
@@ -381,18 +381,18 @@ defer:
     return result;
 }
 
-bool create_shader_module(const char *shader, VkShaderModule *module)
+bool create_shader_module(const char *file_name, VkShaderModule *module)
 {
     bool result = true;
     Nob_String_Builder sb = {};
-    char *err_msg = nob_temp_sprintf("failed to read entire file %s", shader);
-    cvr_chk(nob_read_entire_file(shader, &sb), err_msg);
+    char *err_msg = nob_temp_sprintf("failed to read entire file %s", file_name);
+    cvr_chk(nob_read_entire_file(file_name, &sb), err_msg);
 
     VkShaderModuleCreateInfo module_ci = {0};
     module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     module_ci.codeSize = sb.count;
     module_ci.pCode = (const uint32_t *)sb.items;
-    err_msg = nob_temp_sprintf("failed to create shader module from %s", shader);
+    err_msg = nob_temp_sprintf("failed to create shader module from %s", file_name);
     vk_chk(vkCreateShaderModule(ctx.device, &module_ci, NULL, module), err_msg);
 
 defer:
