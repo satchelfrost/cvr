@@ -1,7 +1,22 @@
 # C Vulkan Renderer
-Currently only supports Linux and draws a primitive
+> **__NOTE:__** Currently only supports Linux
 
-## Dependencies
+C Vulkan Renderer (or simply cvr) is a framework very similar to [raylib](https://github.com/raysan5/raylib), but using Vulkan instead of OpenGL. The API tries to emulate raylib in its simplicity, while making any modifications that might be necessary for Vulkan; or things I deem to be convenient at any given time.
+
+**What this project is not**:
+* This is not a Vulkan backend for raylib.
+    - cvr and raylib are separate projects with different goals. Creating a Vulkan backend for raylib would likely be a pain, and I'm not even sure the original creator would want to go in that direction in the first place. This project exists soley to answer questions like: "What if raylib supported Vulkan?", "What would that look like?", and "Would it make Vulkan easier to use?".
+* This project is not even close to a drop-in replacement for raylib.
+    - Over time this will become less true, but it's probably best to keep your expectations low. This is really just an on-going experiment for fun.
+
+**Goals of the project**:
+* The ability to iterate fast, and test out different ideas in Vulkan.
+* Basic examples like Phong lighting, and skinned animation (currently not implemented).
+* Simplicity.
+    - I don't want too many layers of indirection from the API to the actual implementation. You should still be able to look at the Vulkan implementation without going blind (at least thats the hope).
+
+
+## Required libraries for building
 
 Vulkan & GLFW
 
@@ -25,6 +40,23 @@ cc -o nob nob.c
 and you never need to directly build it again. Even if you make changes to `nob.c`, that will be detected and nob will recompile itself.
 
 For usage options of this project type the following command
+```bash
+./nob -h
+```
+
+## Running an example:
+To list available examples run the following:
+```bash
+./nob -l
+```
+To build and run an example use the `-e` flag, e.g.:
+```bash
+./nob -e psychedelic
+```
+
+![](examples/psychedelic/psychedelic.gif)
+
+For more up to date commands see `-h` flag
 ```bash
 ./nob -h
 ```

@@ -13,7 +13,7 @@
  *
  *  In some cases (especially constants, enumerations, and structs), there is little difference aside from 
  *  naming conventions. On the other hand, while the API names may be the same or similar, the implementation
- *  of cvr is completely different from the raylib core (see more in cvr_core.c). This is mainly due
+ *  of cvr is completely different from the raylib implementation. This is mainly due
  *  to Vulkan being the primary backend, but also the scope and aims of this project being much smaller.
  */
 
