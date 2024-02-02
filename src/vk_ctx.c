@@ -455,7 +455,7 @@ bool create_frame_buffs()
     return true;
 }
 
-void begin_render_pass(Color color)
+void cvr_begin_render_pass(Color color)
 {
     VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
 
@@ -502,33 +502,14 @@ bool cvr_draw_shape(Shape_Type shape_type)
         ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
     );
 
-    Matrix view  = MatrixLookAt(core_state.camera.position, core_state.camera.target, core_state.camera.up);
-    Matrix proj = {0};
-    double aspect = ctx.extent.width / (double) ctx.extent.height;
-    double top = core_state.camera.fovy / 2.0;
-    double right = top * aspect;
-    switch (core_state.camera.projection) {
-    case PERSPECTIVE:
-        proj  = MatrixPerspective(core_state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
-        break;
-    case ORTHOGRAPHIC:
-        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
-        break;
-    default:
-        assert(0 && "unrecognized camera mode");
-        break;
-    }
-
-    proj.m5 *= -1.0f;
-
-    Matrix viewProj = MatrixMultiply(view, proj);
-
     // flatten matrix stack
     Matrix model = MatrixIdentity();
     for (size_t i = 0; i < mat_stack_p; i++)
         model = MatrixMultiply(mat_stack[i], model);
 
+    Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
     Matrix mvp = MatrixMultiply(model, viewProj);
+
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
         cmd_buffer,
@@ -566,7 +547,7 @@ bool begin_draw()
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    update_ubos(curr_frame);
+    cvr_update_ubos();
 
     vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
     vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
@@ -752,42 +733,15 @@ defer:
      return result;
 }
 
-void update_ubos(uint32_t curr_image)
+void cvr_update_ubos()
 {
-    clock_t curr_time = clock();
-    double time_spent = (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
-
-    Matrix model = MatrixRotateZ(PI / 4);
-    model = MatrixMultiply(model, MatrixRotateY(-time_spent * 0.5f));
-    // model = MatrixMultiply(MatrixScale(2.0f, 2.0f, 3.0f), model);
-
-    Matrix view  = MatrixLookAt(core_state.camera.position, core_state.camera.target, core_state.camera.up);
-
-    Matrix proj = {0};
-    double aspect = ctx.extent.width / (double) ctx.extent.height;
-    double top = core_state.camera.fovy / 2.0;
-    double right = top * aspect;
-    switch (core_state.camera.projection) {
-    case PERSPECTIVE:
-        proj  = MatrixPerspective(core_state.camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
-        break;
-    case ORTHOGRAPHIC:
-        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
-        break;
-    default:
-        assert(0 && "unrecognized camera mode");
-        break;
-    }
-
     UBO ubo = {
-        .model = MatrixToFloatV(model),
-        .view  = MatrixToFloatV(view),
-        .proj  = MatrixToFloatV(proj),
+        .model = MatrixToFloatV(MatrixIdentity()),
+        .view  = MatrixToFloatV(core_state.view),
+        .proj  = MatrixToFloatV(core_state.proj),
     };
 
-    ubo.proj.v[5] *= -1.0f;
-
-    memcpy(ctx.ubos.items[curr_image].mapped, &ubo, sizeof(ubo));
+    memcpy(ctx.ubos.items[curr_frame].mapped, &ubo, sizeof(ubo));
 }
 
 bool create_descriptor_pool()
@@ -1127,6 +1081,36 @@ bool cvr_push_matrix()
     else
         return false;
     return true;
+}
+
+void cvr_set_proj(Camera camera)
+{
+    Matrix proj = {0};
+    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double top = camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
+
+    /* Vulkan */
+    proj.m5 *= -1.0f;
+
+    core_state.proj = proj;
+
+}
+
+void cvr_set_view(Camera camera)
+{
+    core_state.view = MatrixLookAt(camera.position, camera.target, camera.up);
 }
 
 bool cvr_pop_matrix()

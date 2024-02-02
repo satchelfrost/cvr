@@ -96,7 +96,7 @@ bool create_shape_idx_buffer(Shape *shape);
 
 bool alloc_shape_res(Shape_Type shape_type);
 bool create_ubos();
-void update_ubos(uint32_t curr_frame);
+void cvr_update_ubos();
 bool create_descriptor_pool();
 bool create_descriptor_sets();
 
@@ -148,6 +148,10 @@ typedef struct {
 } Camera;
 #endif
 
+void cvr_set_proj(Camera camera);
+void cvr_set_view(Camera camera);
+void cvr_set_view_proj(Camera camera);
+
 #ifndef CVR_COLOR
 typedef struct Color {
     unsigned char r;
@@ -157,13 +161,15 @@ typedef struct Color {
 } Color;
 #endif
 
-void begin_render_pass(Color color);
+void cvr_begin_render_pass(Color color);
 
 typedef struct {
     Color clear_color;
     Vector3 cube_color;
     Camera camera;
     VkPrimitiveTopology topology;
+    Matrix view;
+    Matrix proj;
 } Core_State;
 
 #endif // VK_CTX_H_

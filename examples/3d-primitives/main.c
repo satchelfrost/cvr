@@ -19,24 +19,25 @@ int main()
     while (!window_should_close()) {
         if (is_key_pressed(KEY_SPACE)) shape = (shape + 1) % SHAPE_COUNT;
 
-        begin_mode_3d(camera);
-            clear_background(BLUE);
-            push_matrix();
-                double time = get_time();
-                for (size_t i = 0; i < 10; i++) {
-                    rotate_y(time * 0.4f);
-                    translate(0.1f, 0.0f, -0.65f);
-                    draw_shape(shape);
-                }
-                translate(0.1f, 0.1f, -0.5f);
+        begin_drawing(BLUE);
+            begin_mode_3d(camera);
                 push_matrix();
-                    rotate_x(-90 * DEG2RAD);
+                    double time = get_time();
+                    for (size_t i = 0; i < 10; i++) {
+                        rotate_y(time * 0.4f);
+                        translate(0.1f, 0.0f, -0.65f);
+                        draw_shape(shape);
+                    }
+                    translate(0.1f, 0.1f, -0.5f);
+                    push_matrix();
+                        rotate_x(-90 * DEG2RAD);
+                        draw_shape(SHAPE_TETRAHEDRON);
+                    pop_matrix();
+                    scale(0.5f, 0.5f, 0.5f);
                     draw_shape(SHAPE_TETRAHEDRON);
                 pop_matrix();
-                scale(0.5f, 0.5f, 0.5f);
-                draw_shape(SHAPE_TETRAHEDRON);
-            pop_matrix();
-        end_mode_3d();
+            end_mode_3d();
+        end_drawing();
     }
 
     close_window();

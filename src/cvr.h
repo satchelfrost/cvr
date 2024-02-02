@@ -198,12 +198,14 @@ bool init_window(int width, int height, const char *title); /* Initialize window
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
 bool draw_shape(Shape_Type shape_type);
-void begin_mode_3d(Camera camera);                          /* Sets camera and gets vulkan ready for commands */
-void end_mode_3d();                                         /* Submits commands, presents, and polls for input */
 bool is_key_pressed(int key);
 bool is_key_down(int key);
-void clear_background(Color color);
 double get_time();
+
+void begin_drawing(Color color);             /*  vulkan for commands, set clear color */
+void begin_mode_3d(Camera camera);
+void end_mode_3d();                              /* Submits commands, presents, and polls for input */
+void end_drawing();                              /* Submits commands, presents, and polls for input */
 
 void push_matrix();
 void pop_matrix();

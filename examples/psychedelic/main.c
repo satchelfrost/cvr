@@ -20,10 +20,10 @@ int main()
     while (!window_should_close()) {
         if (is_key_pressed(KEY_SPACE)) shape = (shape + 1) % SHAPE_COUNT;
 
-        begin_mode_3d(camera);
-            clear_background(BLUE);
-            push_matrix();
-            for (size_t k = 0; k < 8; k++) {
+        begin_drawing(BLUE);
+            begin_mode_3d(camera);
+                push_matrix();
+                for (size_t k = 0; k < 8; k++) {
                     rotate_z(45.0f * DEG2RAD);
                     double time = get_time();
                     float step = sin(time) * 0.5f + 0.5f;
@@ -36,9 +36,10 @@ int main()
                         pop_matrix();
                         rotate_y(0.5f);
                     }
-            }
-            pop_matrix();
-        end_mode_3d();
+                }
+                pop_matrix();
+            end_mode_3d();
+        end_drawing();
     }
 
     close_window();

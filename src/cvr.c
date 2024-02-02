@@ -70,19 +70,32 @@ defer:
     return result;
 }
 
-void clear_background(Color color)
-{
-    begin_render_pass(color);
-}
-
 void begin_mode_3d(Camera camera)
 {
     core_state.camera = camera;
+    cvr_set_proj(camera);
+    cvr_set_view(camera);
+}
+
+void begin_drawing(Color color)
+{
     begin_draw();
+    cvr_begin_render_pass(color);
 }
 
 void end_mode_3d()
 {
+    size_t leftover = 0;
+    while(cvr_pop_matrix())
+        leftover++;
+
+    if (leftover)
+        nob_log(NOB_WARNING, "%d matrix stack(s) leftover", leftover);
+}
+
+void end_drawing()
+{
+    cvr_update_ubos();
     end_draw();
     poll_input_events();
 }

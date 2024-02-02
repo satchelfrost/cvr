@@ -26,23 +26,24 @@ int main()
             }
         }
 
-        begin_mode_3d(camera);
-            clear_background(PURPLE);
-            push_matrix();
-                rotate_y(0.5);
-                draw_shape(SHAPE_TETRAHEDRON);
-            pop_matrix();
-            push_matrix();
-                translate(-4.0f, 0.0f, 2.0f);
-                scale(2.0f, 5.0f, 2.0f);
-                draw_shape(SHAPE_CUBE);
-            pop_matrix();
-            push_matrix();
-                translate(4.0f, 0.0f, 2.0f);
-                scale(2.0f, 3.0f, 2.0f);
-                draw_shape(SHAPE_QUAD);
-            pop_matrix();
-        end_mode_3d();
+        begin_drawing(PURPLE);
+            begin_mode_3d(camera);
+                push_matrix();
+                    rotate_y(0.5);
+                    draw_shape(SHAPE_TETRAHEDRON);
+                pop_matrix();
+                push_matrix();
+                    translate(-4.0f, 0.0f, 2.0f);
+                    scale(2.0f, 5.0f, 2.0f);
+                    draw_shape(SHAPE_CUBE);
+                pop_matrix();
+                push_matrix();
+                    translate(4.0f, 0.0f, 2.0f);
+                    scale(2.0f, 3.0f, 2.0f);
+                    draw_shape(SHAPE_QUAD);
+                pop_matrix();
+            end_mode_3d();
+        end_drawing();
     }
 
     close_window();
