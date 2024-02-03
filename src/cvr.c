@@ -33,16 +33,18 @@ bool init_window(int width, int height, const char *title)
 {
     bool result = true;
 
+    /* Initialize glfw stuff */
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
-
     glfwSetKeyCallback(ctx.window, key_callback);
 
+    /* Initialize vulkan stuff */
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
 
+    /* Start the clock */
     time_begin = clock();
 
     /* Set the default topology to triangle list */

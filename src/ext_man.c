@@ -42,12 +42,17 @@ bool inst_exts_satisfied()
     vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
     size_t unsatisfied_exts = ext_manager.inst_exts.count;
     for (size_t i = 0; i < ext_manager.inst_exts.count; i++) {
+        bool found = false;
         for (size_t j = 0; j < avail_ext_count; j++) {
             if (strcmp(ext_manager.inst_exts.items[i], avail_exts[j].extensionName) == 0) {
                 if (--unsatisfied_exts == 0)
                     return true;
+                found = true;
+                break;
             }
         }
+        if (!found)
+            nob_log(NOB_ERROR, "Instance extension `%s` not available", ext_manager.inst_exts.items[i]);
     }
 
     return false;
@@ -61,12 +66,17 @@ bool chk_validation_support()
     vkEnumerateInstanceLayerProperties(&layer_count, avail_layers);
     size_t unsatisfied_layers = ext_manager.validation_layers.count;
     for (size_t i = 0; i < ext_manager.validation_layers.count; i++) {
+        bool found = false;
         for (size_t j = 0; j < layer_count; j++) {
             if (strcmp(ext_manager.validation_layers.items[i], avail_layers[j].layerName) == 0) {
                 if (--unsatisfied_layers == 0)
                     return true;
+                found = true;
+                break;
             }
         }
+        if (!found)
+            nob_log(NOB_ERROR, "Validation layer `%s` not available", ext_manager.validation_layers.items[i]);
     }
 
     return true;
@@ -80,12 +90,17 @@ bool device_exts_supported(VkPhysicalDevice phys_device)
     vkEnumerateDeviceExtensionProperties(phys_device, NULL, &avail_ext_count, avail_exts);
     uint32_t unsatisfied_exts = ext_manager.device_exts.count; 
     for (size_t i = 0; i < ext_manager.device_exts.count; i++) {
+        bool found = false;
         for (size_t j = 0; j < avail_ext_count; j++) {
             if (strcmp(ext_manager.device_exts.items[i], avail_exts[j].extensionName) == 0) {
                 if (--unsatisfied_exts == 0)
                     return true;
+                found = true;
+                break;
             }
         }
+        if (!found)
+            nob_log(NOB_ERROR, "Device extension `%s` not available", ext_manager.device_exts.items[i]);
     }
 
     return false;

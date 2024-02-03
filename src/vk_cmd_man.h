@@ -16,7 +16,7 @@ typedef struct {
     vec(VkFence) fences;
 } Vk_Cmd_Man;
 
-/* Initializes a vulkan command manager, must set the physical device & logical device */
+/* Initializes a vulkan command manager, must set the physical device & logical device, and frames in flight */
 bool cmd_man_init(Vk_Cmd_Man *cmd_man);
 
 /* Destroys a vulkan command manager */

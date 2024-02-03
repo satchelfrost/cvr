@@ -1,0 +1,5 @@
+Random ideas:
+* Buffer alginment
+* Texture mapping
+* Ability to conditionally use uniform buffer & specify data
+* Mess around with different dynamic options in pipeline (e.g. VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)

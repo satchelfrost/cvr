@@ -29,7 +29,6 @@ size_t mat_stack_p = 0;
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
 static uint32_t img_idx = 0;
-static clock_t time_begin;
 
 typedef struct {
     float16 model;
@@ -41,7 +40,6 @@ bool cvr_init()
 {
     bool result = true;
 
-    time_begin = clock();
     init_ext_managner();
 
     cvr_chk(create_instance(), "failed to create instance");
@@ -547,8 +545,6 @@ bool begin_draw()
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    cvr_update_ubos();
-
     vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
     vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
 
@@ -632,6 +628,8 @@ defer:
 bool create_shape_vtx_buffer(Shape *shape)
 {
     bool result = true;
+
+    /* create two buffers, a so-called "staging" buffer, and one for our actual vertex buffer */
     Vk_Buffer stg_buff;
     shape->vtx_buff.device = stg_buff.device = ctx.device;
     shape->vtx_buff.size   = stg_buff.size   = shape->vert_size * shape->vert_count;
@@ -655,6 +653,7 @@ bool create_shape_vtx_buffer(Shape *shape)
     );
     cvr_chk(result, "failed to create vertex buffer");
 
+    /* transfer data from staging buffer to vertex buffer */
     vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->vtx_buff, 0);
 
 defer:
@@ -665,6 +664,8 @@ defer:
 bool create_shape_idx_buffer(Shape *shape)
 {
     bool result = true;
+
+    /* create two buffers, a so-called "staging" buffer, and one for our actual index buffer */
     Vk_Buffer stg_buff;
     shape->idx_buff.device = stg_buff.device = ctx.device;
     shape->idx_buff.size   = stg_buff.size   = shape->idx_size * shape->idx_count;
@@ -688,6 +689,7 @@ bool create_shape_idx_buffer(Shape *shape)
     );
     cvr_chk(result, "failed to create index buffer");
 
+    /* transfer data from staging buffer to index buffer */
     vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->idx_buff, 0);
 
 defer:
