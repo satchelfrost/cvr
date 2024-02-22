@@ -48,6 +48,13 @@ typedef struct {
     size_t idx_size;
 } Shape;
 
+typedef struct {
+    Vk_Buffer vtx_buff;
+    const Vertex *verts;
+    size_t vert_count;
+    size_t vert_size;
+} Mesh;
+
 /* Vulkan Context */
 typedef struct {
     GLFWwindow *window;
@@ -64,6 +71,7 @@ typedef struct {
     VkPipelineLayout pipeline_layout;
     Vk_Swpchain swpchain;
     Shape shapes[SHAPE_COUNT];
+    vec(Mesh) meshes;
     vec(Vk_Buffer) ubos;
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
@@ -99,6 +107,8 @@ bool create_ubos();
 void cvr_update_ubos();
 bool create_descriptor_pool();
 bool create_descriptor_sets();
+bool cvr_upload_mesh(const Vertex *verts, size_t count, size_t *mesh_id);
+bool create_mesh_vtx_buffer(Mesh *mesh);
 
 /* Manages synchronization info and gets ready for vulkan commands.
  * Returns true if succeeded and false otherwise */
@@ -109,6 +119,7 @@ bool begin_draw();
 bool end_draw();
 
 bool cvr_draw_shape(Shape_Type shape_type);
+bool cvr_draw_mesh(size_t mesh_id);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);

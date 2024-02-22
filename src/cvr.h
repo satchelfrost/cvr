@@ -2,6 +2,7 @@
 #define CVR_H_
 
 #include <stdbool.h>
+#include "vertex.h" 
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -170,13 +171,6 @@ typedef enum {
     ORTHOGRAPHIC
 } Camera_Projection;
 
-#define RL_VECTOR3_TYPE
-typedef struct Vector3 {
-    float x;
-    float y;
-    float z;
-} Vector3;
-
 #define CVR_CAMERA
 typedef struct {
     Vector3 position;
@@ -201,6 +195,11 @@ bool draw_shape(Shape_Type shape_type);
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 double get_time();
+
+/* uploads a mesh to vulkan and returns an id used to draw. 
+ * All meshes will be unloaded, but unload_mesh can be called explicity */
+size_t upload_mesh(const Vertex *verts, size_t count);
+void draw_mesh(size_t mesh_id);
 
 void begin_drawing(Color color);             /*  vulkan for commands, set clear color */
 void begin_mode_3d(Camera camera);

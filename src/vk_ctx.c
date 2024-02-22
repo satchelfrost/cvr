@@ -1,3 +1,6 @@
+#define RAYMATH_IMPLEMENTATION
+#include "ext/raylib-5.0/raymath.h"
+
 #include "cvr.h"
 #include "ext_man.h"
 #include "vk_cmd_man.h"
@@ -5,14 +8,12 @@
 #include <vulkan/vulkan_core.h>
 #include "common.h"
 
-#define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
-
 #include <vulkan/vulkan.h>
 #include "vk_ctx.h"
 #include "vk_buffer.h"
 #include "geometry.h"
 #include <time.h>
+
 
 #define Z_NEAR 0.01
 #define Z_FAR 1000.0
@@ -82,6 +83,10 @@ bool cvr_destroy()
             vk_buff_destroy(ctx.shapes[i].vtx_buff);
         if (ctx.shapes[i].idx_buff.handle)
             vk_buff_destroy(ctx.shapes[i].idx_buff);
+    }
+    for (size_t i = 0; i < ctx.meshes.count; i++) {
+        if (ctx.meshes.items[i].vtx_buff.handle)
+            vk_buff_destroy(ctx.meshes.items[i].vtx_buff);
     }
     vkDestroyPipeline(ctx.device, ctx.pipelines.shape, NULL);
     ctx.pipelines.shape = NULL;
@@ -1194,4 +1199,116 @@ bool cvr_scale(float x, float y, float z)
     else
       return false;
     return true;
+}
+
+bool cvr_upload_mesh(const Vertex *verts, size_t count, size_t *mesh_id)
+{
+    bool result = true;
+
+    Mesh mesh = {0};
+    mesh.vert_count = count;
+    mesh.vert_size = sizeof(verts[0]);
+    mesh.verts = verts;
+
+    if (!create_mesh_vtx_buffer(&mesh)) {
+        nob_log(NOB_ERROR, "failed to allocate resources for mesh");
+        nob_return_defer(false);
+    }
+
+    /* mesh_id is just an index into mesh array */
+    *mesh_id = ctx.meshes.count;
+    nob_da_append(&ctx.meshes, mesh);
+
+defer:
+    return result;
+}
+
+bool create_mesh_vtx_buffer(Mesh *mesh)
+{
+    bool result = true;
+
+    /* create two buffers, a so-called "staging" buffer, and one for our actual vertex buffer */
+    Vk_Buffer stg_buff;
+    mesh->vtx_buff.device = stg_buff.device = ctx.device;
+    mesh->vtx_buff.size   = stg_buff.size   = mesh->vert_size * mesh->vert_count;
+    mesh->vtx_buff.count  = stg_buff.count  = mesh->vert_count;
+    result = vk_buff_init(
+        &stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create staging buffer");
+
+    void* data;
+    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
+    memcpy(data, mesh->verts, stg_buff.size);
+    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
+
+    result = vk_buff_init(
+        &mesh->vtx_buff,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to create vertex buffer");
+
+    /* transfer data from staging buffer to vertex buffer */
+    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, mesh->vtx_buff, 0);
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+}
+
+bool cvr_draw_mesh(size_t mesh_id)
+{
+    bool result = true;
+
+    /* for now meshes can only be points */
+    assert(core_state.topology == VK_PRIMITIVE_TOPOLOGY_POINT_LIST && "mesh must enable point topology");
+
+    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines.shape);
+    VkViewport viewport = {0};
+    viewport.width = (float)ctx.extent.width;
+    viewport.height =(float)ctx.extent.height;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {0};
+    scissor.extent = ctx.extent;
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+    assert(mesh_id < ctx.meshes.count && "mesh id out of range");
+    Vk_Buffer vtx_buff = ctx.meshes.items[mesh_id].vtx_buff;
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindDescriptorSets(
+        cmd_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
+    );
+
+    // flatten matrix stack
+    Matrix model = MatrixIdentity();
+    for (size_t i = 0; i < mat_stack_p; i++)
+        model = MatrixMultiply(mat_stack[i], model);
+
+    Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
+    Matrix mvp = MatrixMultiply(model, viewProj);
+
+    float16 mat = MatrixToFloatV(mvp);
+    vkCmdPushConstants(
+        cmd_buffer,
+        ctx.pipeline_layout,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(float16),
+        &mat
+    );
+
+    // vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
+
+    return result;
 }

@@ -225,3 +225,24 @@ void enable_point_topology()
 {
     core_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 }
+
+size_t upload_mesh(const Vertex *verts, size_t count)
+{
+    size_t mesh_id = 0;
+    if (!cvr_upload_mesh(verts, count, &mesh_id)) {
+        nob_log(NOB_ERROR, "failed to upload mesh");
+        exit(1);
+    }
+    return mesh_id;
+}
+
+void draw_mesh(size_t mesh_id)
+{
+    /* for now borrow the shapes pipeline */
+    if (!ctx.pipelines.shape) create_shape_pipeline();
+
+    if (!cvr_draw_mesh(mesh_id)) {
+        nob_log(NOB_ERROR, "failed to draw mesh");
+        exit(1);
+    }
+}
