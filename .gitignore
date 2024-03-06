@@ -4,4 +4,3 @@ nob.old
 .clangd
 compile_commands.json
 .cache
-shaders
