@@ -64,11 +64,8 @@ static Example examples[] = {
 
 static const char *cvr[] = {
     "cvr",
-    "ext_man",
-    "vertex",
     "vk_buffer",
     "vk_cmd_man",
-    "vk_ctx",
 };
 
 bool build_cvr()

@@ -1,10 +1,17 @@
 #include "cvr.h"
+
+#define RAYMATH_IMPLEMENTATION
+#include "ext/raylib-5.0/raymath.h"
+
+#define VK_CTX_IMPLEMENTATION
 #include "vk_ctx.h"
+
 #include <time.h>
 #include <vulkan/vulkan_core.h>
 
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
+
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
