@@ -47,15 +47,6 @@ typedef struct {
     bool buff_resized;
 } Vk_Swpchain;
 
-#ifndef SHAPE_TYPE
-typedef enum {
-    SHAPE_CUBE = 0,
-    SHAPE_QUAD,
-    SHAPE_TETRAHEDRON,
-    SHAPE_COUNT,
-} Shape_Type;
-#endif
-
 /* Manage vulkan buffer info */
 typedef struct {
     VkDevice device;
@@ -65,17 +56,6 @@ typedef struct {
     VkDeviceMemory buff_mem;
     void *mapped;
 } Vk_Buffer;
-
-typedef struct {
-    Vk_Buffer vtx_buff;
-    Vk_Buffer idx_buff;
-    const Vertex *verts;
-    size_t vert_count;
-    size_t vert_size;
-    const uint16_t *idxs;
-    size_t idx_count;
-    size_t idx_size;
-} Shape;
 
 /* Vulkan Context */
 typedef struct {
@@ -92,13 +72,12 @@ typedef struct {
     VkRenderPass render_pass;
     VkPipelineLayout pipeline_layout;
     Vk_Swpchain swpchain;
-    Shape shapes[SHAPE_COUNT];
     vec(Vk_Buffer) ubos;
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     vec(VkDescriptorSet) descriptor_sets;
     struct {
-        VkPipeline shape;
+        VkPipeline deflt;
     } pipelines;
 } Vk_Context;
 
@@ -111,19 +90,12 @@ bool create_surface();
 bool create_swpchain();
 bool create_img_views();
 bool create_descriptor_set_layout();
-bool create_shape_pipeline();
+bool create_default_pipeline();
 bool create_shader_module(const char *file_name, VkShaderModule *module);
 bool create_render_pass();
 bool create_frame_buffs();
 bool recreate_swpchain();
 
-/* Must first set the verts, vert_size, & vert_count */
-bool create_shape_vtx_buffer(Shape *shape);
-
-/* Must first set the idxs, idx_size, & idx_count */
-bool create_shape_idx_buffer(Shape *shape);
-
-bool alloc_shape_res(Shape_Type shape_type);
 bool create_ubos();
 void cvr_update_ubos();
 bool create_descriptor_pool();
@@ -137,7 +109,7 @@ bool begin_draw();
  * Returns true if succeeded and false otherwise */
 bool end_draw();
 
-bool cvr_draw_shape(Shape_Type shape_type, Matrix model);
+bool draw(VkPipeline pipline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
@@ -155,7 +127,6 @@ bool pick_phys_device();
 void cleanup_swpchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 void frame_buff_resized(GLFWwindow* window, int width, int height);
-bool is_shape_res_alloc(Shape_Type shape_type);
 
 #ifndef CVR_CAMERA
 typedef struct {
@@ -308,13 +279,15 @@ bool cvr_init()
     cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
     cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
 
+    /* Set the default topology to triangle list */
+    core_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
 defer:
     return result;
 }
 
 bool cvr_destroy()
 {
-    vkDeviceWaitIdle(ctx.device);
     cmd_man_destroy(&cmd_man);
     cleanup_swpchain();
     for (size_t i = 0; i < ctx.ubos.count; i++)
@@ -323,14 +296,8 @@ bool cvr_destroy()
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
     vkDestroyDescriptorSetLayout(ctx.device, ctx.descriptor_set_layout, NULL);
     nob_da_free(ctx.descriptor_sets);
-    for (size_t i = 0; i < SHAPE_COUNT; i++) {
-        if (ctx.shapes[i].vtx_buff.handle)
-            vk_buff_destroy(ctx.shapes[i].vtx_buff);
-        if (ctx.shapes[i].idx_buff.handle)
-            vk_buff_destroy(ctx.shapes[i].idx_buff);
-    }
-    vkDestroyPipeline(ctx.device, ctx.pipelines.shape, NULL);
-    ctx.pipelines.shape = NULL;
+    vkDestroyPipeline(ctx.device, ctx.pipelines.deflt, NULL);
+    ctx.pipelines.deflt = NULL;
     vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layout, NULL);
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
@@ -504,7 +471,7 @@ bool create_img_views()
     return true;
 }
 
-bool create_shape_pipeline()
+bool create_default_pipeline()
 {
     bool result = true;
     VkPipelineShaderStageCreateInfo vert_ci = {0};
@@ -615,7 +582,7 @@ bool create_shape_pipeline()
     pipeline_ci.renderPass = ctx.render_pass;
     pipeline_ci.subpass = 0;
 
-    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines.shape);
+    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines.deflt);
     vk_chk(vk_result, "failed to create pipeline");
 
 defer:
@@ -718,13 +685,13 @@ void cvr_begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool cvr_draw_shape(Shape_Type shape_type, Matrix model)
+bool draw(VkPipeline pipeline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
 {
     bool result = true;
 
     VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
 
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines.shape);
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
     viewport.height =(float)ctx.extent.height;
@@ -733,9 +700,6 @@ bool cvr_draw_shape(Shape_Type shape_type, Matrix model)
     VkRect2D scissor = {0};
     scissor.extent = ctx.extent;
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
-
-    Vk_Buffer vtx_buff = ctx.shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = ctx.shapes[shape_type].idx_buff;
 
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
@@ -864,79 +828,6 @@ bool recreate_swpchain()
 
 defer:
     return result;
-}
-
-bool create_shape_vtx_buffer(Shape *shape)
-{
-    bool result = true;
-
-    /* create two buffers, a so-called "staging" buffer, and one for our actual vertex buffer */
-    Vk_Buffer stg_buff;
-    shape->vtx_buff.device = stg_buff.device = ctx.device;
-    shape->vtx_buff.size   = stg_buff.size   = shape->vert_size * shape->vert_count;
-    shape->vtx_buff.count  = stg_buff.count  = shape->vert_count;
-    result = vk_buff_init(
-        &stg_buff,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    cvr_chk(result, "failed to create staging buffer");
-
-    void* data;
-    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
-    memcpy(data, shape->verts, stg_buff.size);
-    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
-
-    result = vk_buff_init(
-        &shape->vtx_buff,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    cvr_chk(result, "failed to create vertex buffer");
-
-    /* transfer data from staging buffer to vertex buffer */
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->vtx_buff, 0);
-
-defer:
-    vk_buff_destroy(stg_buff);
-    return result;
-}
-
-bool create_shape_idx_buffer(Shape *shape)
-{
-    bool result = true;
-
-    /* create two buffers, a so-called "staging" buffer, and one for our actual index buffer */
-    Vk_Buffer stg_buff;
-    shape->idx_buff.device = stg_buff.device = ctx.device;
-    shape->idx_buff.size   = stg_buff.size   = shape->idx_size * shape->idx_count;
-    shape->idx_buff.count  = stg_buff.count  = shape->idx_count;
-    result = vk_buff_init(
-        &stg_buff,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    cvr_chk(result, "failed to create staging buffer");
-
-    void* data;
-    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
-    memcpy(data, shape->idxs, stg_buff.size);
-    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
-
-    result = vk_buff_init(
-        &shape->idx_buff,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    cvr_chk(result, "failed to create index buffer");
-
-    /* transfer data from staging buffer to index buffer */
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->idx_buff, 0);
-
-defer:
-    vk_buff_destroy(stg_buff);
-    return result;
-
 }
 
 bool create_descriptor_set_layout()
@@ -1266,55 +1157,6 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     unused(width);
     unused(height);
     ctx.swpchain.buff_resized = true;
-}
-
-void close_window()
-{
-    cvr_destroy();
-    glfwDestroyWindow(ctx.window);
-    glfwTerminate();
-}
-
-bool alloc_shape_res(Shape_Type shape_type)
-{
-    bool result = true;
-
-    if (is_shape_res_alloc(shape_type)) {
-        nob_log(NOB_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
-        nob_return_defer(false);
-    }
-
-    Shape *shape = &ctx.shapes[shape_type];
-    switch (shape_type) {
-#define X(CONST_NAME, array_name)                        \
-    case SHAPE_ ## CONST_NAME:                           \
-    shape->vert_count = CONST_NAME ## _VERTS;            \
-    shape->vert_size = sizeof(array_name ## _verts[0]);  \
-    shape->verts = array_name ## _verts;                 \
-    shape->idx_count = CONST_NAME ## _IDXS;              \
-    shape->idx_size = sizeof(array_name ## _indices[0]); \
-    shape->idxs = array_name ## _indices;                \
-    break;
-    SHAPE_LIST
-#undef X
-    default:
-        nob_log(NOB_ERROR, "unrecognized shape %d", shape_type);
-        nob_return_defer(false);
-    }
-
-    if ((!create_shape_vtx_buffer(shape)) || (!create_shape_idx_buffer(shape))) {
-        nob_log(NOB_ERROR, "failed to allocate resources for shape %d", shape_type);
-        nob_return_defer(false);
-    }
-
-defer:
-    return result;
-}
-
-bool is_shape_res_alloc(Shape_Type shape_type)
-{
-    assert((shape_type >= 0 && shape_type < SHAPE_COUNT) && "invalid shape");
-    return (ctx.shapes[shape_type].vtx_buff.handle || ctx.shapes[shape_type].idx_buff.handle);
 }
 
 void cvr_set_proj(Camera camera)
