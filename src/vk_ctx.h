@@ -1,15 +1,36 @@
 #ifndef VK_CTX_H_
 #define VK_CTX_H_
 
-#include "common.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
 #include "geometry.h"
+#include "ext/nob.h"
+#include "nob_ext.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
+/* Common macro definitions */
+#define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(ctx.instance, #pfn)
+#define unused(x) (void)(x)
+#define MIN_SEVERITY NOB_WARNING
+#define vk_ok(x) ((x) == VK_SUCCESS)
+#define cvr_chk(expr, msg)           \
+    do {                             \
+        if (!(expr)) {               \
+            nob_log(NOB_ERROR, msg); \
+            nob_return_defer(false); \
+        }                            \
+    } while (0)
+#define vk_chk(vk_result, msg) cvr_chk(vk_ok(vk_result), msg)
+#define vec(type) struct { \
+    type *items;           \
+    size_t capacity;       \
+    size_t count;          \
+}
+#define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
 
 typedef struct {
     uint32_t gfx_idx;
