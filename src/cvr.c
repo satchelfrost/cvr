@@ -6,12 +6,8 @@
 #define VK_CTX_IMPLEMENTATION
 #include "vk_ctx.h"
 
-#include <time.h>
-#include <vulkan/vulkan_core.h>
-
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
-
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
@@ -32,6 +28,9 @@ Keyboard keyboard = {0};
 extern Core_State core_state;
 extern Vk_Context ctx;
 static clock_t time_begin;
+#define MAX_MAT_STACK 1024 * 1024
+Matrix mat_stack[MAX_MAT_STACK];
+size_t mat_stack_p = 0;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void poll_input_events();
@@ -73,7 +72,10 @@ bool draw_shape(Shape_Type shape_type)
     bool result = true;
     if (!ctx.pipelines.shape) create_shape_pipeline();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
-    cvr_chk(cvr_draw_shape(shape_type), "failed to draw frame");
+    if (mat_stack_p)
+        cvr_chk(cvr_draw_shape(shape_type, mat_stack[mat_stack_p - 1]), "failed to draw frame");
+    else
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
 
 defer:
     return result;
@@ -84,6 +86,7 @@ void begin_mode_3d(Camera camera)
     core_state.camera = camera;
     cvr_set_proj(camera);
     cvr_set_view(camera);
+    push_matrix();
 }
 
 void begin_drawing(Color color)
@@ -92,11 +95,37 @@ void begin_drawing(Color color)
     cvr_begin_render_pass(color);
 }
 
+void push_matrix()
+{
+    if (mat_stack_p < MAX_MAT_STACK) {
+        if (mat_stack_p) {
+            mat_stack[mat_stack_p] = mat_stack[mat_stack_p - 1];
+            mat_stack_p++;
+        } else {
+            mat_stack[mat_stack_p++] = MatrixIdentity();
+        }
+    } else {
+        nob_log(NOB_ERROR, "matrix stack overflow");
+    }
+}
+
+void pop_matrix()
+{
+    if (mat_stack_p > 0)
+        mat_stack_p--;
+    else
+        nob_log(NOB_ERROR, "matrix stack underflow");
+}
+
 void end_mode_3d()
 {
+    pop_matrix();
+
     size_t leftover = 0;
-    while(cvr_pop_matrix())
+    while(mat_stack_p > 0) {
+        pop_matrix();
         leftover++;
+    }
 
     if (leftover)
         nob_log(NOB_WARNING, "%d matrix stack(s) leftover", leftover);
@@ -178,54 +207,68 @@ double get_time()
     return (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
 }
 
-void push_matrix()
-{
-    if (!cvr_push_matrix()) nob_log(NOB_ERROR, "matrix stack overflow");
-}
-
-void pop_matrix()
-{
-    if (!cvr_pop_matrix()) nob_log(NOB_ERROR, "matrix stack underflow");
-}
-
 void translate(float x, float y, float z)
 {
-    if (!cvr_translate(x, y, z)) nob_log(NOB_ERROR, "no matrix available to translate");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixTranslate(x, y, z), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to translate");
 }
 
 void rotate(Vector3 axis, float angle)
 {
-    if (!cvr_rotate(axis, angle)) nob_log(NOB_ERROR, "no matrix available to rotate");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotate(axis, angle), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to rotate");
 }
 
 void rotate_x(float angle)
 {
-    if (!cvr_rotate_x(angle)) nob_log(NOB_ERROR, "no matrix available to rotate x");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateX(angle), mat_stack[mat_stack_p - 1]);
+    else
+    nob_log(NOB_ERROR, "no matrix available to rotate x");
 }
 
 void rotate_y(float angle)
 {
-    if (!cvr_rotate_y(angle)) nob_log(NOB_ERROR, "no matrix available to rotate y");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateY(angle), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to rotate y");
 }
 
 void rotate_z(float angle)
 {
-    if (!cvr_rotate_z(angle)) nob_log(NOB_ERROR, "no matrix available to rotate z");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZ(angle), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to rotate z");
 }
 
 void rotate_xyz(Vector3 angle)
 {
-    if (!cvr_rotate_xyz(angle)) nob_log(NOB_ERROR, "no matrix available to rotate xyz");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateXYZ(angle), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to rotate xyz");
 }
 
 void rotate_zyx(Vector3 angle)
 {
-    if (!cvr_rotate_zyx(angle)) nob_log(NOB_ERROR, "no matrix available to rotate zyx");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZYX(angle), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to rotate zyx");
 }
 
 void scale(float x, float y, float z)
 {
-    if (!cvr_scale(x, y, z)) nob_log(NOB_ERROR, "no matrix available to scale");
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixScale(x, y, z), mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to scale");
 }
 
 void enable_point_topology()

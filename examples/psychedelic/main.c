@@ -22,7 +22,6 @@ int main()
 
         begin_drawing(BLUE);
             begin_mode_3d(camera);
-                push_matrix();
                 for (size_t k = 0; k < 8; k++) {
                     rotate_z(45.0f * DEG2RAD);
                     double time = get_time();
@@ -37,7 +36,6 @@ int main()
                         rotate_y(0.5f);
                     }
                 }
-                pop_matrix();
             end_mode_3d();
         end_drawing();
     }

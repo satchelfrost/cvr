@@ -2,7 +2,6 @@
 #define VK_CTX_H_
 
 #include "common.h"
-#include "vk_buffer.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
 #include <sys/types.h>
@@ -35,6 +34,16 @@ typedef enum {
     SHAPE_COUNT,
 } Shape_Type;
 #endif
+
+/* Manage vulkan buffer info */
+typedef struct {
+    VkDevice device;
+    size_t size;
+    size_t count;
+    VkBuffer handle;
+    VkDeviceMemory buff_mem;
+    void *mapped;
+} Vk_Buffer;
 
 typedef struct {
     Vk_Buffer vtx_buff;
@@ -107,7 +116,7 @@ bool begin_draw();
  * Returns true if succeeded and false otherwise */
 bool end_draw();
 
-bool cvr_draw_shape(Shape_Type shape_type);
+bool cvr_draw_shape(Shape_Type shape_type, Matrix model);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
@@ -126,16 +135,6 @@ void cleanup_swpchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 void frame_buff_resized(GLFWwindow* window, int width, int height);
 bool is_shape_res_alloc(Shape_Type shape_type);
-bool cvr_push_matrix();
-bool cvr_pop_matrix();
-bool cvr_translate(float x, float y, float z);
-bool cvr_rotate(Vector3 axis, float angle);
-bool cvr_rotate_x(float angle);
-bool cvr_rotate_y(float angle);
-bool cvr_rotate_z(float angle);
-bool cvr_rotate_xyz(Vector3 angle);
-bool cvr_rotate_zyx(Vector3 angle);
-bool cvr_scale(float x, float y, float z);
 
 #ifndef CVR_CAMERA
 typedef struct {
@@ -173,14 +172,16 @@ typedef struct {
 
 #endif // VK_CTX_H_
 
-/* Vulkan Context Implementation */
+/***********************************************************************************
+*
+*   Vulkan Context Implementation
+*
+************************************************************************************/
+
 #ifdef VK_CTX_IMPLEMENTATION
 
-// #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
-
 #include <vulkan/vulkan.h>
-#include "vk_buffer.h"
 #include <time.h>
 
 #define Z_NEAR 0.01
@@ -188,7 +189,35 @@ typedef struct {
 
 Vk_Context ctx = {0};
 Core_State core_state = {0};
+
+/* Manage vulkan command and sync info */
+typedef struct {
+    VkPhysicalDevice phys_device;
+    VkDevice device;
+    VkCommandPool pool;
+    size_t frames_in_flight;
+    vec(VkCommandBuffer) buffs;
+    vec(VkSemaphore) img_avail_sems;
+    vec(VkSemaphore) render_fin_sems;
+    vec(VkFence) fences;
+} Vk_Cmd_Man;
 static Vk_Cmd_Man cmd_man = {0};
+
+/* Initializes a vulkan command manager, must set the physical device & logical device, and frames in flight */
+bool cmd_man_init(Vk_Cmd_Man *cmd_man);
+
+/* Destroys a vulkan command manager */
+void cmd_man_destroy(Vk_Cmd_Man *cmd_man);
+
+/* Allocates and begins a temporary command buffer. Easy-to-use, not super efficent. */
+bool cmd_quick_begin(const Vk_Cmd_Man *cmd_man, VkCommandBuffer *tmp_cmd_buff);
+
+/* Ends and frees a temporary command buffer. Easy-to-use, not super efficent. */
+bool cmd_quick_end(const Vk_Cmd_Man *cmd, VkQueue queue, VkCommandBuffer *tmp_cmd_buff);
+
+bool cmd_buff_create(Vk_Cmd_Man *cmd_man);
+bool cmd_syncs_create(Vk_Cmd_Man *cmd_man);
+bool cmd_pool_create(Vk_Cmd_Man *cmd_man);
 
 /* Manage vulkan extensions*/
 typedef vec(const char*) Extensions;
@@ -205,6 +234,13 @@ bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
 
+/* VK_Buffer must be set with device & size prior to calling this function */
+bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
+void vk_buff_destroy(Vk_Buffer buffer);
+
+/* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
+bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, Vk_Buffer dst_buff, VkDeviceSize size);
+
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
 static const char *device_exts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
@@ -214,10 +250,6 @@ Ext_Manager ext_manager = {0};
 VkVertexInputBindingDescription get_binding_desc();
 typedef vec(VkVertexInputAttributeDescription) VtxAttrDescs;
 void get_attr_descs(VtxAttrDescs *attr_descs);
-
-#define MAX_MAT_STACK 1024 * 1024
-Matrix mat_stack[MAX_MAT_STACK];
-size_t mat_stack_p = 0;
 
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
 static uint32_t curr_frame = 0;
@@ -665,7 +697,7 @@ void cvr_begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool cvr_draw_shape(Shape_Type shape_type)
+bool cvr_draw_shape(Shape_Type shape_type, Matrix model)
 {
     bool result = true;
 
@@ -692,11 +724,6 @@ bool cvr_draw_shape(Shape_Type shape_type)
         VK_PIPELINE_BIND_POINT_GRAPHICS,
         ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
     );
-
-    // flatten matrix stack
-    Matrix model = MatrixIdentity();
-    for (size_t i = 0; i < mat_stack_p; i++)
-        model = MatrixMultiply(mat_stack[i], model);
 
     Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
     Matrix mvp = MatrixMultiply(model, viewProj);
@@ -1269,15 +1296,6 @@ bool is_shape_res_alloc(Shape_Type shape_type)
     return (ctx.shapes[shape_type].vtx_buff.handle || ctx.shapes[shape_type].idx_buff.handle);
 }
 
-bool cvr_push_matrix()
-{
-    if (mat_stack_p < MAX_MAT_STACK)
-        mat_stack[mat_stack_p++] = MatrixIdentity();
-    else
-        return false;
-    return true;
-}
-
 void cvr_set_proj(Camera camera)
 {
     Matrix proj = {0};
@@ -1308,86 +1326,6 @@ void cvr_set_view(Camera camera)
     core_state.view = MatrixLookAt(camera.position, camera.target, camera.up);
 }
 
-bool cvr_pop_matrix()
-{
-    if (mat_stack_p > 0)
-        mat_stack_p--;
-    else
-        return false;
-    return true;
-}
-
-bool cvr_translate(float x, float y, float z)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixTranslate(x, y, z), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_rotate(Vector3 axis, float angle)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotate(axis, angle), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_rotate_x(float angle)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateX(angle), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_rotate_y(float angle)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateY(angle), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_rotate_z(float angle)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZ(angle), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_rotate_xyz(Vector3 angle)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateXYZ(angle), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_rotate_zyx(Vector3 angle)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZYX(angle), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
-
-bool cvr_scale(float x, float y, float z)
-{
-    if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixScale(x, y, z), mat_stack[mat_stack_p - 1]);
-    else
-      return false;
-    return true;
-}
 
 void init_ext_managner()
 {
@@ -1512,6 +1450,186 @@ void get_attr_descs(VtxAttrDescs *attr_descs)
     desc.format = VK_FORMAT_R32G32B32_SFLOAT;
     desc.offset = offsetof(Vertex, color);
     nob_da_append(attr_descs, desc);
+}
+
+bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
+{
+    bool result = true;
+    VkBufferCreateInfo buffer_ci = {0};
+    buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    cvr_chk(buffer->size, "Vk_Buffer must be set with size before calling constructor");
+    buffer_ci.size = (VkDeviceSize) buffer->size;
+    buffer_ci.usage = usage;
+    buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    cvr_chk(buffer->device, "Vk_Buffer must be set with device before calling constructor");
+    vk_chk(vkCreateBuffer(buffer->device, &buffer_ci, NULL, &buffer->handle), "failed to create buffer");
+
+    VkMemoryRequirements mem_reqs = {0};
+    vkGetBufferMemoryRequirements(buffer->device, buffer->handle, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_ci = {0};
+    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_ci.allocationSize = mem_reqs.size;
+    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
+    cvr_chk(result, "Memory not suitable based on memory requirements");
+    VkResult vk_result = vkAllocateMemory(buffer->device, &alloc_ci, NULL, &buffer->buff_mem);
+    vk_chk(vk_result, "failed to allocate buffer memory!");
+
+    vk_chk(vkBindBufferMemory(buffer->device, buffer->handle, buffer->buff_mem, 0), "failed to bind buffer memory");
+
+defer:
+    return result;
+}
+
+void vk_buff_destroy(Vk_Buffer buffer)
+{
+    if (!buffer.device) {
+        nob_log(NOB_WARNING, "cannot destroy null buffer");
+        return;
+    }
+    vkDestroyBuffer(buffer.device, buffer.handle, NULL);
+    vkFreeMemory(buffer.device, buffer.buff_mem, NULL);
+    buffer.handle = NULL;
+}
+
+bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, Vk_Buffer dst_buff, VkDeviceSize size)
+{
+    bool result = true;
+
+    VkCommandBuffer tmp_cmd_buff;
+    cvr_chk(cmd_quick_begin(cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+
+    VkBufferCopy copy_region = {0};
+    if (size) {
+        copy_region.size = size;
+        cvr_chk(size <= dst_buff.size, "Cannot copy buffer, size > dst buffer (won't fit)");
+        cvr_chk(size <= src_buff.size, "Cannot copy buffer, size > src buffer (cannot copy more than what's available)");
+    } else {
+        cvr_chk(dst_buff.size >= src_buff.size, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
+        copy_region.size = src_buff.size;
+    }
+
+    vkCmdCopyBuffer(tmp_cmd_buff, src_buff.handle, dst_buff.handle, 1, &copy_region);
+
+    cvr_chk(cmd_quick_end(cmd_man, queue, &tmp_cmd_buff), "failed quick cmd end");
+
+defer:
+    return result;
+}
+
+bool cmd_man_init(Vk_Cmd_Man *cmd_man)
+{
+    bool result = true;
+    cvr_chk(cmd_pool_create(cmd_man), "failed to create command pool");
+    cvr_chk(cmd_buff_create(cmd_man), "failed to create cmd buffers");
+    cvr_chk(cmd_syncs_create(cmd_man), "failed to create cmd sync objects");
+
+defer:
+    return result;
+}
+
+void cmd_man_destroy(Vk_Cmd_Man *cmd_man)
+{
+    for (size_t i = 0; i < cmd_man->frames_in_flight; i++) {
+        vkDestroySemaphore(cmd_man->device, cmd_man->img_avail_sems.items[i], NULL);
+        vkDestroySemaphore(cmd_man->device, cmd_man->render_fin_sems.items[i], NULL);
+        vkDestroyFence(cmd_man->device, cmd_man->fences.items[i], NULL);
+    }
+    vkDestroyCommandPool(cmd_man->device, cmd_man->pool, NULL);
+
+    nob_da_reset(cmd_man->buffs);
+    nob_da_reset(cmd_man->img_avail_sems);
+    nob_da_reset(cmd_man->render_fin_sems);
+    nob_da_reset(cmd_man->fences);
+}
+
+bool cmd_pool_create(Vk_Cmd_Man *cmd_man)
+{
+    bool result = true;
+    QueueFamilyIndices indices = find_queue_fams(cmd_man->phys_device);
+    cvr_chk(indices.has_gfx, "failed to create command pool, no graphics queue");
+    VkCommandPoolCreateInfo cmd_pool_ci = {0};
+    cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
+    vk_chk(vkCreateCommandPool(cmd_man->device, &cmd_pool_ci, NULL, &cmd_man->pool), "failed to create command pool");
+
+defer:
+    return result;
+}
+
+bool cmd_buff_create(Vk_Cmd_Man *cmd_man)
+{
+    VkCommandBufferAllocateInfo ci = {0};
+    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ci.commandPool = cmd_man->pool;
+    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    nob_da_resize(&cmd_man->buffs, cmd_man->frames_in_flight);
+    ci.commandBufferCount = cmd_man->buffs.count;
+    return vk_ok(vkAllocateCommandBuffers(cmd_man->device, &ci, cmd_man->buffs.items));
+}
+
+bool cmd_syncs_create(Vk_Cmd_Man *cmd_man)
+{
+    bool result = true;
+    VkSemaphoreCreateInfo sem_ci = {0};
+    sem_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    VkFenceCreateInfo fence_ci = {0};
+    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    size_t num_syncs = cmd_man->frames_in_flight;
+    nob_da_resize(&cmd_man->img_avail_sems, num_syncs);
+    nob_da_resize(&cmd_man->render_fin_sems, num_syncs);
+    nob_da_resize(&cmd_man->fences, num_syncs);
+    VkResult vk_result;
+    for (size_t i = 0; i < num_syncs; i++) {
+        vk_result = vkCreateSemaphore(cmd_man->device, &sem_ci, NULL, &cmd_man->img_avail_sems.items[i]);
+        vk_chk(vk_result, "failed to create semaphore");
+        vk_result = vkCreateSemaphore(cmd_man->device, &sem_ci, NULL, &cmd_man->render_fin_sems.items[i]);
+        vk_chk(vk_result, "failed to create semaphore");
+        vk_result = vkCreateFence(cmd_man->device, &fence_ci, NULL, &cmd_man->fences.items[i]);
+        vk_chk(vk_result, "failed to create fence");
+    }
+
+defer:
+    return result;
+}
+
+bool cmd_quick_begin(const Vk_Cmd_Man *cmd_man, VkCommandBuffer *tmp_cmd_buff)
+{
+    bool result = true;
+
+    VkCommandBufferAllocateInfo ci = {0};
+    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ci.commandPool = cmd_man->pool;
+    ci.commandBufferCount = 1;
+    vk_chk(vkAllocateCommandBuffers(cmd_man->device, &ci, tmp_cmd_buff), "failed to create quick cmd");
+
+    VkCommandBufferBeginInfo cmd_begin = {0};
+    cmd_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmd_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vk_chk(vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin), "failed to begin quick cmd");
+
+defer:
+    return result;
+}
+
+bool cmd_quick_end(const Vk_Cmd_Man *cmd_man, VkQueue queue, VkCommandBuffer *tmp_cmd_buff)
+{
+    bool result = true;
+    vk_chk(vkEndCommandBuffer(*tmp_cmd_buff), "failed to end cmd buffer");
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = tmp_cmd_buff;
+    vk_chk(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
+    vk_chk(vkQueueWaitIdle(queue), "failed to wait idle in quick cmd");
+
+defer:
+    vkFreeCommandBuffers(cmd_man->device, cmd_man->pool, 1, tmp_cmd_buff);
+    return result;
 }
 
 #endif // VK_CTX_IMPLEMENTATION

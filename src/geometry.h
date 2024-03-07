@@ -2,6 +2,8 @@
 #define GEOMETRY_H_
 
 #include "ext/raylib-5.0/raymath.h"
+#include <stdint.h>
+
 typedef struct {
     Vector3 pos;
     Vector3 color;
