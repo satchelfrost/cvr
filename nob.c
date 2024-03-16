@@ -60,15 +60,21 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         }
     },
+    {
+        .name = "waves",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
 };
 
 static const char *cvr[] = {
     "cvr",
-    "ext_man",
-    "vertex",
-    "vk_buffer",
-    "vk_cmd_man",
-    "vk_ctx",
 };
 
 bool build_cvr()

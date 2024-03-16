@@ -1,7 +1,13 @@
 #ifndef GEOMETRY_H_
 #define GEOMETRY_H_
 
-#include "vertex.h"
+#include "ext/raylib-5.0/raymath.h"
+#include <stdint.h>
+
+typedef struct {
+    Vector3 pos;
+    Vector3 color;
+} Vertex; 
 
 #define Red 1, 0, 0
 #define DarkRed 0.25f, 0, 0
