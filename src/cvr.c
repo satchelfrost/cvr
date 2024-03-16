@@ -86,7 +86,7 @@ bool window_should_close()
 bool draw_shape(Shape_Type shape_type)
 {
     bool result = true;
-    if (!ctx.pipelines.deflt) create_default_pipeline();
+    if (!ctx.pipelines.deflt) create_dflt_pipeline();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
