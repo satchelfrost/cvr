@@ -47,15 +47,22 @@ typedef struct {
     bool buff_resized;
 } Vk_Swpchain;
 
-/* Manage vulkan buffer info */
 typedef struct {
     VkDevice device;
     size_t size;
     size_t count;
     VkBuffer handle;
-    VkDeviceMemory buff_mem;
+    VkDeviceMemory mem;
     void *mapped;
 } Vk_Buffer;
+
+typedef struct {
+    VkDevice device;
+    size_t width;
+    size_t height;
+    VkImage handle;
+    VkDeviceMemory mem;
+} Vk_Image;
 
 /* Vulkan Context */
 typedef struct {
@@ -77,7 +84,7 @@ typedef struct {
     VkDescriptorPool descriptor_pool;
     vec(VkDescriptorSet) descriptor_sets;
     struct {
-        VkPipeline deflt;
+        VkPipeline dflt;
     } pipelines;
 } Vk_Context;
 
@@ -230,8 +237,17 @@ bool device_exts_supported(VkPhysicalDevice phys_device);
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
 
+/* Must first set the size, count, & device */
+bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data);
+
+/* Must first set the size, count, & device */
+bool idx_buff_init(Vk_Buffer *idx_buff, const void *data);
+
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
 bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, Vk_Buffer dst_buff, VkDeviceSize size);
+
+/* Vk_Image must be set with device, width, and height */
+bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
@@ -296,8 +312,8 @@ bool cvr_destroy()
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
     vkDestroyDescriptorSetLayout(ctx.device, ctx.descriptor_set_layout, NULL);
     nob_da_free(ctx.descriptor_sets);
-    vkDestroyPipeline(ctx.device, ctx.pipelines.deflt, NULL);
-    ctx.pipelines.deflt = NULL;
+    vkDestroyPipeline(ctx.device, ctx.pipelines.dflt, NULL);
+    ctx.pipelines.dflt = NULL;
     vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layout, NULL);
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
@@ -582,7 +598,7 @@ bool create_dflt_pipeline()
     pipeline_ci.renderPass = ctx.render_pass;
     pipeline_ci.subpass = 0;
 
-    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines.deflt);
+    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines.dflt);
     vk_chk(vk_result, "failed to create pipeline");
 
 defer:
@@ -860,7 +876,7 @@ bool create_ubos()
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
         );
         cvr_chk(result, "failed to create uniform buffer");
-        vkMapMemory(ctx.device, buff->buff_mem, 0, buff->size, 0, &buff->mapped);
+        vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
     }
 
 defer:
@@ -1335,10 +1351,10 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
     alloc_ci.allocationSize = mem_reqs.size;
     result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
     cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(buffer->device, &alloc_ci, NULL, &buffer->buff_mem);
+    VkResult vk_result = vkAllocateMemory(buffer->device, &alloc_ci, NULL, &buffer->mem);
     vk_chk(vk_result, "failed to allocate buffer memory!");
 
-    vk_chk(vkBindBufferMemory(buffer->device, buffer->handle, buffer->buff_mem, 0), "failed to bind buffer memory");
+    vk_chk(vkBindBufferMemory(buffer->device, buffer->handle, buffer->mem, 0), "failed to bind buffer memory");
 
 defer:
     return result;
@@ -1351,9 +1367,82 @@ void vk_buff_destroy(Vk_Buffer buffer)
         return;
     }
     vkDestroyBuffer(buffer.device, buffer.handle, NULL);
-    vkFreeMemory(buffer.device, buffer.buff_mem, NULL);
+    vkFreeMemory(buffer.device, buffer.mem, NULL);
     buffer.handle = NULL;
 }
+
+bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
+{
+    bool result = true;
+
+    /* create two buffers, a so-called "staging" buffer, and one for our actual vertex buffer */
+    Vk_Buffer stg_buff = {
+        .device = vtx_buff->device,
+        .size   = vtx_buff->size,
+        .count  = vtx_buff->count,
+    };
+    result = vk_buff_init(
+        &stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create staging buffer");
+
+    vk_chk(vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
+    memcpy(stg_buff.mapped, data, stg_buff.size);
+    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+
+    result = vk_buff_init(
+        vtx_buff,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to create vertex buffer");
+
+    /* transfer data from staging buffer to vertex buffer */
+    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, *vtx_buff, 0);
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+}
+
+bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
+{
+    bool result = true;
+
+    /* create two buffers, a so-called "staging" buffer, and one for our actual index buffer */
+    Vk_Buffer stg_buff = {
+        .device = idx_buff->device,
+        .size   = idx_buff->size,
+        .count  = idx_buff->count,
+    };
+    result = vk_buff_init(
+        &stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create staging buffer");
+
+    vk_chk(vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
+    memcpy(stg_buff.mapped, data, stg_buff.size);
+    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+
+    result = vk_buff_init(
+        idx_buff,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to create index buffer");
+
+    /* transfer data from staging buffer to index buffer */
+    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, *idx_buff, 0);
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+}
+
 
 bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, Vk_Buffer dst_buff, VkDeviceSize size)
 {
@@ -1375,6 +1464,41 @@ bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, 
     vkCmdCopyBuffer(tmp_cmd_buff, src_buff.handle, dst_buff.handle, 1, &copy_region);
 
     cvr_chk(cmd_quick_end(cmd_man, queue, &tmp_cmd_buff), "failed quick cmd end");
+
+defer:
+    return result;
+}
+
+bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
+{
+    bool result = true;
+
+    VkImageCreateInfo img_ci = {
+        .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType   = VK_IMAGE_TYPE_2D,
+        .format      = VK_FORMAT_R8G8B8A8_SRGB,
+        .extent      = {img->width, img->height, 1},
+        .mipLevels   = 1,
+        .arrayLayers = 1,
+        .samples     = VK_SAMPLE_COUNT_1_BIT,
+        .tiling      = VK_IMAGE_TILING_OPTIMAL,
+        .usage       = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    vk_chk(vkCreateImage(img->device, &img_ci, NULL, &img->handle), "failed to create image");
+
+    VkMemoryRequirements mem_reqs = {0};
+    vkGetImageMemoryRequirements(img->device, img->handle, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_ci = {0};
+    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_ci.allocationSize = mem_reqs.size;
+    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
+    cvr_chk(result, "Memory not suitable based on memory requirements");
+    VkResult vk_result = vkAllocateMemory(img->device, &alloc_ci, NULL, &img->mem);
+    vk_chk(vk_result, "failed to allocate buffer memory!");
+
+    vk_chk(vkBindImageMemory(img->device, img->handle, img->mem, 0), "failed to bind buffer memory");
 
 defer:
     return result;

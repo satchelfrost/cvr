@@ -9,6 +9,9 @@
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "ext/stb_image.h"
+
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
 #define MAX_CHAR_PRESSED_QUEUE 16
@@ -28,11 +31,7 @@ typedef struct {
     Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
     const Vertex *verts;
-    size_t vert_count;
-    size_t vert_size;
     const uint16_t *idxs;
-    size_t idx_count;
-    size_t idx_size;
 } Shape;
 
 Keyboard keyboard = {0};
@@ -44,13 +43,6 @@ Shape shapes[SHAPE_COUNT];
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void poll_input_events();
-
-/* Must first set the verts, vert_size, & vert_count */
-bool create_shape_vtx_buffer(Shape *shape);
-
-/* Must first set the idxs, idx_size, & idx_count */
-bool create_shape_idx_buffer(Shape *shape);
-
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 
@@ -86,13 +78,13 @@ bool window_should_close()
 bool draw_shape(Shape_Type shape_type)
 {
     bool result = true;
-    if (!ctx.pipelines.deflt) create_dflt_pipeline();
+    if (!ctx.pipelines.dflt) create_dflt_pipeline();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     if (mat_stack_p)
-        cvr_chk(draw(ctx.pipelines.deflt, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
+        cvr_chk(draw(ctx.pipelines.dflt, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
     else
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
 
@@ -295,78 +287,6 @@ void enable_point_topology()
     core_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 }
 
-bool create_shape_vtx_buffer(Shape *shape)
-{
-    bool result = true;
-
-    /* create two buffers, a so-called "staging" buffer, and one for our actual vertex buffer */
-    Vk_Buffer stg_buff;
-    shape->vtx_buff.device = stg_buff.device = ctx.device;
-    shape->vtx_buff.size   = stg_buff.size   = shape->vert_size * shape->vert_count;
-    shape->vtx_buff.count  = stg_buff.count  = shape->vert_count;
-    result = vk_buff_init(
-        &stg_buff,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    cvr_chk(result, "failed to create staging buffer");
-
-    void* data;
-    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
-    memcpy(data, shape->verts, stg_buff.size);
-    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
-
-    result = vk_buff_init(
-        &shape->vtx_buff,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    cvr_chk(result, "failed to create vertex buffer");
-
-    /* transfer data from staging buffer to vertex buffer */
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->vtx_buff, 0);
-
-defer:
-    vk_buff_destroy(stg_buff);
-    return result;
-}
-
-bool create_shape_idx_buffer(Shape *shape)
-{
-    bool result = true;
-
-    /* create two buffers, a so-called "staging" buffer, and one for our actual index buffer */
-    Vk_Buffer stg_buff;
-    shape->idx_buff.device = stg_buff.device = ctx.device;
-    shape->idx_buff.size   = stg_buff.size   = shape->idx_size * shape->idx_count;
-    shape->idx_buff.count  = stg_buff.count  = shape->idx_count;
-    result = vk_buff_init(
-        &stg_buff,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    cvr_chk(result, "failed to create staging buffer");
-
-    void* data;
-    vk_chk(vkMapMemory(ctx.device, stg_buff.buff_mem, 0, stg_buff.size, 0, &data), "failed to map memory");
-    memcpy(data, shape->idxs, stg_buff.size);
-    vkUnmapMemory(ctx.device, stg_buff.buff_mem);
-
-    result = vk_buff_init(
-        &shape->idx_buff,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    cvr_chk(result, "failed to create index buffer");
-
-    /* transfer data from staging buffer to index buffer */
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, shape->idx_buff, 0);
-
-defer:
-    vk_buff_destroy(stg_buff);
-    return result;
-}
-
 bool alloc_shape_res(Shape_Type shape_type)
 {
     bool result = true;
@@ -378,14 +298,15 @@ bool alloc_shape_res(Shape_Type shape_type)
 
     Shape *shape = &shapes[shape_type];
     switch (shape_type) {
-#define X(CONST_NAME, array_name)                        \
-    case SHAPE_ ## CONST_NAME:                           \
-    shape->vert_count = CONST_NAME ## _VERTS;            \
-    shape->vert_size = sizeof(array_name ## _verts[0]);  \
-    shape->verts = array_name ## _verts;                 \
-    shape->idx_count = CONST_NAME ## _IDXS;              \
-    shape->idx_size = sizeof(array_name ## _indices[0]); \
-    shape->idxs = array_name ## _indices;                \
+#define X(CONST_NAME, array_name)                                                     \
+    case SHAPE_ ## CONST_NAME:                                                        \
+    shape->vtx_buff.device = shape->idx_buff.device = ctx.device;                     \
+    shape->vtx_buff.count = CONST_NAME ## _VERTS;                                     \
+    shape->vtx_buff.size = sizeof(array_name ## _verts[0]) * shape->vtx_buff.count;   \
+    shape->verts = array_name ## _verts;                                              \
+    shape->idx_buff.count = CONST_NAME ## _IDXS;                                      \
+    shape->idx_buff.size = sizeof(array_name ## _indices[0]) * shape->idx_buff.count; \
+    shape->idxs = array_name ## _indices;                                             \
     break;
     SHAPE_LIST
 #undef X
@@ -394,7 +315,8 @@ bool alloc_shape_res(Shape_Type shape_type)
         nob_return_defer(false);
     }
 
-    if ((!create_shape_vtx_buffer(shape)) || (!create_shape_idx_buffer(shape))) {
+
+    if ((!vtx_buff_init(&shape->vtx_buff, shape->verts)) || (!idx_buff_init(&shape->idx_buff, shape->idxs))) {
         nob_log(NOB_ERROR, "failed to allocate resources for shape %d", shape_type);
         nob_return_defer(false);
     }
@@ -427,4 +349,85 @@ void close_window()
     cvr_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
+}
+
+Image load_image(const char *file_name)
+{
+    Image img = {0};
+    img.data = stbi_load(file_name, &img.width, &img.height, &img.channels, STBI_rgb_alpha);
+
+    /* force the image to have rgba even if original only has three */
+    if (img.data) img.channels = 4;
+
+    return img;
+}
+
+void unload_image(Image image)
+{
+    free(image.data);
+}
+
+Texture load_texture_from_image(Image image)
+{
+    Texture texture = {
+        .width    = image.width,
+        .height   = image.height,
+        .mipmaps  = image.mipmaps,
+        .channels = image.channels,
+    };
+
+    /* create staging buffer for image */
+    Vk_Buffer stg_buff;
+    stg_buff.device = ctx.device;
+    stg_buff.size   = image.width * image.height * image.channels;
+    stg_buff.count  = image.width * image.height;
+    bool result = vk_buff_init(
+        &stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    if(!result) {
+        nob_log(NOB_ERROR, "failed to create staging buffer");
+        goto defer;
+    }
+    VkResult res = vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
+    if (!vk_ok(res)) {
+        nob_log(NOB_WARNING, "unable to map memory");
+        goto defer;
+    }
+    memcpy(stg_buff.mapped, image.data, stg_buff.size);
+    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+
+    /* Create the image */
+    Vk_Image img = {
+        .device = ctx.device,
+        .width  = image.width,
+        .height = image.height,
+    };
+    result = vk_img_init(
+        &img,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if(!result) {
+        nob_log(NOB_ERROR, "failed to create image");
+        goto defer;
+    }
+
+    texture.vk_img = img.handle;
+    texture.vk_tex_mem = img.mem;
+
+defer:
+    return texture;
+}
+
+void unload_texture(Texture texture)
+{
+    if (!texture.vk_img || !texture.vk_tex_mem) {
+        nob_log(NOB_WARNING, "texture was never allocated");
+        return;
+    }
+
+    vkDestroyImage(ctx.device, texture.vk_img, NULL);
+    vkFreeMemory(ctx.device, texture.vk_tex_mem, NULL);
 }
