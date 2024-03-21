@@ -2,7 +2,6 @@
 
 layout(push_constant) uniform constants
 {
-    //vec3 color;
     mat4 mvp;
 } push_const;
 
@@ -20,8 +19,6 @@ layout(location = 0) out vec3 fragColor;
 
 void main()
 {
-    //gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
     gl_Position = push_const.mvp * vec4(inPosition, 1.0);
-    // fragColor = push_const.color;
     fragColor = inColor;
 }

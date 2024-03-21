@@ -357,15 +357,6 @@ int main(int argc, char **argv)
         nob_cmd_append(&cmd, "ln", "-sf", shader_path, "shaders");
         if (!nob_cmd_run_sync(cmd)) return 1;
         cmd.count = 0;
-        nob_cmd_append(&cmd, "rm", "res", "-f");
-        if (!nob_cmd_run_sync(cmd)) return 1;
-        cmd.count = 0;
-        if (strcmp(examples[i].name, "texture") == 0) {
-            const char *res_path = nob_temp_sprintf("%s/res", example_path);
-            nob_cmd_append(&cmd, "ln", "-sf", res_path, "res");
-        }
-        if (!nob_cmd_run_sync(cmd)) return 1;
-        cmd.count = 0;
 
         /* Linx only - run example after building */
         nob_log(NOB_INFO, "running example %s", example);
