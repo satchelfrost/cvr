@@ -27,7 +27,8 @@ int main()
         nob_log(NOB_INFO, "    image size = %d bytes", img.height * img.width * 4);
     }
 
-    // Texture tex = load_texture_from_image(img);
+    Texture tex = load_texture_from_image(img);
+    (void)tex;
     unload_image(img);
 
     while(!window_should_close()) {
@@ -40,7 +41,7 @@ int main()
         end_drawing();
     }
 
-    // unload_texture(tex);
+    unload_texture(tex);
     close_window();
     return 0;
 }

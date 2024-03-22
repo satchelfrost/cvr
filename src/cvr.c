@@ -1,4 +1,5 @@
 #include "cvr.h"
+#include <vulkan/vulkan_core.h>
 
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
@@ -399,13 +400,13 @@ Texture load_texture_from_image(Image image)
     vkUnmapMemory(stg_buff.device, stg_buff.mem);
 
     /* Create the image */
-    Vk_Image img = {
+    Vk_Image vk_img = {
         .device = ctx.device,
         .width  = image.width,
         .height = image.height,
     };
     result = vk_img_init(
-        &img,
+        &vk_img,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
@@ -414,10 +415,23 @@ Texture load_texture_from_image(Image image)
         goto defer;
     }
 
-    texture.vk_img = img.handle;
-    texture.vk_tex_mem = img.mem;
+    texture.vk_img = vk_img.handle;
+    texture.vk_tex_mem = vk_img.mem;
+
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.width, vk_img.height);
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
 
 defer:
+    vk_buff_destroy(stg_buff);
     return texture;
 }
 

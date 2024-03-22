@@ -244,10 +244,12 @@ bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data);
 bool idx_buff_init(Vk_Buffer *idx_buff, const void *data);
 
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
-bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, Vk_Buffer dst_buff, VkDeviceSize size);
+bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 /* Vk_Image must be set with device, width, and height */
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
+
+bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, uint32_t width, uint32_t height);
 
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
@@ -1400,7 +1402,7 @@ bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
     cvr_chk(result, "failed to create vertex buffer");
 
     /* transfer data from staging buffer to vertex buffer */
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, *vtx_buff, 0);
+    vk_buff_copy(*vtx_buff, stg_buff, 0);
 
 defer:
     vk_buff_destroy(stg_buff);
@@ -1436,7 +1438,7 @@ bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
     cvr_chk(result, "failed to create index buffer");
 
     /* transfer data from staging buffer to index buffer */
-    vk_buff_copy(&cmd_man, ctx.gfx_queue, stg_buff, *idx_buff, 0);
+    vk_buff_copy(*idx_buff, stg_buff, 0);
 
 defer:
     vk_buff_destroy(stg_buff);
@@ -1444,12 +1446,12 @@ defer:
 }
 
 
-bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, Vk_Buffer dst_buff, VkDeviceSize size)
+bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size)
 {
     bool result = true;
 
     VkCommandBuffer tmp_cmd_buff;
-    cvr_chk(cmd_quick_begin(cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+    cvr_chk(cmd_quick_begin(&cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
 
     VkBufferCopy copy_region = {0};
     if (size) {
@@ -1463,7 +1465,7 @@ bool vk_buff_copy(const Vk_Cmd_Man *cmd_man, VkQueue queue, Vk_Buffer src_buff, 
 
     vkCmdCopyBuffer(tmp_cmd_buff, src_buff.handle, dst_buff.handle, 1, &copy_region);
 
-    cvr_chk(cmd_quick_end(cmd_man, queue, &tmp_cmd_buff), "failed quick cmd end");
+    cvr_chk(cmd_quick_end(&cmd_man, ctx.gfx_queue, &tmp_cmd_buff), "failed quick cmd end");
 
 defer:
     return result;
@@ -1616,6 +1618,89 @@ bool cmd_quick_end(const Vk_Cmd_Man *cmd_man, VkQueue queue, VkCommandBuffer *tm
 
 defer:
     vkFreeCommandBuffers(cmd_man->device, cmd_man->pool, 1, tmp_cmd_buff);
+    return result;
+}
+
+bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
+{
+    bool result = true;
+    VkCommandBuffer tmp_cmd_buff;
+    cvr_chk(cmd_quick_begin(&cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+    
+    bool layout_dst = old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+                      new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    bool layout_shader = old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+                         new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    const char *msg = nob_temp_sprintf(
+        "old_layout %d with new_layout %d not allowed yet",
+        old_layout,
+        new_layout
+    );
+    assert(layout_dst || layout_shader && msg);
+
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = (layout_dst) ? 0 : VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = (layout_dst) ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_SHADER_READ_BIT,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
+        },
+    };
+
+    vkCmdPipelineBarrier(
+        tmp_cmd_buff,
+        (layout_dst) ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+        (layout_dst) ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        NULL,
+        0,
+        NULL,
+        1,
+        &barrier
+    );
+
+    cvr_chk(cmd_quick_end(&cmd_man, ctx.gfx_queue, &tmp_cmd_buff), "failed quick cmd end");
+
+defer:
+    return result;
+}
+
+bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, uint32_t width, uint32_t height)
+{
+    bool result = true;
+    VkCommandBuffer tmp_cmd_buff;
+    cvr_chk(cmd_quick_begin(&cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+
+    VkBufferImageCopy region = {
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .layerCount = 1,
+        },
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {width, height, 1},
+    };
+
+    vkCmdCopyBufferToImage(
+        tmp_cmd_buff,
+        src_buff,
+        dst_img,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &region
+    );
+
+    cvr_chk(cmd_quick_end(&cmd_man, ctx.gfx_queue, &tmp_cmd_buff), "failed quick cmd end");
+
+defer:
     return result;
 }
 
