@@ -108,12 +108,10 @@ void cvr_update_ubos();
 bool create_descriptor_pool();
 bool create_descriptor_sets();
 
-/* Manages synchronization info and gets ready for vulkan commands.
- * Returns true if succeeded and false otherwise */
+/* Manages synchronization info and gets ready for vulkan commands. */
 bool begin_draw();
 
-/* Submits vulkan commands.
- * Returns true if succeeded and false otherwise */
+/* Submits vulkan commands. */
 bool end_draw();
 
 bool draw(VkPipeline pipline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
@@ -496,14 +494,14 @@ bool create_dflt_pipeline()
     vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vert_ci.pName = "main";
-    if (!create_shader_module("./shaders/shader.vert.spv", &vert_ci.module))
+    if (!create_shader_module("./res/shader.vert.spv", &vert_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo frag_ci = {0};
     frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_ci.pName = "main";
-    if (!create_shader_module("./shaders/shader.frag.spv", &frag_ci.module))
+    if (!create_shader_module("./res/shader.frag.spv", &frag_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
@@ -1637,7 +1635,7 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
         old_layout,
         new_layout
     );
-    assert(layout_dst || layout_shader && msg);
+    assert(layout_dst || (layout_shader && msg));
 
     VkImageMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
