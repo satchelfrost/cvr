@@ -226,6 +226,7 @@ typedef struct {
     int mipmaps;
     int channels;
 } Image;
+
 Image load_image(const char *file_name);
 void unload_image(Image image);
 
@@ -237,9 +238,9 @@ typedef struct {
     int mipmaps;
     int channels;
 } Texture;
+
 Texture load_texture_from_image(Image image);
 void unload_texture(Texture texture);
 // void draw_texture(Texture texture, int pos_x, int pos_x, Color tint);
-
 
 #endif // CVR_H_

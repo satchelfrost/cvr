@@ -358,7 +358,7 @@ Image load_image(const char *file_name)
     img.data = stbi_load(file_name, &img.width, &img.height, &img.channels, STBI_rgb_alpha);
 
     /* force the image to have rgba even if original only has three */
-    if (img.data) img.channels = 4;
+    if (img.data) img.channels = 4; // TODO: curious why I have to force this
 
     return img;
 }

@@ -25,11 +25,6 @@
         }                            \
     } while (0)
 #define vk_chk(vk_result, msg) cvr_chk(vk_ok(vk_result), msg)
-#define vec(type) struct { \
-    type *items;           \
-    size_t capacity;       \
-    size_t count;          \
-}
 #define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
 
 typedef struct {
@@ -37,13 +32,31 @@ typedef struct {
     bool has_gfx;
     uint32_t present_idx;
     bool has_present;
-} QueueFamilyIndices;
+} Queue_Fams;
+
+typedef struct {
+    VkImage *items;
+    size_t count;
+    size_t capacity;
+} Imgs;
+
+typedef struct {
+    VkImageView *items;
+    size_t count;
+    size_t capacity;
+} Img_Views;
+
+typedef struct {
+    VkFramebuffer *items;
+    size_t count;
+    size_t capacity;
+} Frame_Buffs;
 
 typedef struct {
     VkSwapchainKHR handle;
-    vec(VkImage) imgs;
-    vec(VkImageView) img_views;
-    vec(VkFramebuffer) buffs;
+    Imgs imgs;
+    Img_Views img_views;
+    Frame_Buffs buffs;
     bool buff_resized;
 } Vk_Swpchain;
 
@@ -64,7 +77,22 @@ typedef struct {
     VkDeviceMemory mem;
 } Vk_Image;
 
-/* Vulkan Context */
+typedef struct {
+    Vk_Buffer *items;
+    size_t count;
+    size_t capacity;
+} UBOS;
+
+typedef struct {
+    VkDescriptorSet *items;
+    size_t count;
+    size_t capacity;
+} Descriptor_Sets;
+
+typedef struct {
+    VkPipeline dflt;
+} Pipelines;
+
 typedef struct {
     GLFWwindow *window;
     VkInstance instance;
@@ -79,13 +107,11 @@ typedef struct {
     VkRenderPass render_pass;
     VkPipelineLayout pipeline_layout;
     Vk_Swpchain swpchain;
-    vec(Vk_Buffer) ubos;
+    UBOS ubos;
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
-    vec(VkDescriptorSet) descriptor_sets;
-    struct {
-        VkPipeline dflt;
-    } pipelines;
+    Descriptor_Sets descriptor_sets;
+    Pipelines pipelines;
 } Vk_Context;
 
 /* CVR render functions */
@@ -120,8 +146,14 @@ bool draw(VkPipeline pipline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mod
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 bool setup_debug_msgr();
-QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device);
-typedef vec(uint32_t) U32_Set;
+Queue_Fams find_queue_fams(VkPhysicalDevice phys_device);
+
+typedef struct {
+    uint32_t *items;
+    size_t count;
+    size_t capacity;
+} U32_Set;
+
 void populate_set(int arr[], size_t arr_size, U32_Set *set);
 bool swpchain_adequate(VkPhysicalDevice phys_device);
 VkSurfaceFormatKHR choose_swpchain_fmt();
@@ -189,14 +221,32 @@ Core_State core_state = {0};
 
 /* Manage vulkan command and sync info */
 typedef struct {
+    VkCommandBuffer *items;
+    size_t count;
+    size_t capacity;
+} Cmd_Buffs;
+
+typedef struct {
+    VkSemaphore *items;
+    size_t count;
+    size_t capacity;
+} Semaphores;
+
+typedef struct {
+    VkFence *items;
+    size_t count;
+    size_t capacity;
+} Fences;
+
+typedef struct {
     VkPhysicalDevice phys_device;
     VkDevice device;
     VkCommandPool pool;
     size_t frames_in_flight;
-    vec(VkCommandBuffer) buffs;
-    vec(VkSemaphore) img_avail_sems;
-    vec(VkSemaphore) render_fin_sems;
-    vec(VkFence) fences;
+    Cmd_Buffs buffs;
+    Semaphores img_avail_sems;
+    Semaphores render_fin_sems;
+    Fences fences;
 } Vk_Cmd_Man;
 static Vk_Cmd_Man cmd_man = {0};
 
@@ -217,11 +267,16 @@ bool cmd_syncs_create(Vk_Cmd_Man *cmd_man);
 bool cmd_pool_create(Vk_Cmd_Man *cmd_man);
 
 /* Manage vulkan extensions*/
-typedef vec(const char*) Extensions;
 typedef struct {
-    Extensions validation_layers;
-    Extensions device_exts;
-    Extensions inst_exts;
+    const char **items;
+    size_t count;
+    size_t capacity;
+} Strings;
+
+typedef struct {
+    Strings validation_layers;
+    Strings device_exts;
+    Strings inst_exts;
     int inited;
 } Ext_Manager;
 
@@ -256,7 +311,12 @@ Ext_Manager ext_manager = {0};
 
 /* Vertex attributes */
 VkVertexInputBindingDescription get_binding_desc();
-typedef vec(VkVertexInputAttributeDescription) VtxAttrDescs;
+typedef struct {
+    VkVertexInputAttributeDescription *items;
+    size_t count;
+    size_t capacity;
+} VtxAttrDescs;
+
 void get_attr_descs(VtxAttrDescs *attr_descs);
 
 static const size_t MAX_FRAMES_IN_FLIGHT = 2;
@@ -368,15 +428,21 @@ defer:
     return result;
 }
 
+typedef struct {
+    VkDeviceQueueCreateInfo *items;
+    size_t count;
+    size_t capacity;
+} Queue_Create_Infos;
+
 bool create_device()
 {
-    QueueFamilyIndices indices = find_queue_fams(ctx.phys_device);
+    Queue_Fams queue_fams = find_queue_fams(ctx.phys_device);
 
-    int queue_fams[] = {indices.gfx_idx, indices.present_idx};
+    int queue_fam_idxs[] = {queue_fams.gfx_idx, queue_fams.present_idx};
     U32_Set unique_fams = {0};
-    populate_set(queue_fams, NOB_ARRAY_LEN(queue_fams), &unique_fams);
+    populate_set(queue_fam_idxs, NOB_ARRAY_LEN(queue_fam_idxs), &unique_fams);
 
-    vec(VkDeviceQueueCreateInfo) queue_cis = {0};
+    Queue_Create_Infos queue_cis = {0};
     float queuePriority = 1.0f;
     for (size_t i = 0; i < unique_fams.count; i++) {
         VkDeviceQueueCreateInfo queue_ci = {0};
@@ -403,8 +469,8 @@ bool create_device()
 
     bool result = true;
     if (vk_ok(vkCreateDevice(ctx.phys_device, &device_ci, NULL, &ctx.device))) {
-        vkGetDeviceQueue(ctx.device, indices.gfx_idx, 0, &ctx.gfx_queue);
-        vkGetDeviceQueue(ctx.device, indices.present_idx, 0, &ctx.present_queue);
+        vkGetDeviceQueue(ctx.device, queue_fams.gfx_idx, 0, &ctx.gfx_queue);
+        vkGetDeviceQueue(ctx.device, queue_fams.present_idx, 0, &ctx.present_queue);
     } else {
         nob_return_defer(false);
     }
@@ -437,12 +503,12 @@ bool create_swpchain()
     swpchain_ci.imageExtent = ctx.extent = choose_swp_extent();
     swpchain_ci.imageArrayLayers = 1;
     swpchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    QueueFamilyIndices indices = find_queue_fams(ctx.phys_device);
-    uint32_t queue_fams[] = {indices.gfx_idx, indices.present_idx};
-    if (indices.gfx_idx != indices.present_idx) {
+    Queue_Fams queue_fams = find_queue_fams(ctx.phys_device);
+    uint32_t queue_fam_idxs[] = {queue_fams.gfx_idx, queue_fams.present_idx};
+    if (queue_fams.gfx_idx != queue_fams.present_idx) {
         swpchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        swpchain_ci.queueFamilyIndexCount = 2;
-        swpchain_ci.pQueueFamilyIndices = queue_fams;
+        swpchain_ci.queueFamilyIndexCount = NOB_ARRAY_LEN(queue_fam_idxs);
+        swpchain_ci.pQueueFamilyIndices = queue_fam_idxs;
     } else {
         swpchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
@@ -909,11 +975,17 @@ bool create_descriptor_pool()
     return vk_ok(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, &ctx.descriptor_pool));
 }
 
+typedef struct {
+    VkDescriptorSetLayout *items;
+    size_t count;
+    size_t capacity;
+} Descriptor_Set_Layouts;
+
 bool create_descriptor_sets()
 {
     bool result = true;
 
-    vec(VkDescriptorSetLayout) layouts = {0};
+    Descriptor_Set_Layouts layouts = {0};
     nob_da_resize(&layouts, MAX_FRAMES_IN_FLIGHT);
     for (size_t i = 0; i < layouts.count; i++)
         layouts.items[i] = ctx.descriptor_set_layout;
@@ -954,7 +1026,7 @@ defer:
 bool is_device_suitable(VkPhysicalDevice phys_device)
 {
     bool result = true;
-    QueueFamilyIndices indices = find_queue_fams(phys_device);
+    Queue_Fams queue_fams = find_queue_fams(phys_device);
     VkPhysicalDeviceProperties props;
     VkPhysicalDeviceFeatures features;
     vkGetPhysicalDeviceProperties(phys_device, &props);
@@ -962,7 +1034,7 @@ bool is_device_suitable(VkPhysicalDevice phys_device)
     result &= (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
                props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
     result &= (features.geometryShader);
-    cvr_chk(indices.has_gfx && indices.has_present, "requested indices not present");
+    cvr_chk(queue_fams.has_gfx && queue_fams.has_present, "requested indices not present");
     cvr_chk(device_exts_supported(phys_device), "device extensions not supported");
     cvr_chk(swpchain_adequate(phys_device), "swapchain was not adequate");
 
@@ -1020,30 +1092,30 @@ bool setup_debug_msgr()
     }
 }
 
-QueueFamilyIndices find_queue_fams(VkPhysicalDevice phys_device)
+Queue_Fams find_queue_fams(VkPhysicalDevice phys_device)
 {
     uint32_t queue_fam_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, NULL);
-    VkQueueFamilyProperties queue_fams[queue_fam_count];
-    vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, queue_fams);
-    QueueFamilyIndices indices = {0};
+    VkQueueFamilyProperties queue_fam_props[queue_fam_count];
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, queue_fam_props);
+    Queue_Fams queue_fams = {0};
     for (size_t i = 0; i < queue_fam_count; i++) {
-        if (queue_fams[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            indices.gfx_idx = i;
-            indices.has_gfx = true;
+        if (queue_fam_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            queue_fams.gfx_idx = i;
+            queue_fams.has_gfx = true;
         }
 
         VkBool32 present_support = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(phys_device, i, ctx.surface, &present_support);
         if (present_support) {
-            indices.present_idx = i;
-            indices.has_present = true;
+            queue_fams.present_idx = i;
+            queue_fams.has_present = true;
         }
 
-        if (indices.has_gfx && indices.has_present)
-            return indices;
+        if (queue_fams.has_gfx && queue_fams.has_present)
+            return queue_fams;
     }
-    return indices;
+    return queue_fams;
 }
 
 bool pick_phys_device()
@@ -1533,12 +1605,12 @@ void cmd_man_destroy(Vk_Cmd_Man *cmd_man)
 bool cmd_pool_create(Vk_Cmd_Man *cmd_man)
 {
     bool result = true;
-    QueueFamilyIndices indices = find_queue_fams(cmd_man->phys_device);
-    cvr_chk(indices.has_gfx, "failed to create command pool, no graphics queue");
+    Queue_Fams queue_fams = find_queue_fams(cmd_man->phys_device);
+    cvr_chk(queue_fams.has_gfx, "failed to create command pool, no graphics queue");
     VkCommandPoolCreateInfo cmd_pool_ci = {0};
     cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    cmd_pool_ci.queueFamilyIndex = indices.gfx_idx;
+    cmd_pool_ci.queueFamilyIndex = queue_fams.gfx_idx;
     vk_chk(vkCreateCommandPool(cmd_man->device, &cmd_pool_ci, NULL, &cmd_man->pool), "failed to create command pool");
 
 defer:
