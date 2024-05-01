@@ -392,28 +392,24 @@ Texture load_texture_from_image(Image image)
         goto defer;
     }
     VkResult res = vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
-    if (!vk_ok(res)) {
-        nob_log(NOB_WARNING, "unable to map memory");
-        goto defer;
-    }
+    vk_chk(res, "unable to map memory");
     memcpy(stg_buff.mapped, image.data, stg_buff.size);
     vkUnmapMemory(stg_buff.device, stg_buff.mem);
 
-    /* Create the image */
+    /* create the image */
     Vk_Image vk_img = {
         .device = ctx.device,
-        .width  = image.width,
-        .height = image.height,
+        .extent  = {
+            image.width,
+            image.height
+        }
     };
     result = vk_img_init(
         &vk_img,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    if(!result) {
-        nob_log(NOB_ERROR, "failed to create image");
-        goto defer;
-    }
+    cvr_chk(result, "failed to create image");
 
     texture.vk_img = vk_img.handle;
     texture.vk_tex_mem = vk_img.mem;
@@ -423,12 +419,16 @@ Texture load_texture_from_image(Image image)
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
-    vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.width, vk_img.height);
+    vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent);
     transition_img_layout(
         vk_img.handle,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
+
+    // VkImageView img_view;
+    // result = create_img_view(vk_img.handle, VK_FORMAT_R8G8B8A8_SRGB, &img_view);
+    // cvr_chk(result, "failed to create image view");
 
 defer:
     vk_buff_destroy(stg_buff);

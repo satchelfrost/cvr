@@ -71,8 +71,7 @@ typedef struct {
 
 typedef struct {
     VkDevice device;
-    size_t width;
-    size_t height;
+    VkExtent2D extent;
     VkImage handle;
     VkDeviceMemory mem;
 } Vk_Image;
@@ -122,6 +121,7 @@ bool create_device();
 bool create_surface();
 bool create_swpchain();
 bool create_img_views();
+bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view);
 bool create_descriptor_set_layout();
 bool create_dflt_pipeline();
 bool create_shader_module(const char *file_name, VkShaderModule *module);
@@ -302,7 +302,7 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 /* Vk_Image must be set with device, width, and height */
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 
-bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, uint32_t width, uint32_t height);
+bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
@@ -528,25 +528,35 @@ bool create_swpchain()
     }
 }
 
+bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view)
+{
+    VkImageViewCreateInfo img_view_ci = {0};
+    img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    img_view_ci.image = img;
+    img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    img_view_ci.format = fmt;
+    img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    img_view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    img_view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    img_view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    img_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    img_view_ci.subresourceRange.baseMipLevel = 0;
+    img_view_ci.subresourceRange.levelCount = 1;
+    img_view_ci.subresourceRange.baseArrayLayer = 0;
+    img_view_ci.subresourceRange.layerCount = 1;
+    return vk_ok(vkCreateImageView(ctx.device, &img_view_ci, NULL, img_view));
+}
+
 bool create_img_views()
 {
     nob_da_resize(&ctx.swpchain.img_views, ctx.swpchain.imgs.count);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)  {
-        VkImageViewCreateInfo img_view_ci = {0};
-        img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        img_view_ci.image = ctx.swpchain.imgs.items[i];
-        img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        img_view_ci.format = ctx.surface_fmt.format;
-        img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        img_view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        img_view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        img_view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        img_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        img_view_ci.subresourceRange.baseMipLevel = 0;
-        img_view_ci.subresourceRange.levelCount = 1;
-        img_view_ci.subresourceRange.baseArrayLayer = 0;
-        img_view_ci.subresourceRange.layerCount = 1;
-        if (!vk_ok(vkCreateImageView(ctx.device, &img_view_ci, NULL, &ctx.swpchain.img_views.items[i])))
+        bool view_created = create_img_view(
+            ctx.swpchain.imgs.items[i],
+            ctx.surface_fmt.format,
+            &ctx.swpchain.img_views.items[i]
+        );
+        if (!view_created)
             return false;
     }
 
@@ -1549,7 +1559,7 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
         .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType   = VK_IMAGE_TYPE_2D,
         .format      = VK_FORMAT_R8G8B8A8_SRGB,
-        .extent      = {img->width, img->height, 1},
+        .extent      = {img->extent.width, img->extent.height, 1},
         .mipLevels   = 1,
         .arrayLayers = 1,
         .samples     = VK_SAMPLE_COUNT_1_BIT,
@@ -1744,7 +1754,7 @@ defer:
     return result;
 }
 
-bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, uint32_t width, uint32_t height)
+bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
 {
     bool result = true;
     VkCommandBuffer tmp_cmd_buff;
@@ -1756,7 +1766,7 @@ bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, uint32_t width, uint32_t he
             .layerCount = 1,
         },
         .imageOffset = {0, 0, 0},
-        .imageExtent = {width, height, 1},
+        .imageExtent = {extent.width, extent.height, 1},
     };
 
     vkCmdCopyBufferToImage(

@@ -23,7 +23,7 @@ int main()
     } else {
         nob_log(NOB_INFO, "image %s was successfully loaded", img_name);
         nob_log(NOB_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
-        nob_log(NOB_INFO, "    image size = %d bytes", img.height * img.width * 4);
+        nob_log(NOB_INFO, "    image size = %d bytes", img.height * img.width * img.channels);
     }
 
     Texture tex = load_texture_from_image(img);
