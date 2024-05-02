@@ -330,10 +330,10 @@ bool cvr_init()
     cvr_chk(create_swpchain(), "failed to create swapchain");
     cvr_chk(create_img_views(), "failed to create image views");
     cvr_chk(create_render_pass(), "failed to create render pass");
-    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
 
+    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
     cvr_chk(create_ubos(), "failed to create uniform buffer objects");
     cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
     cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
