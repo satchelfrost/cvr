@@ -61,7 +61,6 @@ typedef struct {
 } Vk_Swpchain;
 
 typedef struct {
-    VkDevice device;
     size_t size;
     size_t count;
     VkBuffer handle;
@@ -70,7 +69,6 @@ typedef struct {
 } Vk_Buffer;
 
 typedef struct {
-    VkDevice device;
     VkExtent2D extent;
     VkImage handle;
     VkDeviceMemory mem;
@@ -239,8 +237,6 @@ typedef struct {
 } Fences;
 
 typedef struct {
-    VkPhysicalDevice phys_device;
-    VkDevice device;
     VkCommandPool pool;
     size_t frames_in_flight;
     Cmd_Buffs buffs;
@@ -250,21 +246,17 @@ typedef struct {
 } Vk_Cmd_Man;
 static Vk_Cmd_Man cmd_man = {0};
 
-/* Initializes a vulkan command manager, must set the physical device & logical device, and frames in flight */
-bool cmd_man_init(Vk_Cmd_Man *cmd_man);
-
-/* Destroys a vulkan command manager */
-void cmd_man_destroy(Vk_Cmd_Man *cmd_man);
+bool cmd_man_init();
+bool cmd_buff_create();
+bool cmd_syncs_create();
+bool cmd_pool_create();
+void cmd_man_destroy();
 
 /* Allocates and begins a temporary command buffer. Easy-to-use, not super efficent. */
-bool cmd_quick_begin(const Vk_Cmd_Man *cmd_man, VkCommandBuffer *tmp_cmd_buff);
+bool cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff);
 
 /* Ends and frees a temporary command buffer. Easy-to-use, not super efficent. */
-bool cmd_quick_end(const Vk_Cmd_Man *cmd, VkQueue queue, VkCommandBuffer *tmp_cmd_buff);
-
-bool cmd_buff_create(Vk_Cmd_Man *cmd_man);
-bool cmd_syncs_create(Vk_Cmd_Man *cmd_man);
-bool cmd_pool_create(Vk_Cmd_Man *cmd_man);
+bool cmd_quick_end(VkCommandBuffer *tmp_cmd_buff);
 
 /* Manage vulkan extensions*/
 typedef struct {
@@ -286,22 +278,15 @@ bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
 
-/* VK_Buffer must be set with device & size prior to calling this function */
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
-
-/* Must first set the size, count, & device */
 bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data);
-
-/* Must first set the size, count, & device */
 bool idx_buff_init(Vk_Buffer *idx_buff, const void *data);
 
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
 bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
-/* Vk_Image must be set with device, width, and height */
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
-
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 
 /* Add various static extensions & validation layers here */
@@ -319,7 +304,7 @@ typedef struct {
 
 void get_attr_descs(VtxAttrDescs *attr_descs);
 
-static const size_t MAX_FRAMES_IN_FLIGHT = 2;
+#define MAX_FRAMES_IN_FLIGHT 2
 static uint32_t curr_frame = 0;
 static uint32_t img_idx = 0;
 
@@ -347,10 +332,8 @@ bool cvr_init()
     cvr_chk(create_render_pass(), "failed to create render pass");
     cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
-    cmd_man.phys_device = ctx.phys_device;
-    cmd_man.device = ctx.device;
-    cmd_man.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
-    cvr_chk(cmd_man_init(&cmd_man), "failed to create vulkan command manager");
+    cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
+
     cvr_chk(create_ubos(), "failed to create uniform buffer objects");
     cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
     cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
@@ -456,6 +439,7 @@ bool create_device()
     VkDeviceCreateInfo device_ci = {0};
     device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     VkPhysicalDeviceFeatures features = {0};
+    features.samplerAnisotropy = VK_TRUE;
     features.fillModeNonSolid = VK_TRUE;
     device_ci.pEnabledFeatures = &features;
     device_ci.pQueueCreateInfos = queue_cis.items;
@@ -924,16 +908,23 @@ defer:
 
 bool create_descriptor_set_layout()
 {
-    VkDescriptorSetLayoutBinding layout = {0};
-    layout.binding = 0;
-    layout.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    layout.descriptorCount = 1;
-    layout.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    VkDescriptorSetLayoutBinding ubo_layout = {0};
+    ubo_layout.binding = 0;
+    ubo_layout.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo_layout.descriptorCount = 1;
+    ubo_layout.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+    VkDescriptorSetLayoutBinding sampler_layout = {0};
+    sampler_layout.binding = 1;
+    sampler_layout.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sampler_layout.descriptorCount = 1;
+    sampler_layout.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding layouts[] = {ubo_layout, sampler_layout};
     VkDescriptorSetLayoutCreateInfo layout_ci = {0};
     layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_ci.bindingCount = 1;
-    layout_ci.pBindings = &layout;
+    layout_ci.bindingCount = NOB_ARRAY_LEN(layouts);
+    layout_ci.pBindings = layouts;
     return vk_ok(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.descriptor_set_layout));
 }
 
@@ -945,7 +936,6 @@ bool create_ubos()
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         Vk_Buffer *buff = &ctx.ubos.items[i];
         buff->size = sizeof(UBO);
-        buff->device = ctx.device;
         result = vk_buff_init(
             buff,
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -972,15 +962,17 @@ void cvr_update_ubos()
 
 bool create_descriptor_pool()
 {
-    VkDescriptorPoolSize pool_size = {0};
-    pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    pool_size.descriptorCount = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+    VkDescriptorPoolSize pool_sizes[2] = {0};
+    pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_sizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+    pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_sizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
 
     VkDescriptorPoolCreateInfo pool_ci = {0};
     pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_ci.poolSizeCount = 1;
-    pool_ci.pPoolSizes = &pool_size;
-    pool_ci.maxSets = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+    pool_ci.poolSizeCount = NOB_ARRAY_LEN(pool_sizes);
+    pool_ci.pPoolSizes = pool_sizes;
+    pool_ci.maxSets = MAX_FRAMES_IN_FLIGHT;
 
     return vk_ok(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, &ctx.descriptor_pool));
 }
@@ -1003,7 +995,7 @@ bool create_descriptor_sets()
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc.descriptorPool = ctx.descriptor_pool;
-    alloc.descriptorSetCount = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+    alloc.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
     alloc.pSetLayouts = layouts.items;
 
     nob_da_resize(&ctx.descriptor_sets, MAX_FRAMES_IN_FLIGHT);
@@ -1418,25 +1410,24 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
     bool result = true;
     VkBufferCreateInfo buffer_ci = {0};
     buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    cvr_chk(buffer->size, "Vk_Buffer must be set with size before calling constructor");
+    cvr_chk(buffer->size, "Vk_Buffer must be set with size before calling vk_buff_init");
     buffer_ci.size = (VkDeviceSize) buffer->size;
     buffer_ci.usage = usage;
     buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    cvr_chk(buffer->device, "Vk_Buffer must be set with device before calling constructor");
-    vk_chk(vkCreateBuffer(buffer->device, &buffer_ci, NULL, &buffer->handle), "failed to create buffer");
+    vk_chk(vkCreateBuffer(ctx.device, &buffer_ci, NULL, &buffer->handle), "failed to create buffer");
 
     VkMemoryRequirements mem_reqs = {0};
-    vkGetBufferMemoryRequirements(buffer->device, buffer->handle, &mem_reqs);
+    vkGetBufferMemoryRequirements(ctx.device, buffer->handle, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_ci = {0};
     alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_ci.allocationSize = mem_reqs.size;
     result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
     cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(buffer->device, &alloc_ci, NULL, &buffer->mem);
+    VkResult vk_result = vkAllocateMemory(ctx.device, &alloc_ci, NULL, &buffer->mem);
     vk_chk(vk_result, "failed to allocate buffer memory!");
 
-    vk_chk(vkBindBufferMemory(buffer->device, buffer->handle, buffer->mem, 0), "failed to bind buffer memory");
+    vk_chk(vkBindBufferMemory(ctx.device, buffer->handle, buffer->mem, 0), "failed to bind buffer memory");
 
 defer:
     return result;
@@ -1444,12 +1435,12 @@ defer:
 
 void vk_buff_destroy(Vk_Buffer buffer)
 {
-    if (!buffer.device) {
+    if (!buffer.handle) {
         nob_log(NOB_WARNING, "cannot destroy null buffer");
         return;
     }
-    vkDestroyBuffer(buffer.device, buffer.handle, NULL);
-    vkFreeMemory(buffer.device, buffer.mem, NULL);
+    vkDestroyBuffer(ctx.device, buffer.handle, NULL);
+    vkFreeMemory(ctx.device, buffer.mem, NULL);
     buffer.handle = NULL;
 }
 
@@ -1459,7 +1450,6 @@ bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
 
     /* create two buffers, a so-called "staging" buffer, and one for our actual vertex buffer */
     Vk_Buffer stg_buff = {
-        .device = vtx_buff->device,
         .size   = vtx_buff->size,
         .count  = vtx_buff->count,
     };
@@ -1470,9 +1460,9 @@ bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
     );
     cvr_chk(result, "failed to create staging buffer");
 
-    vk_chk(vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
+    vk_chk(vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
     memcpy(stg_buff.mapped, data, stg_buff.size);
-    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+    vkUnmapMemory(ctx.device, stg_buff.mem);
 
     result = vk_buff_init(
         vtx_buff,
@@ -1495,7 +1485,6 @@ bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
 
     /* create two buffers, a so-called "staging" buffer, and one for our actual index buffer */
     Vk_Buffer stg_buff = {
-        .device = idx_buff->device,
         .size   = idx_buff->size,
         .count  = idx_buff->count,
     };
@@ -1506,9 +1495,9 @@ bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
     );
     cvr_chk(result, "failed to create staging buffer");
 
-    vk_chk(vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
+    vk_chk(vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
     memcpy(stg_buff.mapped, data, stg_buff.size);
-    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+    vkUnmapMemory(ctx.device, stg_buff.mem);
 
     result = vk_buff_init(
         idx_buff,
@@ -1531,7 +1520,7 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size)
     bool result = true;
 
     VkCommandBuffer tmp_cmd_buff;
-    cvr_chk(cmd_quick_begin(&cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+    cvr_chk(cmd_quick_begin(&tmp_cmd_buff), "failed quick cmd begin");
 
     VkBufferCopy copy_region = {0};
     if (size) {
@@ -1545,7 +1534,7 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size)
 
     vkCmdCopyBuffer(tmp_cmd_buff, src_buff.handle, dst_buff.handle, 1, &copy_region);
 
-    cvr_chk(cmd_quick_end(&cmd_man, ctx.gfx_queue, &tmp_cmd_buff), "failed quick cmd end");
+    cvr_chk(cmd_quick_end(&tmp_cmd_buff), "failed quick cmd end");
 
 defer:
     return result;
@@ -1554,6 +1543,9 @@ defer:
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
 {
     bool result = true;
+
+    cvr_chk(img->extent.width, "Vk_Image must be set with width before calling vk_img_init");
+    cvr_chk(img->extent.height, "Vk_Image must be set with height before calling vk_img_init");
 
     VkImageCreateInfo img_ci = {
         .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -1567,78 +1559,79 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
         .usage       = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vk_chk(vkCreateImage(img->device, &img_ci, NULL, &img->handle), "failed to create image");
+    vk_chk(vkCreateImage(ctx.device, &img_ci, NULL, &img->handle), "failed to create image");
 
     VkMemoryRequirements mem_reqs = {0};
-    vkGetImageMemoryRequirements(img->device, img->handle, &mem_reqs);
+    vkGetImageMemoryRequirements(ctx.device, img->handle, &mem_reqs);
 
     VkMemoryAllocateInfo alloc_ci = {0};
     alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc_ci.allocationSize = mem_reqs.size;
     result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
     cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(img->device, &alloc_ci, NULL, &img->mem);
+    VkResult vk_result = vkAllocateMemory(ctx.device, &alloc_ci, NULL, &img->mem);
     vk_chk(vk_result, "failed to allocate buffer memory!");
 
-    vk_chk(vkBindImageMemory(img->device, img->handle, img->mem, 0), "failed to bind buffer memory");
+    vk_chk(vkBindImageMemory(ctx.device, img->handle, img->mem, 0), "failed to bind image buffer memory");
 
 defer:
     return result;
 }
 
-bool cmd_man_init(Vk_Cmd_Man *cmd_man)
+bool cmd_man_init()
 {
     bool result = true;
-    cvr_chk(cmd_pool_create(cmd_man), "failed to create command pool");
-    cvr_chk(cmd_buff_create(cmd_man), "failed to create cmd buffers");
-    cvr_chk(cmd_syncs_create(cmd_man), "failed to create cmd sync objects");
+    cmd_man.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
+    cvr_chk(cmd_pool_create(), "failed to create command pool");
+    cvr_chk(cmd_buff_create(), "failed to create cmd buffers");
+    cvr_chk(cmd_syncs_create(), "failed to create cmd sync objects");
 
 defer:
     return result;
 }
 
-void cmd_man_destroy(Vk_Cmd_Man *cmd_man)
+void cmd_man_destroy()
 {
-    for (size_t i = 0; i < cmd_man->frames_in_flight; i++) {
-        vkDestroySemaphore(cmd_man->device, cmd_man->img_avail_sems.items[i], NULL);
-        vkDestroySemaphore(cmd_man->device, cmd_man->render_fin_sems.items[i], NULL);
-        vkDestroyFence(cmd_man->device, cmd_man->fences.items[i], NULL);
+    for (size_t i = 0; i < cmd_man.frames_in_flight; i++) {
+        vkDestroySemaphore(ctx.device, cmd_man.img_avail_sems.items[i], NULL);
+        vkDestroySemaphore(ctx.device, cmd_man.render_fin_sems.items[i], NULL);
+        vkDestroyFence(ctx.device, cmd_man.fences.items[i], NULL);
     }
-    vkDestroyCommandPool(cmd_man->device, cmd_man->pool, NULL);
+    vkDestroyCommandPool(ctx.device, cmd_man.pool, NULL);
 
-    nob_da_reset(cmd_man->buffs);
-    nob_da_reset(cmd_man->img_avail_sems);
-    nob_da_reset(cmd_man->render_fin_sems);
-    nob_da_reset(cmd_man->fences);
+    nob_da_reset(cmd_man.buffs);
+    nob_da_reset(cmd_man.img_avail_sems);
+    nob_da_reset(cmd_man.render_fin_sems);
+    nob_da_reset(cmd_man.fences);
 }
 
-bool cmd_pool_create(Vk_Cmd_Man *cmd_man)
+bool cmd_pool_create()
 {
     bool result = true;
-    Queue_Fams queue_fams = find_queue_fams(cmd_man->phys_device);
+    Queue_Fams queue_fams = find_queue_fams(ctx.phys_device);
     cvr_chk(queue_fams.has_gfx, "failed to create command pool, no graphics queue");
     VkCommandPoolCreateInfo cmd_pool_ci = {0};
     cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cmd_pool_ci.queueFamilyIndex = queue_fams.gfx_idx;
-    vk_chk(vkCreateCommandPool(cmd_man->device, &cmd_pool_ci, NULL, &cmd_man->pool), "failed to create command pool");
+    vk_chk(vkCreateCommandPool(ctx.device, &cmd_pool_ci, NULL, &cmd_man.pool), "failed to create command pool");
 
 defer:
     return result;
 }
 
-bool cmd_buff_create(Vk_Cmd_Man *cmd_man)
+bool cmd_buff_create()
 {
     VkCommandBufferAllocateInfo ci = {0};
     ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ci.commandPool = cmd_man->pool;
+    ci.commandPool = cmd_man.pool;
     ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    nob_da_resize(&cmd_man->buffs, cmd_man->frames_in_flight);
-    ci.commandBufferCount = cmd_man->buffs.count;
-    return vk_ok(vkAllocateCommandBuffers(cmd_man->device, &ci, cmd_man->buffs.items));
+    nob_da_resize(&cmd_man.buffs, cmd_man.frames_in_flight);
+    ci.commandBufferCount = cmd_man.buffs.count;
+    return vk_ok(vkAllocateCommandBuffers(ctx.device, &ci, cmd_man.buffs.items));
 }
 
-bool cmd_syncs_create(Vk_Cmd_Man *cmd_man)
+bool cmd_syncs_create()
 {
     bool result = true;
     VkSemaphoreCreateInfo sem_ci = {0};
@@ -1646,17 +1639,17 @@ bool cmd_syncs_create(Vk_Cmd_Man *cmd_man)
     VkFenceCreateInfo fence_ci = {0};
     fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    size_t num_syncs = cmd_man->frames_in_flight;
-    nob_da_resize(&cmd_man->img_avail_sems, num_syncs);
-    nob_da_resize(&cmd_man->render_fin_sems, num_syncs);
-    nob_da_resize(&cmd_man->fences, num_syncs);
+    size_t num_syncs = cmd_man.frames_in_flight;
+    nob_da_resize(&cmd_man.img_avail_sems, num_syncs);
+    nob_da_resize(&cmd_man.render_fin_sems, num_syncs);
+    nob_da_resize(&cmd_man.fences, num_syncs);
     VkResult vk_result;
     for (size_t i = 0; i < num_syncs; i++) {
-        vk_result = vkCreateSemaphore(cmd_man->device, &sem_ci, NULL, &cmd_man->img_avail_sems.items[i]);
+        vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.img_avail_sems.items[i]);
         vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateSemaphore(cmd_man->device, &sem_ci, NULL, &cmd_man->render_fin_sems.items[i]);
+        vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.render_fin_sems.items[i]);
         vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateFence(cmd_man->device, &fence_ci, NULL, &cmd_man->fences.items[i]);
+        vk_result = vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.fences.items[i]);
         vk_chk(vk_result, "failed to create fence");
     }
 
@@ -1664,16 +1657,16 @@ defer:
     return result;
 }
 
-bool cmd_quick_begin(const Vk_Cmd_Man *cmd_man, VkCommandBuffer *tmp_cmd_buff)
+bool cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
 {
     bool result = true;
 
     VkCommandBufferAllocateInfo ci = {0};
     ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ci.commandPool = cmd_man->pool;
+    ci.commandPool = cmd_man.pool;
     ci.commandBufferCount = 1;
-    vk_chk(vkAllocateCommandBuffers(cmd_man->device, &ci, tmp_cmd_buff), "failed to create quick cmd");
+    vk_chk(vkAllocateCommandBuffers(ctx.device, &ci, tmp_cmd_buff), "failed to create quick cmd");
 
     VkCommandBufferBeginInfo cmd_begin = {0};
     cmd_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1684,7 +1677,7 @@ defer:
     return result;
 }
 
-bool cmd_quick_end(const Vk_Cmd_Man *cmd_man, VkQueue queue, VkCommandBuffer *tmp_cmd_buff)
+bool cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
 {
     bool result = true;
     vk_chk(vkEndCommandBuffer(*tmp_cmd_buff), "failed to end cmd buffer");
@@ -1693,11 +1686,11 @@ bool cmd_quick_end(const Vk_Cmd_Man *cmd_man, VkQueue queue, VkCommandBuffer *tm
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = tmp_cmd_buff;
-    vk_chk(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
-    vk_chk(vkQueueWaitIdle(queue), "failed to wait idle in quick cmd");
+    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
+    vk_chk(vkQueueWaitIdle(ctx.gfx_queue), "failed to wait idle in quick cmd");
 
 defer:
-    vkFreeCommandBuffers(cmd_man->device, cmd_man->pool, 1, tmp_cmd_buff);
+    vkFreeCommandBuffers(ctx.device, cmd_man.pool, 1, tmp_cmd_buff);
     return result;
 }
 
@@ -1705,7 +1698,7 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
 {
     bool result = true;
     VkCommandBuffer tmp_cmd_buff;
-    cvr_chk(cmd_quick_begin(&cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+    cvr_chk(cmd_quick_begin(&tmp_cmd_buff), "failed quick cmd begin");
     
     bool layout_dst = old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
                       new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -1748,7 +1741,7 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
         &barrier
     );
 
-    cvr_chk(cmd_quick_end(&cmd_man, ctx.gfx_queue, &tmp_cmd_buff), "failed quick cmd end");
+    cvr_chk(cmd_quick_end(&tmp_cmd_buff), "failed quick cmd end");
 
 defer:
     return result;
@@ -1758,7 +1751,7 @@ bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
 {
     bool result = true;
     VkCommandBuffer tmp_cmd_buff;
-    cvr_chk(cmd_quick_begin(&cmd_man, &tmp_cmd_buff), "failed quick cmd begin");
+    cvr_chk(cmd_quick_begin(&tmp_cmd_buff), "failed quick cmd begin");
 
     VkBufferImageCopy region = {
         .imageSubresource = {
@@ -1778,7 +1771,7 @@ bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
         &region
     );
 
-    cvr_chk(cmd_quick_end(&cmd_man, ctx.gfx_queue, &tmp_cmd_buff), "failed quick cmd end");
+    cvr_chk(cmd_quick_end(&tmp_cmd_buff), "failed quick cmd end");
 
 defer:
     return result;

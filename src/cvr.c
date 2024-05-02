@@ -301,7 +301,6 @@ bool alloc_shape_res(Shape_Type shape_type)
     switch (shape_type) {
 #define X(CONST_NAME, array_name)                                                     \
     case SHAPE_ ## CONST_NAME:                                                        \
-    shape->vtx_buff.device = shape->idx_buff.device = ctx.device;                     \
     shape->vtx_buff.count = CONST_NAME ## _VERTS;                                     \
     shape->vtx_buff.size = sizeof(array_name ## _verts[0]) * shape->vtx_buff.count;   \
     shape->verts = array_name ## _verts;                                              \
@@ -379,7 +378,6 @@ Texture load_texture_from_image(Image image)
 
     /* create staging buffer for image */
     Vk_Buffer stg_buff;
-    stg_buff.device = ctx.device;
     stg_buff.size   = image.width * image.height * image.channels;
     stg_buff.count  = image.width * image.height;
     bool result = vk_buff_init(
@@ -391,14 +389,13 @@ Texture load_texture_from_image(Image image)
         nob_log(NOB_ERROR, "failed to create staging buffer");
         goto defer;
     }
-    VkResult res = vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
+    VkResult res = vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
     vk_chk(res, "unable to map memory");
     memcpy(stg_buff.mapped, image.data, stg_buff.size);
-    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+    vkUnmapMemory(ctx.device, stg_buff.mem);
 
     /* create the image */
     Vk_Image vk_img = {
-        .device = ctx.device,
         .extent  = {
             image.width,
             image.height
@@ -426,9 +423,30 @@ Texture load_texture_from_image(Image image)
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
 
-    // VkImageView img_view;
-    // result = create_img_view(vk_img.handle, VK_FORMAT_R8G8B8A8_SRGB, &img_view);
-    // cvr_chk(result, "failed to create image view");
+    /* create image view */
+    VkImageView img_view;
+    result = create_img_view(vk_img.handle, VK_FORMAT_R8G8B8A8_SRGB, &img_view);
+    cvr_chk(result, "failed to create image view");
+    texture.vk_img_view = img_view;
+
+    /* create sampler */
+    VkSamplerCreateInfo sampler_ci = {0};
+    sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_ci.magFilter = VK_FILTER_LINEAR;
+    sampler_ci.minFilter = VK_FILTER_LINEAR;
+    sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_ci.anisotropyEnable = VK_TRUE;
+    VkPhysicalDeviceProperties props = {0};
+    vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
+    sampler_ci.maxAnisotropy = props.limits.maxSamplerAnisotropy;
+    sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    VkSampler sampler;
+    vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
+    texture.sampler = sampler;
 
 defer:
     vk_buff_destroy(stg_buff);
@@ -442,6 +460,8 @@ void unload_texture(Texture texture)
         return;
     }
 
+    vkDestroySampler(ctx.device, texture.sampler, NULL);
+    vkDestroyImageView(ctx.device, texture.vk_img_view, NULL);
     vkDestroyImage(ctx.device, texture.vk_img, NULL);
     vkFreeMemory(ctx.device, texture.vk_tex_mem, NULL);
 }

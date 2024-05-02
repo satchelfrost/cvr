@@ -232,7 +232,9 @@ void unload_image(Image image);
 
 typedef struct {
     void *vk_img;
+    void *vk_img_view;
     void *vk_tex_mem;
+    void *sampler;
     int width;
     int height;
     int mipmaps;
