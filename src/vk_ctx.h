@@ -1,6 +1,7 @@
 #ifndef VK_CTX_H_
 #define VK_CTX_H_
 
+#include "cvr.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
 #include <sys/types.h>
@@ -81,6 +82,11 @@ typedef struct {
 } UBOS;
 
 typedef struct {
+    VkImageView view;
+    VkSampler sampler;
+} Vk_Texture;
+
+typedef struct {
     VkDescriptorSet *items;
     size_t count;
     size_t capacity;
@@ -105,6 +111,7 @@ typedef struct {
     VkPipelineLayout pipeline_layout;
     Vk_Swpchain swpchain;
     UBOS ubos;
+    Vk_Texture texture;
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     Descriptor_Sets descriptor_sets;
@@ -332,11 +339,6 @@ bool cvr_init()
     cvr_chk(create_render_pass(), "failed to create render pass");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
-
-    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
-    cvr_chk(create_ubos(), "failed to create uniform buffer objects");
-    cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
-    cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
 
     /* Set the default topology to triangle list */
     core_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -601,8 +603,8 @@ bool create_dflt_pipeline()
 
     VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    // rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer_ci.polygonMode = VK_POLYGON_MODE_LINE;
+    rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
+    // rasterizer_ci.polygonMode = VK_POLYGON_MODE_LINE;
     rasterizer_ci.lineWidth = 1.0f;
     // rasterizer_ci.cullMode = VK_CULL_MODE_FRONT_BIT;
     // rasterizer_ci.cullMode = VK_CULL_MODE_BACK_BIT;
@@ -1008,16 +1010,30 @@ bool create_descriptor_sets()
         buff_info.offset = 0;
         buff_info.range = sizeof(UBO);
 
-        VkWriteDescriptorSet descriptor_write = {0};
-        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet = ctx.descriptor_sets.items[i];
-        descriptor_write.dstBinding = 0;
-        descriptor_write.dstArrayElement = 0;
+        VkDescriptorImageInfo img_info = {0};
+        img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_info.imageView = ctx.texture.view;
+        img_info.sampler = ctx.texture.sampler;
 
-        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_write.descriptorCount = 1;
-        descriptor_write.pBufferInfo = &buff_info;
-        vkUpdateDescriptorSets(ctx.device, 1, &descriptor_write, 0, NULL);
+        VkWriteDescriptorSet descriptor_writes[2] = {0};
+
+        descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_writes[0].dstSet = ctx.descriptor_sets.items[i];
+        descriptor_writes[0].dstBinding = 0;
+        descriptor_writes[0].dstArrayElement = 0;
+        descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_writes[0].descriptorCount = 1;
+        descriptor_writes[0].pBufferInfo = &buff_info;
+
+        descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_writes[1].dstSet = ctx.descriptor_sets.items[i];
+        descriptor_writes[1].dstBinding = 1;
+        descriptor_writes[1].dstArrayElement = 0;
+        descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_writes[1].descriptorCount = 1;
+        descriptor_writes[1].pImageInfo = &img_info;
+
+        vkUpdateDescriptorSets(ctx.device, NOB_ARRAY_LEN(descriptor_writes), descriptor_writes, 0, NULL);
     }
 
 defer:
@@ -1402,6 +1418,12 @@ void get_attr_descs(VtxAttrDescs *attr_descs)
     desc.location = 1;
     desc.format = VK_FORMAT_R32G32B32_SFLOAT;
     desc.offset = offsetof(Vertex, color);
+    nob_da_append(attr_descs, desc);
+
+    desc.binding = 0;
+    desc.location = 2;
+    desc.format = VK_FORMAT_R32G32_SFLOAT;
+    desc.offset = offsetof(Vertex, tex_coord);
     nob_da_append(attr_descs, desc);
 }
 

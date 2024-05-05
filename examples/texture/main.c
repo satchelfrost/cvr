@@ -1,10 +1,11 @@
 #include "cvr.h"
 #include "ext/nob.h"
+#include <math.h>
 
 int main()
 {
     Camera camera = {
-        .position   = {5.0f, 5.0f, 5.0f},
+        .position   = {0.0f, 1.0f, 2.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = 45.0f,
@@ -25,6 +26,7 @@ int main()
         nob_log(NOB_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
         nob_log(NOB_INFO, "    image size = %d bytes", img.height * img.width * img.channels);
     }
+    float aspect_ratio = (float)img.width / img.height;
 
     Texture tex = load_texture_from_image(img);
     (void)tex;
@@ -34,6 +36,11 @@ int main()
         begin_drawing(RED);
         begin_mode_3d(camera);
 
+            double time = get_time();
+            rotate_z(3.14259f);
+            scale(aspect_ratio, 1.0f, 1.0f);
+            rotate_y(-time);
+            draw_shape(SHAPE_QUAD);
         // draw_texture(texture, width / 2, height / 2, PINK);
 
         end_mode_3d();

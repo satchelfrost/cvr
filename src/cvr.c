@@ -448,6 +448,14 @@ Texture load_texture_from_image(Image image)
     vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
     texture.sampler = sampler;
 
+    ctx.texture.sampler = sampler; // TODO: not the best way to do this
+    ctx.texture.view = img_view;   // TODO: not the best way to do this
+
+    cvr_chk(create_ubos(), "failed to create uniform buffer objects");
+    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
+    cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
+    cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
+
 defer:
     vk_buff_destroy(stg_buff);
     return texture;
@@ -455,6 +463,8 @@ defer:
 
 void unload_texture(Texture texture)
 {
+    vkDeviceWaitIdle(ctx.device);
+
     if (!texture.vk_img || !texture.vk_tex_mem) {
         nob_log(NOB_WARNING, "texture was never allocated");
         return;
