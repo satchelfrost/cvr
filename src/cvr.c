@@ -79,7 +79,13 @@ bool window_should_close()
 bool draw_shape(Shape_Type shape_type)
 {
     bool result = true;
-    if (!ctx.pipelines.dflt) create_dflt_pipeline();
+    if (!ctx.pipelines.dflt) {
+        cvr_chk(create_ubos(), "failed to create uniform buffer objects");
+        cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
+        cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
+        cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
+        cvr_chk(create_dflt_pipeline(), "failed to create default pipeline");
+    }
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
@@ -204,13 +210,6 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     }
 
     if ((key == keyboard.exit_key) && (action == GLFW_PRESS)) glfwSetWindowShouldClose(window, GLFW_TRUE);
-}
-
-void set_cube_color(Color color)
-{
-    core_state.cube_color.x = color.r / (float)255.0f;
-    core_state.cube_color.y = color.g / (float)255.0f;
-    core_state.cube_color.z = color.b / (float)255.0f;
 }
 
 double get_time()
@@ -354,11 +353,9 @@ void close_window()
 Image load_image(const char *file_name)
 {
     Image img = {0};
-    img.data = stbi_load(file_name, &img.width, &img.height, &img.channels, STBI_rgb_alpha);
-
-    /* force the image to have rgba even if original only has three */
-    if (img.data) img.channels = 4; // TODO: curious why I have to force this
-
+    int channels;
+    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
+    img.format = (int)VK_FORMAT_R8G8B8A8_SRGB;
     return img;
 }
 
@@ -367,111 +364,22 @@ void unload_image(Image image)
     free(image.data);
 }
 
-Texture load_texture_from_image(Image image)
+Texture load_texture_from_image(Image img)
 {
     Texture texture = {
-        .width    = image.width,
-        .height   = image.height,
-        .mipmaps  = image.mipmaps,
-        .channels = image.channels,
+        .width    = img.width,
+        .height   = img.height,
+        .mipmaps  = img.mipmaps,
+        .format   = img.format,
     };
 
-    /* create staging buffer for image */
-    Vk_Buffer stg_buff;
-    stg_buff.size   = image.width * image.height * image.channels;
-    stg_buff.count  = image.width * image.height;
-    bool result = vk_buff_init(
-        &stg_buff,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    if(!result) {
-        nob_log(NOB_ERROR, "failed to create staging buffer");
-        goto defer;
-    }
-    VkResult res = vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
-    vk_chk(res, "unable to map memory");
-    memcpy(stg_buff.mapped, image.data, stg_buff.size);
-    vkUnmapMemory(ctx.device, stg_buff.mem);
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id))
+        nob_log(NOB_ERROR, "unable to load texture");
 
-    /* create the image */
-    Vk_Image vk_img = {
-        .extent  = {
-            image.width,
-            image.height
-        }
-    };
-    result = vk_img_init(
-        &vk_img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    cvr_chk(result, "failed to create image");
-
-    texture.vk_img = vk_img.handle;
-    texture.vk_tex_mem = vk_img.mem;
-
-    transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
-    vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent);
-    transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
-
-    /* create image view */
-    VkImageView img_view;
-    result = create_img_view(vk_img.handle, VK_FORMAT_R8G8B8A8_SRGB, &img_view);
-    cvr_chk(result, "failed to create image view");
-    texture.vk_img_view = img_view;
-
-    /* create sampler */
-    VkSamplerCreateInfo sampler_ci = {0};
-    sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_ci.magFilter = VK_FILTER_LINEAR;
-    sampler_ci.minFilter = VK_FILTER_LINEAR;
-    sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_ci.anisotropyEnable = VK_TRUE;
-    VkPhysicalDeviceProperties props = {0};
-    vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
-    sampler_ci.maxAnisotropy = props.limits.maxSamplerAnisotropy;
-    sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
-    sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    VkSampler sampler;
-    vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
-    texture.sampler = sampler;
-
-    ctx.texture.sampler = sampler; // TODO: not the best way to do this
-    ctx.texture.view = img_view;   // TODO: not the best way to do this
-
-    cvr_chk(create_ubos(), "failed to create uniform buffer objects");
-    cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
-    cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
-    cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
-
-defer:
-    vk_buff_destroy(stg_buff);
     return texture;
 }
 
 void unload_texture(Texture texture)
 {
-    vkDeviceWaitIdle(ctx.device);
-
-    if (!texture.vk_img || !texture.vk_tex_mem) {
-        nob_log(NOB_WARNING, "texture was never allocated");
-        return;
-    }
-
-    vkDestroySampler(ctx.device, texture.sampler, NULL);
-    vkDestroyImageView(ctx.device, texture.vk_img_view, NULL);
-    vkDestroyImage(ctx.device, texture.vk_img, NULL);
-    vkFreeMemory(ctx.device, texture.vk_tex_mem, NULL);
+    vk_unload_texture(texture.id);
 }

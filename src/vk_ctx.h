@@ -84,7 +84,16 @@ typedef struct {
 typedef struct {
     VkImageView view;
     VkSampler sampler;
+    Vk_Image img;
+    size_t id;
+    bool active;
 } Vk_Texture;
+
+typedef struct {
+    Vk_Texture *items;
+    size_t count;
+    size_t capacity;
+} Vk_Textures;
 
 typedef struct {
     VkDescriptorSet *items;
@@ -111,7 +120,7 @@ typedef struct {
     VkPipelineLayout pipeline_layout;
     Vk_Swpchain swpchain;
     UBOS ubos;
-    Vk_Texture texture;
+    Vk_Textures textures;
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     Descriptor_Sets descriptor_sets;
@@ -127,7 +136,6 @@ bool create_surface();
 bool create_swpchain();
 bool create_img_views();
 bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view);
-bool create_descriptor_set_layout();
 bool create_dflt_pipeline();
 bool create_shader_module(const char *file_name, VkShaderModule *module);
 bool create_render_pass();
@@ -136,6 +144,7 @@ bool recreate_swpchain();
 
 bool create_ubos();
 void cvr_update_ubos();
+bool create_descriptor_set_layout();
 bool create_descriptor_pool();
 bool create_descriptor_sets();
 
@@ -196,8 +205,6 @@ typedef struct Color {
 void cvr_begin_render_pass(Color color);
 
 typedef struct {
-    Color clear_color;
-    Vector3 cube_color;
     Camera camera;
     VkPrimitiveTopology topology;
     Matrix view;
@@ -295,6 +302,8 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id);
+bool vk_unload_texture(size_t id);
 
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
@@ -908,28 +917,6 @@ defer:
     return result;
 }
 
-bool create_descriptor_set_layout()
-{
-    VkDescriptorSetLayoutBinding ubo_layout = {0};
-    ubo_layout.binding = 0;
-    ubo_layout.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo_layout.descriptorCount = 1;
-    ubo_layout.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    VkDescriptorSetLayoutBinding sampler_layout = {0};
-    sampler_layout.binding = 1;
-    sampler_layout.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    sampler_layout.descriptorCount = 1;
-    sampler_layout.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutBinding layouts[] = {ubo_layout, sampler_layout};
-    VkDescriptorSetLayoutCreateInfo layout_ci = {0};
-    layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_ci.bindingCount = NOB_ARRAY_LEN(layouts);
-    layout_ci.pBindings = layouts;
-    return vk_ok(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.descriptor_set_layout));
-}
-
 bool create_ubos()
 {
     bool result = true;
@@ -962,21 +949,78 @@ void cvr_update_ubos()
     memcpy(ctx.ubos.items[curr_frame].mapped, &ubo, sizeof(ubo));
 }
 
+typedef struct {
+    VkDescriptorSetLayoutBinding *items;
+    size_t count;
+    size_t capacity;
+} Vk_Descriptor_Set_Layout_Bindings;
+
+bool create_descriptor_set_layout()
+{
+    bool result = true;
+
+    Vk_Descriptor_Set_Layout_Bindings layouts = {0};
+    VkDescriptorSetLayoutBinding layout = {
+        .binding = layouts.count,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+    };
+    nob_da_append(&layouts, layout);
+
+    for (size_t i = 0; i < ctx.textures.count; i++) {
+        layout.binding = layouts.count;
+        layout.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        layout.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        nob_da_append(&layouts, layout);
+    }
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {0};
+    layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_ci.bindingCount = layouts.count;
+    layout_ci.pBindings = layouts.items;
+
+    VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.descriptor_set_layout);
+    vk_chk(vk_result, "failed to create descriptor set layout");
+
+defer:
+    nob_da_free(layouts);
+    return result;
+}
+
+typedef struct {
+    VkDescriptorPoolSize *items;
+    size_t count;
+    size_t capacity;
+} Vk_Descriptor_Pool_Sizes;
+
 bool create_descriptor_pool()
 {
-    VkDescriptorPoolSize pool_sizes[2] = {0};
-    pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    pool_sizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT;
-    pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_sizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+    bool result = true;
+
+    Vk_Descriptor_Pool_Sizes pool_sizes = {0};
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = MAX_FRAMES_IN_FLIGHT,
+    };
+    nob_da_append(&pool_sizes, pool_size);
+
+    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    for (size_t i = 0; i < ctx.textures.count; i++)
+        nob_da_append(&pool_sizes, pool_size);
 
     VkDescriptorPoolCreateInfo pool_ci = {0};
     pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_ci.poolSizeCount = NOB_ARRAY_LEN(pool_sizes);
-    pool_ci.pPoolSizes = pool_sizes;
+    pool_ci.poolSizeCount = pool_sizes.count;
+    pool_ci.pPoolSizes = pool_sizes.items;
     pool_ci.maxSets = MAX_FRAMES_IN_FLIGHT;
 
-    return vk_ok(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, &ctx.descriptor_pool));
+    VkResult vk_res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, &ctx.descriptor_pool);
+    vk_chk(vk_res, "failed to create descriptor pool");
+
+defer:
+    nob_da_free(pool_sizes);
+    return result;
 }
 
 typedef struct {
@@ -984,6 +1028,12 @@ typedef struct {
     size_t count;
     size_t capacity;
 } Descriptor_Set_Layouts;
+
+typedef struct {
+    VkWriteDescriptorSet *items;
+    size_t count;
+    size_t capacity;
+} Vk_Descriptor_Writes;
 
 bool create_descriptor_sets()
 {
@@ -1004,40 +1054,44 @@ bool create_descriptor_sets()
     VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.descriptor_sets.items);
     vk_chk(vk_result, "failed to allocate descriptor sets");
 
+    Vk_Descriptor_Writes descriptor_writes = {0};
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        descriptor_writes.count = 0;
+
         VkDescriptorBufferInfo buff_info = {0};
         buff_info.buffer = ctx.ubos.items[i].handle;
         buff_info.offset = 0;
         buff_info.range = sizeof(UBO);
 
-        VkDescriptorImageInfo img_info = {0};
-        img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_info.imageView = ctx.texture.view;
-        img_info.sampler = ctx.texture.sampler;
+        VkWriteDescriptorSet descriptor_write = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = ctx.descriptor_sets.items[i],
+            .dstBinding = descriptor_writes.count,
+            .dstArrayElement = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .pBufferInfo = &buff_info,
+        };
+        nob_da_append(&descriptor_writes, descriptor_write);
 
-        VkWriteDescriptorSet descriptor_writes[2] = {0};
+        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        for (size_t j = 0; j < ctx.textures.count; j++) {
+            VkDescriptorImageInfo img_info = {0};
+            img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            img_info.imageView = ctx.textures.items[j].view;
+            img_info.sampler = ctx.textures.items[j].sampler;
+            descriptor_write.dstBinding = descriptor_writes.count;
+            descriptor_write.pImageInfo = &img_info;
+            nob_da_append(&descriptor_writes, descriptor_write);
+        }
 
-        descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_writes[0].dstSet = ctx.descriptor_sets.items[i];
-        descriptor_writes[0].dstBinding = 0;
-        descriptor_writes[0].dstArrayElement = 0;
-        descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_writes[0].descriptorCount = 1;
-        descriptor_writes[0].pBufferInfo = &buff_info;
-
-        descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_writes[1].dstSet = ctx.descriptor_sets.items[i];
-        descriptor_writes[1].dstBinding = 1;
-        descriptor_writes[1].dstArrayElement = 0;
-        descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_writes[1].descriptorCount = 1;
-        descriptor_writes[1].pImageInfo = &img_info;
-
-        vkUpdateDescriptorSets(ctx.device, NOB_ARRAY_LEN(descriptor_writes), descriptor_writes, 0, NULL);
+        vkUpdateDescriptorSets(ctx.device, descriptor_writes.count, descriptor_writes.items, 0, NULL);
     }
 
 defer:
     nob_da_free(layouts);
+    nob_da_free(descriptor_writes);
     return result;
 }
 
@@ -1797,6 +1851,125 @@ bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
 
 defer:
     return result;
+}
+
+static inline int format_to_size(VkFormat fmt)
+{
+    if (fmt == VK_FORMAT_R8G8B8A8_SRGB) {
+        return 4;
+    } else {
+        nob_log(NOB_WARNING, "unrecognized format %d, returning 4 instead", fmt);
+        return 4;
+    }
+}
+
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id)
+{
+    bool result = true;
+
+    /* create staging buffer for image */
+    Vk_Buffer stg_buff;
+    stg_buff.size   = width * height * format_to_size(fmt);
+    stg_buff.count  = width * height;
+    result = vk_buff_init(
+        &stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    if(!result) {
+        nob_log(NOB_ERROR, "failed to create staging buffer");
+        goto defer;
+    }
+    VkResult res = vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
+    vk_chk(res, "unable to map memory");
+    memcpy(stg_buff.mapped, data, stg_buff.size);
+    vkUnmapMemory(ctx.device, stg_buff.mem);
+
+    /* create the image */
+    Vk_Image vk_img = {
+        .extent  = {
+            width,
+            height
+        }
+    };
+    result = vk_img_init(
+        &vk_img,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to create image");
+
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent);
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    /* create image view */
+    VkImageView img_view;
+    result = create_img_view(vk_img.handle, fmt, &img_view);
+    cvr_chk(result, "failed to create image view");
+
+    /* create sampler */
+    VkSamplerCreateInfo sampler_ci = {0};
+    sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_ci.magFilter = VK_FILTER_LINEAR;
+    sampler_ci.minFilter = VK_FILTER_LINEAR;
+    sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_ci.anisotropyEnable = VK_TRUE;
+    VkPhysicalDeviceProperties props = {0};
+    vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
+    sampler_ci.maxAnisotropy = props.limits.maxSamplerAnisotropy;
+    sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    VkSampler sampler;
+    vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
+
+    Vk_Texture texture = {
+        .view = img_view,
+        .sampler = sampler,
+        .img = vk_img,
+        .id = ctx.textures.count,
+        .active = true,
+    };
+    *id = texture.id;
+    nob_da_append(&ctx.textures, texture);
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+}
+
+bool vk_unload_texture(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device); // TODO: alternatives?
+
+    for (size_t i = 0; i < ctx.textures.count; i++) {
+        Vk_Texture *texture = &ctx.textures.items[i];
+        if (texture->id == id) {
+            if (!texture->active) {
+                nob_log(NOB_WARNING, "cannot unload texture %d, already inactive", texture->id);
+                return false;
+            } else {
+                vkDestroySampler(ctx.device, texture->sampler, NULL);
+                vkDestroyImageView(ctx.device, texture->view, NULL);
+                vkDestroyImage(ctx.device, texture->img.handle, NULL);
+                vkFreeMemory(ctx.device, texture->img.mem, NULL);
+                texture->active = false;
+            }
+        }
+    }
+
+    return true;
 }
 
 #endif // VK_CTX_IMPLEMENTATION

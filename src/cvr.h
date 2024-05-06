@@ -2,6 +2,7 @@
 #define CVR_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -224,24 +225,21 @@ typedef struct {
     int width;
     int height;
     int mipmaps;
-    int channels;
+    int format;
 } Image;
 
 Image load_image(const char *file_name);
-void unload_image(Image image);
+void unload_image(Image img);
 
 typedef struct {
-    void *vk_img;
-    void *vk_img_view;
-    void *vk_tex_mem;
-    void *sampler;
+    size_t id;
     int width;
     int height;
     int mipmaps;
-    int channels;
+    int format;
 } Texture;
 
-Texture load_texture_from_image(Image image);
+Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
 // void draw_texture(Texture texture, int pos_x, int pos_x, Color tint);
 
