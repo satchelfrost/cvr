@@ -79,12 +79,13 @@ bool window_should_close()
 bool draw_shape(Shape_Type shape_type)
 {
     bool result = true;
+
     if (!ctx.pipelines.dflt) {
-        cvr_chk(create_ubos(), "failed to create uniform buffer objects");
-        cvr_chk(create_descriptor_set_layout(), "failed to create desciptorset layout");
-        cvr_chk(create_descriptor_pool(), "failed to create descriptor pool");
-        cvr_chk(create_descriptor_sets(), "failed to create descriptor pool");
-        cvr_chk(create_dflt_pipeline(), "failed to create default pipeline");
+        if (!create_ubos()) nob_return_defer(false);
+        if (!create_descriptor_set_layout()) nob_return_defer(false);
+        if (!create_descriptor_pool()) nob_return_defer(false);
+        if (!create_descriptor_sets()) nob_return_defer(false);
+        if (!create_dflt_pipeline()) nob_return_defer(false);
     }
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 

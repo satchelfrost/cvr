@@ -961,15 +961,15 @@ bool create_descriptor_set_layout()
 
     Vk_Descriptor_Set_Layout_Bindings layouts = {0};
     VkDescriptorSetLayoutBinding layout = {
-        .binding = layouts.count,
+        .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = 1,
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
     };
     nob_da_append(&layouts, layout);
 
-    for (size_t i = 0; i < ctx.textures.count; i++) {
-        layout.binding = layouts.count;
+    if (ctx.textures.count) {
+        layout.binding = 1;
         layout.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         layout.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         nob_da_append(&layouts, layout);
@@ -1005,9 +1005,13 @@ bool create_descriptor_pool()
     };
     nob_da_append(&pool_sizes, pool_size);
 
-    pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    for (size_t i = 0; i < ctx.textures.count; i++)
+    if (ctx.textures.count) {
+        pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        // pool_size.descriptorCount = ctx.textures.count * MAX_FRAMES_IN_FLIGHT; // TODO: I think we need this instead
+        pool_size.descriptorCount = MAX_FRAMES_IN_FLIGHT;
         nob_da_append(&pool_sizes, pool_size);
+    }
+
 
     VkDescriptorPoolCreateInfo pool_ci = {0};
     pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

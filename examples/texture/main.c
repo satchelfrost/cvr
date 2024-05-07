@@ -40,7 +40,7 @@ int main()
             rotate_z(3.14259f);
             scale((sin(time) + 2.0f) * aspect_ratio / 2.0f, (sin(time) + 2.0f) / 2.0f, 1.0f);
             rotate_y(time);
-            draw_shape(SHAPE_QUAD);
+            if(!draw_shape(SHAPE_QUAD)) return 1;
 
         // draw_texture(texture, width / 2, height / 2, PINK);
 
