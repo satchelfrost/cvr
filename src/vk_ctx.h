@@ -15,7 +15,6 @@
 
 /* Common macro definitions */
 #define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(ctx.instance, #pfn)
-#define unused(x) (void)(x)
 #define MIN_SEVERITY NOB_WARNING
 #define vk_ok(x) ((x) == VK_SUCCESS)
 #define cvr_chk(expr, msg)           \
@@ -27,6 +26,7 @@
     } while (0)
 #define vk_chk(vk_result, msg) cvr_chk(vk_ok(vk_result), msg)
 #define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
+#define MAX_FRAMES_IN_FLIGHT 2
 
 typedef struct {
     uint32_t gfx_idx;
@@ -87,6 +87,7 @@ typedef struct {
     Vk_Image img;
     size_t id;
     bool active;
+    VkDescriptorSet descriptor_sets[MAX_FRAMES_IN_FLIGHT];
 } Vk_Texture;
 
 typedef struct {
@@ -94,12 +95,6 @@ typedef struct {
     size_t count;
     size_t capacity;
 } Vk_Textures;
-
-typedef struct {
-    VkDescriptorSet *items;
-    size_t count;
-    size_t capacity;
-} Descriptor_Sets;
 
 typedef struct {
     VkPipeline dflt;
@@ -121,9 +116,10 @@ typedef struct {
     Vk_Swpchain swpchain;
     UBOS ubos;
     Vk_Textures textures;
-    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorSetLayout ubo_set_layout;
+    VkDescriptorSetLayout texture_set_layout;
     VkDescriptorPool descriptor_pool;
-    Descriptor_Sets descriptor_sets;
+    VkDescriptorSet ubo_descriptor_sets[MAX_FRAMES_IN_FLIGHT];
     Pipelines pipelines;
 } Vk_Context;
 
@@ -320,7 +316,7 @@ typedef struct {
 
 void get_attr_descs(VtxAttrDescs *attr_descs);
 
-#define MAX_FRAMES_IN_FLIGHT 2
+/* Manages frames in flight */
 static uint32_t curr_frame = 0;
 static uint32_t img_idx = 0;
 
@@ -364,8 +360,8 @@ bool cvr_destroy()
         vk_buff_destroy(ctx.ubos.items[i]);
     nob_da_free(ctx.ubos);
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
-    vkDestroyDescriptorSetLayout(ctx.device, ctx.descriptor_set_layout, NULL);
-    nob_da_free(ctx.descriptor_sets);
+    vkDestroyDescriptorSetLayout(ctx.device, ctx.ubo_set_layout, NULL);
+    vkDestroyDescriptorSetLayout(ctx.device, ctx.texture_set_layout, NULL);
     vkDestroyPipeline(ctx.device, ctx.pipelines.dflt, NULL);
     ctx.pipelines.dflt = NULL;
     vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layout, NULL);
@@ -637,8 +633,9 @@ bool create_dflt_pipeline()
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_layout_ci.pSetLayouts = &ctx.descriptor_set_layout;
-    pipeline_layout_ci.setLayoutCount = 1;
+    VkDescriptorSetLayout set_layouts[] = {ctx.ubo_set_layout, ctx.texture_set_layout};
+    pipeline_layout_ci.pSetLayouts = set_layouts;
+    pipeline_layout_ci.setLayoutCount = NOB_ARRAY_LEN(set_layouts);
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
@@ -794,8 +791,16 @@ bool draw(VkPipeline pipeline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mo
     vkCmdBindDescriptorSets(
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layout, 0, 1, &ctx.descriptor_sets.items[curr_frame], 0, NULL
+        ctx.pipeline_layout, 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
     );
+
+    for (size_t i = 0; i < ctx.textures.count; i++) {
+        vkCmdBindDescriptorSets(
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layout, 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+        );
+    }
 
     Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
     Matrix mvp = MatrixMultiply(model, viewProj);
@@ -949,42 +954,35 @@ void cvr_update_ubos()
     memcpy(ctx.ubos.items[curr_frame].mapped, &ubo, sizeof(ubo));
 }
 
-typedef struct {
-    VkDescriptorSetLayoutBinding *items;
-    size_t count;
-    size_t capacity;
-} Vk_Descriptor_Set_Layout_Bindings;
-
 bool create_descriptor_set_layout()
 {
     bool result = true;
 
-    Vk_Descriptor_Set_Layout_Bindings layouts = {0};
-    VkDescriptorSetLayoutBinding layout = {
+    VkDescriptorSetLayoutBinding set_layout_binding = {
         .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = 1,
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
     };
-    nob_da_append(&layouts, layout);
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &set_layout_binding,
+    };
+
+    VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.ubo_set_layout);
+    vk_chk(vk_result, "failed to create descriptor set layout for uniform buffer");
 
     if (ctx.textures.count) {
-        layout.binding = 1;
-        layout.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        layout.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        nob_da_append(&layouts, layout);
+        set_layout_binding.binding = 1;
+        set_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.texture_set_layout);
+        vk_chk(vk_result, "failed to create descriptor set layout for texture");
     }
 
-    VkDescriptorSetLayoutCreateInfo layout_ci = {0};
-    layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_ci.bindingCount = layouts.count;
-    layout_ci.pBindings = layouts.items;
-
-    VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.descriptor_set_layout);
-    vk_chk(vk_result, "failed to create descriptor set layout");
-
 defer:
-    nob_da_free(layouts);
     return result;
 }
 
@@ -1003,21 +1001,21 @@ bool create_descriptor_pool()
         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = MAX_FRAMES_IN_FLIGHT,
     };
+    uint32_t max_sets = MAX_FRAMES_IN_FLIGHT;
     nob_da_append(&pool_sizes, pool_size);
 
     if (ctx.textures.count) {
         pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        // pool_size.descriptorCount = ctx.textures.count * MAX_FRAMES_IN_FLIGHT; // TODO: I think we need this instead
-        pool_size.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+        pool_size.descriptorCount = ctx.textures.count * MAX_FRAMES_IN_FLIGHT;
         nob_da_append(&pool_sizes, pool_size);
+        max_sets += ctx.textures.count * MAX_FRAMES_IN_FLIGHT;
     }
-
 
     VkDescriptorPoolCreateInfo pool_ci = {0};
     pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_ci.poolSizeCount = pool_sizes.count;
     pool_ci.pPoolSizes = pool_sizes.items;
-    pool_ci.maxSets = MAX_FRAMES_IN_FLIGHT;
+    pool_ci.maxSets = max_sets;
 
     VkResult vk_res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, &ctx.descriptor_pool);
     vk_chk(vk_res, "failed to create descriptor pool");
@@ -1027,75 +1025,67 @@ defer:
     return result;
 }
 
-typedef struct {
-    VkDescriptorSetLayout *items;
-    size_t count;
-    size_t capacity;
-} Descriptor_Set_Layouts;
-
-typedef struct {
-    VkWriteDescriptorSet *items;
-    size_t count;
-    size_t capacity;
-} Vk_Descriptor_Writes;
-
 bool create_descriptor_sets()
 {
     bool result = true;
 
-    Descriptor_Set_Layouts layouts = {0};
-    nob_da_resize(&layouts, MAX_FRAMES_IN_FLIGHT);
-    for (size_t i = 0; i < layouts.count; i++)
-        layouts.items[i] = ctx.descriptor_set_layout;
+    /* allocate uniform buffer descriptor sets */
+    VkDescriptorSetLayout set_layouts[MAX_FRAMES_IN_FLIGHT];
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        set_layouts[i] = ctx.ubo_set_layout;
 
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc.descriptorPool = ctx.descriptor_pool;
     alloc.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    alloc.pSetLayouts = layouts.items;
+    alloc.pSetLayouts = set_layouts;
 
-    nob_da_resize(&ctx.descriptor_sets, MAX_FRAMES_IN_FLIGHT);
-    VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.descriptor_sets.items);
+    VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.ubo_descriptor_sets);
     vk_chk(vk_result, "failed to allocate descriptor sets");
 
-    Vk_Descriptor_Writes descriptor_writes = {0};
+    /* allocate texture descriptor sets */
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        set_layouts[i] = ctx.texture_set_layout;
+
+    for (size_t i = 0; i < ctx.textures.count; i++) {
+        vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.textures.items[i].descriptor_sets);
+        vk_chk(vk_result, "failed to allocate descriptor sets");
+    }
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        descriptor_writes.count = 0;
-
-        VkDescriptorBufferInfo buff_info = {0};
-        buff_info.buffer = ctx.ubos.items[i].handle;
-        buff_info.offset = 0;
-        buff_info.range = sizeof(UBO);
-
-        VkWriteDescriptorSet descriptor_write = {
+        /* update uniform buffer descriptor sets */
+        VkDescriptorBufferInfo buff_info = {
+            .buffer = ctx.ubos.items[i].handle,
+            .offset = 0,
+            .range = sizeof(UBO),
+        };
+        VkWriteDescriptorSet write = {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = ctx.descriptor_sets.items[i],
-            .dstBinding = descriptor_writes.count,
+            .dstSet = ctx.ubo_descriptor_sets[i],
+            .dstBinding = 0,
             .dstArrayElement = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = 1,
             .pBufferInfo = &buff_info,
         };
-        nob_da_append(&descriptor_writes, descriptor_write);
+        vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
 
-        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        for (size_t j = 0; j < ctx.textures.count; j++) {
-            VkDescriptorImageInfo img_info = {0};
-            img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            img_info.imageView = ctx.textures.items[j].view;
-            img_info.sampler = ctx.textures.items[j].sampler;
-            descriptor_write.dstBinding = descriptor_writes.count;
-            descriptor_write.pImageInfo = &img_info;
-            nob_da_append(&descriptor_writes, descriptor_write);
+        /* update texture descriptor sets */
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.dstBinding = 1;
+        for (size_t tex = 0; tex < ctx.textures.count; tex++) {
+            VkDescriptorImageInfo img_info = {
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .imageView = ctx.textures.items[tex].view,
+                .sampler = ctx.textures.items[tex].sampler,
+            };
+            write.pImageInfo = &img_info;
+            write.dstSet = ctx.textures.items[tex].descriptor_sets[i];
+            vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
         }
-
-        vkUpdateDescriptorSets(ctx.device, descriptor_writes.count, descriptor_writes.items, 0, NULL);
     }
 
 defer:
-    nob_da_free(layouts);
-    nob_da_free(descriptor_writes);
     return result;
 }
 
@@ -1124,8 +1114,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data,
     void* p_user_data)
 {
-    unused(msg_type);
-    unused(p_user_data);
+    (void)msg_type;
+    (void)p_user_data;
     Nob_Log_Level log_lvl = translate_msg_severity(msg_severity);
     if (log_lvl < MIN_SEVERITY) return VK_FALSE;
     nob_log(log_lvl, "[Vulkan Validation] %s", p_callback_data->pMessage);
@@ -1317,9 +1307,9 @@ bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t
 
 void frame_buff_resized(GLFWwindow* window, int width, int height)
 {
-    unused(window);
-    unused(width);
-    unused(height);
+    (void)window;
+    (void)width;
+    (void)height;
     ctx.swpchain.buff_resized = true;
 }
 

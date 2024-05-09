@@ -32,6 +32,10 @@ int main()
     nob_log(NOB_INFO, "    texture id %d", tex.id);
     unload_image(img);
 
+    Image img_2 = load_image("res/statue.jpg");
+    Texture tex_2 = load_texture_from_image(img_2);
+    unload_image(img_2);
+
     while(!window_should_close()) {
         begin_drawing(BLACK);
         begin_mode_3d(camera);
@@ -42,6 +46,12 @@ int main()
             rotate_y(time);
             if(!draw_shape(SHAPE_QUAD)) return 1;
 
+            // push_matrix();
+            // translate(0.0f, 1.0f, 0.0f);
+            // rotate_y(time);
+            // if(!draw_shape(SHAPE_QUAD)) return 1;
+            // pop_matrix();
+
         // draw_texture(texture, width / 2, height / 2, PINK);
 
         end_mode_3d();
@@ -49,6 +59,7 @@ int main()
     }
 
     unload_texture(tex);
+    unload_texture(tex_2);
     close_window();
     return 0;
 }

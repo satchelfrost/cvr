@@ -193,7 +193,7 @@ void poll_input_events()
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    unused(scancode);
+    (void)scancode;
     if (key < 0) return;
 
     switch (action) {
