@@ -100,6 +100,18 @@ typedef struct {
     VkPipeline dflt;
 } Pipelines;
 
+typedef enum {
+    SET_LAYOUT_UBO = 0,
+    SET_LAYOUT_TEX,
+    SET_LAYOUT_COUNT,
+} Set_Layout_Type;
+
+typedef struct {
+    VkDescriptorSetLayout *items;
+    size_t count;
+    size_t capacity;
+} Descriptor_Set_Layouts;
+
 typedef struct {
     GLFWwindow *window;
     VkInstance instance;
@@ -116,8 +128,7 @@ typedef struct {
     Vk_Swpchain swpchain;
     UBOS ubos;
     Vk_Textures textures;
-    VkDescriptorSetLayout ubo_set_layout;
-    VkDescriptorSetLayout texture_set_layout;
+    VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet ubo_descriptor_sets[MAX_FRAMES_IN_FLIGHT];
     Pipelines pipelines;
@@ -360,8 +371,10 @@ bool cvr_destroy()
         vk_buff_destroy(ctx.ubos.items[i]);
     nob_da_free(ctx.ubos);
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
-    vkDestroyDescriptorSetLayout(ctx.device, ctx.ubo_set_layout, NULL);
-    vkDestroyDescriptorSetLayout(ctx.device, ctx.texture_set_layout, NULL);
+    for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
+        if (ctx.set_layouts[i])
+            vkDestroyDescriptorSetLayout(ctx.device, ctx.set_layouts[i], NULL);
+    }
     vkDestroyPipeline(ctx.device, ctx.pipelines.dflt, NULL);
     ctx.pipelines.dflt = NULL;
     vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layout, NULL);
@@ -633,9 +646,13 @@ bool create_dflt_pipeline()
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    VkDescriptorSetLayout set_layouts[] = {ctx.ubo_set_layout, ctx.texture_set_layout};
-    pipeline_layout_ci.pSetLayouts = set_layouts;
-    pipeline_layout_ci.setLayoutCount = NOB_ARRAY_LEN(set_layouts);
+    Descriptor_Set_Layouts set_layouts = {0};
+    for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
+        if (ctx.set_layouts[i])
+            nob_da_append(&set_layouts, ctx.set_layouts[i]);
+    }
+    pipeline_layout_ci.pSetLayouts = set_layouts.items;
+    pipeline_layout_ci.setLayoutCount = set_layouts.count;
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
@@ -673,6 +690,7 @@ defer:
     vkDestroyShaderModule(ctx.device, frag_ci.module, NULL);
     vkDestroyShaderModule(ctx.device, vert_ci.module, NULL);
     nob_da_free(vert_attrs);
+    nob_da_free(set_layouts);
     return result;
 }
 
@@ -971,14 +989,14 @@ bool create_descriptor_set_layout()
         .pBindings = &set_layout_binding,
     };
 
-    VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.ubo_set_layout);
+    VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_UBO]);
     vk_chk(vk_result, "failed to create descriptor set layout for uniform buffer");
 
     if (ctx.textures.count) {
         set_layout_binding.binding = 1;
         set_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.texture_set_layout);
+        vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_TEX]);
         vk_chk(vk_result, "failed to create descriptor set layout for texture");
     }
 
@@ -1032,7 +1050,7 @@ bool create_descriptor_sets()
     /* allocate uniform buffer descriptor sets */
     VkDescriptorSetLayout set_layouts[MAX_FRAMES_IN_FLIGHT];
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        set_layouts[i] = ctx.ubo_set_layout;
+        set_layouts[i] = ctx.set_layouts[SET_LAYOUT_UBO];
 
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1045,7 +1063,7 @@ bool create_descriptor_sets()
 
     /* allocate texture descriptor sets */
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        set_layouts[i] = ctx.texture_set_layout;
+        set_layouts[i] = ctx.set_layouts[SET_LAYOUT_TEX];
 
     for (size_t i = 0; i < ctx.textures.count; i++) {
         vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.textures.items[i].descriptor_sets);
