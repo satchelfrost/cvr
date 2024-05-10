@@ -242,5 +242,6 @@ typedef struct {
 Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
 // void draw_texture(Texture texture, int pos_x, int pos_x, Color tint);
+bool draw_texture(Texture texture, Shape_Type shape_type);
 
 #endif // CVR_H_

@@ -96,9 +96,12 @@ typedef struct {
     size_t capacity;
 } Vk_Textures;
 
-typedef struct {
-    VkPipeline dflt;
-} Pipelines;
+typedef enum {
+    PIPELINE_DEFAULT = 0,
+    PIPELINE_WIREFRAME,
+    PIPELINE_TEXTURE,
+    PIPELINE_COUNT,
+} Pipeline_Type;
 
 typedef enum {
     SET_LAYOUT_UBO = 0,
@@ -124,14 +127,14 @@ typedef struct {
     VkSurfaceFormatKHR surface_fmt;
     VkExtent2D extent;
     VkRenderPass render_pass;
-    VkPipelineLayout pipeline_layout;
+    VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
     Vk_Swpchain swpchain;
     UBOS ubos;
     Vk_Textures textures;
     VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet ubo_descriptor_sets[MAX_FRAMES_IN_FLIGHT];
-    Pipelines pipelines;
+    VkPipeline pipelines[PIPELINE_COUNT];
 } Vk_Context;
 
 /* CVR render functions */
@@ -143,14 +146,14 @@ bool create_surface();
 bool create_swpchain();
 bool create_img_views();
 bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view);
-bool create_dflt_pipeline();
+bool create_basic_pipeline(Pipeline_Type pipeline_type);
 bool create_shader_module(const char *file_name, VkShaderModule *module);
 bool create_render_pass();
 bool create_frame_buffs();
 bool recreate_swpchain();
 
 bool create_ubos();
-void cvr_update_ubos();
+void cvr_update_ubos(float time);
 bool create_descriptor_set_layout();
 bool create_descriptor_pool();
 bool create_descriptor_sets();
@@ -161,7 +164,8 @@ bool begin_draw();
 /* Submits vulkan commands. */
 bool end_draw();
 
-bool draw(VkPipeline pipline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
+bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
+bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
@@ -335,6 +339,7 @@ typedef struct {
     float16 model;
     float16 view;
     float16 proj;
+    float time;
 } UBO;
 
 bool cvr_init()
@@ -371,13 +376,12 @@ bool cvr_destroy()
         vk_buff_destroy(ctx.ubos.items[i]);
     nob_da_free(ctx.ubos);
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
-    for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
-        if (ctx.set_layouts[i])
-            vkDestroyDescriptorSetLayout(ctx.device, ctx.set_layouts[i], NULL);
-    }
-    vkDestroyPipeline(ctx.device, ctx.pipelines.dflt, NULL);
-    ctx.pipelines.dflt = NULL;
-    vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layout, NULL);
+    for (size_t i = 0; i < SET_LAYOUT_COUNT; i++)
+        vkDestroyDescriptorSetLayout(ctx.device, ctx.set_layouts[i], NULL);
+    for (size_t i = 0; i < PIPELINE_COUNT; i++)
+        vkDestroyPipeline(ctx.device, ctx.pipelines[i], NULL);
+    for (size_t i = 0; i < PIPELINE_COUNT; i++)
+        vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layouts[i], NULL);
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
 #ifdef ENABLE_VALIDATION
@@ -567,7 +571,7 @@ bool create_img_views()
     return true;
 }
 
-bool create_dflt_pipeline()
+bool create_basic_pipeline(Pipeline_Type pipeline_type)
 {
     bool result = true;
     VkPipelineShaderStageCreateInfo vert_ci = {0};
@@ -621,14 +625,10 @@ bool create_dflt_pipeline()
 
     VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer_ci.polygonMode = VK_POLYGON_MODE_FILL;
-    // rasterizer_ci.polygonMode = VK_POLYGON_MODE_LINE;
+    rasterizer_ci.polygonMode = (pipeline_type == PIPELINE_WIREFRAME) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
     rasterizer_ci.lineWidth = 1.0f;
-    // rasterizer_ci.cullMode = VK_CULL_MODE_FRONT_BIT;
-    // rasterizer_ci.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
     rasterizer_ci.lineWidth = VK_FRONT_FACE_CLOCKWISE;
-    // rasterizer_ci.lineWidth = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
     multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -664,7 +664,7 @@ bool create_dflt_pipeline()
         ctx.device,
         &pipeline_layout_ci,
         NULL,
-        &ctx.pipeline_layout
+        &ctx.pipeline_layouts[pipeline_type]
     );
     vk_chk(vk_result, "failed to create pipeline layout");
 
@@ -679,11 +679,11 @@ bool create_dflt_pipeline()
     pipeline_ci.pMultisampleState = &multisampling_ci;
     pipeline_ci.pColorBlendState = &color_blend_ci;
     pipeline_ci.pDynamicState = &dynamic_state_ci;
-    pipeline_ci.layout = ctx.pipeline_layout;
+    pipeline_ci.layout = ctx.pipeline_layouts[pipeline_type];
     pipeline_ci.renderPass = ctx.render_pass;
     pipeline_ci.subpass = 0;
 
-    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines.dflt);
+    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines[pipeline_type]);
     vk_chk(vk_result, "failed to create pipeline");
 
 defer:
@@ -787,13 +787,13 @@ void cvr_begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool draw(VkPipeline pipeline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
+bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
 {
     bool result = true;
 
     VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
 
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pipeline_type]);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
     viewport.height =(float)ctx.extent.height;
@@ -809,14 +809,14 @@ bool draw(VkPipeline pipeline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mo
     vkCmdBindDescriptorSets(
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layout, 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
+        ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
     );
 
     for (size_t i = 0; i < ctx.textures.count; i++) {
         vkCmdBindDescriptorSets(
             cmd_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layout, 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+            ctx.pipeline_layouts[pipeline_type], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
         );
     }
 
@@ -826,7 +826,59 @@ bool draw(VkPipeline pipeline, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mo
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
         cmd_buffer,
-        ctx.pipeline_layout,
+        ctx.pipeline_layouts[pipeline_type],
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(float16),
+        &mat
+    );
+
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+
+    return result;
+}
+
+bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
+{
+    bool result = true;
+
+    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_TEXTURE]);
+    VkViewport viewport = {0};
+    viewport.width = (float)ctx.extent.width;
+    viewport.height =(float)ctx.extent.height;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {0};
+    scissor.extent = ctx.extent;
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindDescriptorSets(
+        cmd_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
+    );
+
+    for (size_t i = 0; i < ctx.textures.count; i++) {
+        if (!ctx.textures.items[i].active || id != ctx.textures.items[i].id) continue;
+        vkCmdBindDescriptorSets(
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layouts[PIPELINE_TEXTURE], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+        );
+    }
+
+    Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
+    Matrix mvp = MatrixMultiply(model, viewProj);
+
+    float16 mat = MatrixToFloatV(mvp);
+    vkCmdPushConstants(
+        cmd_buffer,
+        ctx.pipeline_layouts[PIPELINE_TEXTURE],
         VK_SHADER_STAGE_VERTEX_BIT,
         0,
         sizeof(float16),
@@ -961,12 +1013,13 @@ defer:
      return result;
 }
 
-void cvr_update_ubos()
+void cvr_update_ubos(float time)
 {
     UBO ubo = {
         .model = MatrixToFloatV(MatrixIdentity()),
         .view  = MatrixToFloatV(core_state.view),
         .proj  = MatrixToFloatV(core_state.proj),
+        .time = time,
     };
 
     memcpy(ctx.ubos.items[curr_frame].mapped, &ubo, sizeof(ubo));

@@ -41,6 +41,7 @@ static clock_t time_begin;
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
+bool shader_res_allocated = false;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void poll_input_events();
@@ -76,23 +77,34 @@ bool window_should_close()
     return result;
 }
 
-bool draw_shape(Shape_Type shape_type)
+bool alloc_shader_res()
+{
+    if (!create_ubos()) return false;
+    if (!create_descriptor_set_layout()) return false;
+    if (!create_descriptor_pool()) return false;
+    if (!create_descriptor_sets()) return false;
+    shader_res_allocated = true;
+    return true;
+}
+
+bool draw_shape(Shape_Type shape_type) // TODO: add wireframe parameter
 {
     bool result = true;
 
-    if (!ctx.pipelines.dflt) {
-        if (!create_ubos()) nob_return_defer(false);
-        if (!create_descriptor_set_layout()) nob_return_defer(false);
-        if (!create_descriptor_pool()) nob_return_defer(false);
-        if (!create_descriptor_sets()) nob_return_defer(false);
-        if (!create_dflt_pipeline()) nob_return_defer(false);
-    }
+    if (!shader_res_allocated)
+        if (!alloc_shader_res())
+            nob_return_defer(false);
+
+    if (!ctx.pipelines[PIPELINE_WIREFRAME])
+        if (!create_basic_pipeline(PIPELINE_WIREFRAME))
+            nob_return_defer(false);
+
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     if (mat_stack_p)
-        cvr_chk(draw(ctx.pipelines.dflt, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
+        cvr_chk(vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
     else
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
 
@@ -152,7 +164,7 @@ void end_mode_3d()
 
 void end_drawing()
 {
-    cvr_update_ubos();
+    cvr_update_ubos(get_time());
     end_draw();
     poll_input_events();
 }
@@ -383,4 +395,31 @@ Texture load_texture_from_image(Image img)
 void unload_texture(Texture texture)
 {
     vk_unload_texture(texture.id);
+}
+
+bool draw_texture(Texture texture, Shape_Type shape_type)
+{
+    bool result = true;
+
+    if (!shader_res_allocated)
+        if (!alloc_shader_res())
+            nob_return_defer(false);
+
+    if (!ctx.pipelines[PIPELINE_TEXTURE])
+        if (!create_basic_pipeline(PIPELINE_TEXTURE))
+            nob_return_defer(false);
+
+    if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
+
+    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    if (mat_stack_p) {
+        vk_draw_texture(texture.id, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]);
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
 }
