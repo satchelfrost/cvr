@@ -1,4 +1,5 @@
 #include "cvr.h"
+#include <stdbool.h>
 #include <vulkan/vulkan_core.h>
 
 #define RAYMATH_IMPLEMENTATION
@@ -77,23 +78,9 @@ bool window_should_close()
     return result;
 }
 
-bool alloc_shader_res()
-{
-    if (!create_ubos()) return false;
-    if (!create_descriptor_set_layout()) return false;
-    if (!create_descriptor_pool()) return false;
-    if (!create_descriptor_sets()) return false;
-    shader_res_allocated = true;
-    return true;
-}
-
 bool draw_shape(Shape_Type shape_type) // TODO: add wireframe parameter
 {
     bool result = true;
-
-    if (!shader_res_allocated)
-        if (!alloc_shader_res())
-            nob_return_defer(false);
 
     if (!ctx.pipelines[PIPELINE_WIREFRAME])
         if (!create_basic_pipeline(PIPELINE_WIREFRAME))
@@ -401,9 +388,13 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!shader_res_allocated)
-        if (!alloc_shader_res())
-            nob_return_defer(false);
+    if (!shader_res_allocated) {
+        if (!create_ubos())                  nob_return_defer(false);
+        if (!create_descriptor_set_layout()) nob_return_defer(false);
+        if (!create_descriptor_pool())       nob_return_defer(false);
+        if (!create_descriptor_sets())       nob_return_defer(false);
+        shader_res_allocated = true;
+    }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])
         if (!create_basic_pipeline(PIPELINE_TEXTURE))

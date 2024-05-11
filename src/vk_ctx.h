@@ -79,6 +79,7 @@ typedef struct {
     Vk_Buffer *items;
     size_t count;
     size_t capacity;
+    bool active;
 } UBOS;
 
 typedef struct {
@@ -574,18 +575,29 @@ bool create_img_views()
 bool create_basic_pipeline(Pipeline_Type pipeline_type)
 {
     bool result = true;
+
+    char *vert_shader_name;
+    char *frag_shader_name;
+    if (pipeline_type == PIPELINE_TEXTURE) {
+        vert_shader_name = nob_temp_sprintf("./res/texture.vert.spv");
+        frag_shader_name = nob_temp_sprintf("./res/texture.frag.spv");
+    } else {
+        vert_shader_name = nob_temp_sprintf("./res/default.vert.spv");
+        frag_shader_name = nob_temp_sprintf("./res/default.frag.spv");
+    }
+
     VkPipelineShaderStageCreateInfo vert_ci = {0};
     vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vert_ci.pName = "main";
-    if (!create_shader_module("./res/shader.vert.spv", &vert_ci.module))
+    if (!create_shader_module(vert_shader_name, &vert_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo frag_ci = {0};
     frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_ci.pName = "main";
-    if (!create_shader_module("./res/shader.frag.spv", &frag_ci.module))
+    if (!create_shader_module(frag_shader_name, &frag_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
@@ -647,9 +659,11 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
-    for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
-        if (ctx.set_layouts[i])
-            nob_da_append(&set_layouts, ctx.set_layouts[i]);
+    if (pipeline_type != PIPELINE_DEFAULT)  {
+        for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
+            if (ctx.set_layouts[i])
+                nob_da_append(&set_layouts, ctx.set_layouts[i]);
+        }
     }
     pipeline_layout_ci.pSetLayouts = set_layouts.items;
     pipeline_layout_ci.setLayoutCount = set_layouts.count;
@@ -806,11 +820,14 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdBindDescriptorSets(
-        cmd_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
-    );
+
+    if (ctx.ubos.active) {
+        vkCmdBindDescriptorSets(
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
+        );
+    }
 
     for (size_t i = 0; i < ctx.textures.count; i++) {
         vkCmdBindDescriptorSets(
@@ -1008,6 +1025,7 @@ bool create_ubos()
         cvr_chk(result, "failed to create uniform buffer");
         vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
     }
+    ctx.ubos.active = true;
 
 defer:
      return result;
@@ -1015,6 +1033,8 @@ defer:
 
 void cvr_update_ubos(float time)
 {
+    if (!ctx.ubos.active) return;
+
     UBO ubo = {
         .model = MatrixToFloatV(MatrixIdentity()),
         .view  = MatrixToFloatV(core_state.view),

@@ -23,7 +23,7 @@ typedef struct {
     const CFiles c_files;
 } Example;
 
-static const char *default_shader_names[] = {"shader.vert", "shader.frag"};
+static const char *default_shader_names[] = {"default.vert", "default.frag"};
 static const char *default_c_file_names[] = {"main"};
 
 static Example examples[] = {
@@ -74,8 +74,13 @@ static Example examples[] = {
     {
         .name = "texture",
         .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "texture.vert",
+                "texture.frag"
+            },
+            .count = 4
         },
         .c_files = {
             .names = default_c_file_names,
@@ -285,7 +290,7 @@ int main(int argc, char **argv)
             switch (flag) {
             case 'c':
                 nob_log(NOB_INFO, "clean build requested, removing build folder");
-                nob_cmd_append(&cmd, "rm", "build", "-rf");
+                nob_cmd_append(&cmd, "rm", "build", "res", "-rf");
                 if (!nob_cmd_run_sync(cmd)) return 1;
                 break;
             case 'e':
