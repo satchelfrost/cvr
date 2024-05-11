@@ -23,7 +23,7 @@ typedef struct {
     const CFiles c_files;
 } Example;
 
-static const char *default_shader_names[] = {"shader.vert", "shader.frag"};
+static const char *default_shader_names[] = {"default.vert", "default.frag"};
 static const char *default_c_file_names[] = {"main"};
 
 static Example examples[] = {
@@ -74,8 +74,13 @@ static Example examples[] = {
     {
         .name = "texture",
         .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "texture.vert",
+                "texture.frag"
+            },
+            .count = 4
         },
         .c_files = {
             .names = default_c_file_names,
@@ -146,10 +151,10 @@ bool compile_shaders(const char *example_path, Shaders shaders)
 
     nob_log(NOB_INFO, "checking shaders for %s", example_path);
 
-    const char *output_folder = nob_temp_sprintf("./build/%s/shaders", example_path);
+    const char *output_folder = nob_temp_sprintf("./build/%s/res", example_path);
     if (!nob_mkdir_if_not_exists(output_folder)) nob_return_defer(false);
 
-    const char *input_folder = nob_temp_sprintf("%s/shaders", example_path);
+    const char *input_folder = nob_temp_sprintf("%s/res", example_path);
 
     for (size_t i = 0; i < shaders.count; i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.spv", output_folder, shaders.names[i]);
@@ -285,7 +290,7 @@ int main(int argc, char **argv)
             switch (flag) {
             case 'c':
                 nob_log(NOB_INFO, "clean build requested, removing build folder");
-                nob_cmd_append(&cmd, "rm", "build", "-rf");
+                nob_cmd_append(&cmd, "rm", "build", "res", "-rf");
                 if (!nob_cmd_run_sync(cmd)) return 1;
                 break;
             case 'e':
@@ -346,19 +351,33 @@ int main(int argc, char **argv)
             return 1;
         }
         const char *example_path = nob_temp_sprintf("examples/%s", examples[i].name);
+        const char *example_res  = nob_temp_sprintf("%s/res", example_path);
+        const char *build_res    = nob_temp_sprintf("./build/%s/res", example_path);
         if (!build_example(&examples[i])) return 1;
         if (!compile_shaders(example_path, examples[i].shaders)) return 1;
 
-        /* Linux only - for development convenience, run-after-building requires symbolic link */
-        nob_cmd_append(&cmd, "rm", "shaders", "-f");
-        if (!nob_cmd_run_sync(cmd)) return 1;
-        cmd.count = 0;
-        const char *shader_path = nob_temp_sprintf("./build/%s/shaders", example_path);
-        nob_cmd_append(&cmd, "ln", "-sf", shader_path, "shaders");
-        if (!nob_cmd_run_sync(cmd)) return 1;
-        cmd.count = 0;
+        Nob_File_Paths paths = {0};
+        nob_read_entire_dir(example_res, &paths);
+        for (size_t i = 0; i < paths.count; i++) {
+            const char *file_name = paths.items[i];
+            if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0||
+                strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
+                continue;
 
-        /* Linx only - run example after building */
+            // nob_log(NOB_INFO, "File name %s", file_name);
+            const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
+            const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+            // nob_log(NOB_INFO, "source path %s", src_path);
+            // nob_log(NOB_INFO, "destination path %s", dst_path);
+            if (!nob_copy_file(src_path, dst_path)) return 1;
+        }
+
+        /* copy res folder to root so example can be run from root */
+        nob_mkdir_if_not_exists("res");
+        if (!nob_copy_directory_recursively(build_res, "res")) return 1;
+
+        /* run example after building */
+        cmd.count = 0;
         nob_log(NOB_INFO, "running example %s", example);
         const char *build_path = nob_temp_sprintf("build/%s/%s", example_path, examples[i].name);
         nob_cmd_append(&cmd, build_path);

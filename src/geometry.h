@@ -7,6 +7,7 @@
 typedef struct {
     Vector3 pos;
     Vector3 color;
+    Vector2 tex_coord;
 } Vertex; 
 
 #define Red 1, 0, 0
@@ -18,10 +19,10 @@ typedef struct {
 
 #define TETRAHEDRON_VERTS 4
 static const Vertex tetrahedron_verts[TETRAHEDRON_VERTS] = {
-    {{0.0f, -0.333f, 0.943f}, {0.0f, 0.0f, 1.0f}},
-    {{0.816f, -0.333f, -0.471f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.816f, -0.333f, -0.471f}, {0.0f, 0.0f, 0.25f}},
-    {{0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}
+    {{0.0f, -0.333f, 0.943f},     {0.0f, 0.0f, 1.0f},  {0.0f, 0.0f}},
+    {{0.816f, -0.333f, -0.471f},  {0.0f, 1.0f, 0.0f},  {0.0f, 0.0f}},
+    {{-0.816f, -0.333f, -0.471f}, {0.0f, 0.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.0f},          {1.0f, 0.0f, 0.0f},  {0.0f, 0.0f}}
 };
 
 /* clockwise winding order */
@@ -42,7 +43,7 @@ static const uint16_t tetrahedron_indices[TETRAHEDRON_IDXS] = {
 #define  RTB  0.5f,  0.5f, -0.5f
 #define  RTF  0.5f,  0.5f,  0.5f
 
-#define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}}, {{V2}, {COLOR}}, {{V3}, {COLOR}}, {{V4}, {COLOR}}, {{V5}, {COLOR}}, {{V6}, {COLOR}},
+#define CUBE_SIDE(V1, V2, V3, V4, V5, V6, COLOR) {{V1}, {COLOR}, {1.0f, 1.0f}}, {{V2}, {COLOR}, {1.0f, 0.0f}}, {{V3}, {COLOR}, {0.0f, 0.0f}}, {{V4}, {COLOR}, {1.0f, 1.0f}}, {{V5}, {COLOR}, {0.0f, 0.0f}}, {{V6}, {COLOR}, {0.0f, 1.0f}},
 
 #define CUBE_VERTS 36
 static const Vertex cube_verts[CUBE_VERTS] = {
@@ -67,10 +68,10 @@ static const uint16_t cube_indices[CUBE_IDXS] = {
 
 #define QUAD_VERTS 4
 static const Vertex quad_verts[QUAD_VERTS] = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-    {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-    {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 
 /* clockwise winding order */

@@ -1,4 +1,6 @@
 #include "cvr.h"
+#include <stdbool.h>
+#include <vulkan/vulkan_core.h>
 
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
@@ -40,6 +42,7 @@ static clock_t time_begin;
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
+bool shader_res_allocated = false;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void poll_input_events();
@@ -75,16 +78,20 @@ bool window_should_close()
     return result;
 }
 
-bool draw_shape(Shape_Type shape_type)
+bool draw_shape(Shape_Type shape_type) // TODO: add wireframe parameter
 {
     bool result = true;
-    if (!ctx.pipelines.dflt) create_dflt_pipeline();
+
+    if (!ctx.pipelines[PIPELINE_WIREFRAME])
+        if (!create_basic_pipeline(PIPELINE_WIREFRAME))
+            nob_return_defer(false);
+
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     if (mat_stack_p)
-        cvr_chk(draw(ctx.pipelines.dflt, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
+        cvr_chk(vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
     else
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
 
@@ -144,7 +151,7 @@ void end_mode_3d()
 
 void end_drawing()
 {
-    cvr_update_ubos();
+    cvr_update_ubos(get_time());
     end_draw();
     poll_input_events();
 }
@@ -185,7 +192,7 @@ void poll_input_events()
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    unused(scancode);
+    (void)scancode;
     if (key < 0) return;
 
     switch (action) {
@@ -203,13 +210,6 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     }
 
     if ((key == keyboard.exit_key) && (action == GLFW_PRESS)) glfwSetWindowShouldClose(window, GLFW_TRUE);
-}
-
-void set_cube_color(Color color)
-{
-    core_state.cube_color.x = color.r / (float)255.0f;
-    core_state.cube_color.y = color.g / (float)255.0f;
-    core_state.cube_color.z = color.b / (float)255.0f;
 }
 
 double get_time()
@@ -300,7 +300,6 @@ bool alloc_shape_res(Shape_Type shape_type)
     switch (shape_type) {
 #define X(CONST_NAME, array_name)                                                     \
     case SHAPE_ ## CONST_NAME:                                                        \
-    shape->vtx_buff.device = shape->idx_buff.device = ctx.device;                     \
     shape->vtx_buff.count = CONST_NAME ## _VERTS;                                     \
     shape->vtx_buff.size = sizeof(array_name ## _verts[0]) * shape->vtx_buff.count;   \
     shape->verts = array_name ## _verts;                                              \
@@ -354,11 +353,9 @@ void close_window()
 Image load_image(const char *file_name)
 {
     Image img = {0};
-    img.data = stbi_load(file_name, &img.width, &img.height, &img.channels, STBI_rgb_alpha);
-
-    /* force the image to have rgba even if original only has three */
-    if (img.data) img.channels = 4;
-
+    int channels;
+    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
+    img.format = (int)VK_FORMAT_R8G8B8A8_SRGB;
     return img;
 }
 
@@ -367,67 +364,53 @@ void unload_image(Image image)
     free(image.data);
 }
 
-Texture load_texture_from_image(Image image)
+Texture load_texture_from_image(Image img)
 {
     Texture texture = {
-        .width    = image.width,
-        .height   = image.height,
-        .mipmaps  = image.mipmaps,
-        .channels = image.channels,
+        .width    = img.width,
+        .height   = img.height,
+        .mipmaps  = img.mipmaps,
+        .format   = img.format,
     };
 
-    /* create staging buffer for image */
-    Vk_Buffer stg_buff;
-    stg_buff.device = ctx.device;
-    stg_buff.size   = image.width * image.height * image.channels;
-    stg_buff.count  = image.width * image.height;
-    bool result = vk_buff_init(
-        &stg_buff,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
-    if(!result) {
-        nob_log(NOB_ERROR, "failed to create staging buffer");
-        goto defer;
-    }
-    VkResult res = vkMapMemory(stg_buff.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
-    if (!vk_ok(res)) {
-        nob_log(NOB_WARNING, "unable to map memory");
-        goto defer;
-    }
-    memcpy(stg_buff.mapped, image.data, stg_buff.size);
-    vkUnmapMemory(stg_buff.device, stg_buff.mem);
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id))
+        nob_log(NOB_ERROR, "unable to load texture");
 
-    /* Create the image */
-    Vk_Image img = {
-        .device = ctx.device,
-        .width  = image.width,
-        .height = image.height,
-    };
-    result = vk_img_init(
-        &img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    if(!result) {
-        nob_log(NOB_ERROR, "failed to create image");
-        goto defer;
-    }
-
-    texture.vk_img = img.handle;
-    texture.vk_tex_mem = img.mem;
-
-defer:
     return texture;
 }
 
 void unload_texture(Texture texture)
 {
-    if (!texture.vk_img || !texture.vk_tex_mem) {
-        nob_log(NOB_WARNING, "texture was never allocated");
-        return;
+    vk_unload_texture(texture.id);
+}
+
+bool draw_texture(Texture texture, Shape_Type shape_type)
+{
+    bool result = true;
+
+    if (!shader_res_allocated) {
+        if (!create_ubos())                  nob_return_defer(false);
+        if (!create_descriptor_set_layout()) nob_return_defer(false);
+        if (!create_descriptor_pool())       nob_return_defer(false);
+        if (!create_descriptor_sets())       nob_return_defer(false);
+        shader_res_allocated = true;
     }
 
-    vkDestroyImage(ctx.device, texture.vk_img, NULL);
-    vkFreeMemory(ctx.device, texture.vk_tex_mem, NULL);
+    if (!ctx.pipelines[PIPELINE_TEXTURE])
+        if (!create_basic_pipeline(PIPELINE_TEXTURE))
+            nob_return_defer(false);
+
+    if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
+
+    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    if (mat_stack_p) {
+        vk_draw_texture(texture.id, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]);
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
 }
