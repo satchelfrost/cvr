@@ -19,7 +19,7 @@ layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragUv;
-layout (location = 2) out float time;
+layout(location = 2) out float time;
 
 void main()
 {

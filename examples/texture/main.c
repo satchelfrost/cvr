@@ -56,7 +56,7 @@ int main()
             translate(0.0f, sin(time), 0.0f);
             rotate_y(time);
             if (!draw_texture(statue_tex, SHAPE_QUAD)) return 1;
-            draw_shape(SHAPE_CUBE);
+            draw_shape_wireframe(SHAPE_CUBE);
 
         end_mode_3d();
         end_drawing();

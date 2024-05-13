@@ -73,6 +73,8 @@ typedef struct {
     VkExtent2D extent;
     VkImage handle;
     VkDeviceMemory mem;
+    VkImageAspectFlags aspect_mask;
+    VkFormat format;
 } Vk_Image;
 
 typedef struct {
@@ -132,6 +134,8 @@ typedef struct {
     Vk_Swpchain swpchain;
     UBOS ubos;
     Vk_Textures textures;
+    Vk_Image depth_img;
+    VkImageView depth_img_view;
     VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet ubo_descriptor_sets[MAX_FRAMES_IN_FLIGHT];
@@ -146,14 +150,15 @@ bool create_device();
 bool create_surface();
 bool create_swpchain();
 bool create_img_views();
-bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view);
+bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool create_basic_pipeline(Pipeline_Type pipeline_type);
 bool create_shader_module(const char *file_name, VkShaderModule *module);
 bool create_render_pass();
 bool create_frame_buffs();
 bool recreate_swpchain();
+bool vk_depth_init();
 
-bool create_ubos();
+bool create_ubos(); // TODO: renamings in order, prefix with _vk e.g. vk_ubos_init
 void cvr_update_ubos(float time);
 bool create_descriptor_set_layout();
 bool create_descriptor_pool();
@@ -537,18 +542,18 @@ bool create_swpchain()
     }
 }
 
-bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view)
+bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
 {
     VkImageViewCreateInfo img_view_ci = {0};
     img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    img_view_ci.image = img;
+    img_view_ci.image = img.handle;
     img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    img_view_ci.format = fmt;
+    img_view_ci.format = img.format;
     img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
     img_view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
     img_view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
     img_view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    img_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    img_view_ci.subresourceRange.aspectMask = img.aspect_mask;
     img_view_ci.subresourceRange.baseMipLevel = 0;
     img_view_ci.subresourceRange.levelCount = 1;
     img_view_ci.subresourceRange.baseArrayLayer = 0;
@@ -558,18 +563,21 @@ bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view)
 
 bool create_img_views()
 {
+    bool result = true;
+
     nob_da_resize(&ctx.swpchain.img_views, ctx.swpchain.imgs.count);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)  {
-        bool view_created = create_img_view(
-            ctx.swpchain.imgs.items[i],
-            ctx.surface_fmt.format,
-            &ctx.swpchain.img_views.items[i]
-        );
-        if (!view_created)
-            return false;
+        Vk_Image img = {
+            .handle = ctx.swpchain.imgs.items[i],
+            .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .format = ctx.surface_fmt.format,
+        };
+        result = vk_img_view_init(img, &ctx.swpchain.img_views.items[i]);
+        cvr_chk(result, "failed to initialize image view");
     }
 
-    return true;
+defer:
+    return result;
 }
 
 bool create_basic_pipeline(Pipeline_Type pipeline_type)
@@ -659,7 +667,7 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
-    if (pipeline_type != PIPELINE_DEFAULT)  {
+    if (pipeline_type == PIPELINE_TEXTURE)  {
         for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
             if (ctx.set_layouts[i])
                 nob_da_append(&set_layouts, ctx.set_layouts[i]);
@@ -821,20 +829,22 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
 
-    if (ctx.ubos.active) {
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
-        );
-    }
+    if (pipeline_type == PIPELINE_TEXTURE) {
+        if (ctx.ubos.active) {
+            vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
+            );
+        }
 
-    for (size_t i = 0; i < ctx.textures.count; i++) {
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[pipeline_type], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
-        );
+        for (size_t i = 0; i < ctx.textures.count; i++) {
+            vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[pipeline_type], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+            );
+        }
     }
 
     Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
@@ -1004,6 +1014,25 @@ bool recreate_swpchain()
     cvr_chk(create_swpchain(), "failed to recreate swapchain");
     cvr_chk(create_img_views(), "failed to recreate image views");
     cvr_chk(create_frame_buffs(), "failed to recreate frame buffers");
+
+defer:
+    return result;
+}
+
+bool vk_depth_init()
+{
+    bool result = true;
+
+    ctx.depth_img.extent = ctx.extent;
+    ctx.depth_img.aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    ctx.depth_img.format = VK_FORMAT_D32_SFLOAT; // TODO: check supported formats
+    result = vk_img_init(
+        &ctx.depth_img,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to initialize depth image");
+    result = vk_img_view_init(ctx.depth_img, &ctx.depth_img_view);
 
 defer:
     return result;
@@ -1972,10 +2001,9 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
 
     /* create the image */
     Vk_Image vk_img = {
-        .extent  = {
-            width,
-            height
-        }
+        .extent  = {width, height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = fmt,
     };
     result = vk_img_init(
         &vk_img,
@@ -1998,7 +2026,7 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
 
     /* create image view */
     VkImageView img_view;
-    result = create_img_view(vk_img.handle, fmt, &img_view);
+    result = vk_img_view_init(vk_img, &img_view);
     cvr_chk(result, "failed to create image view");
 
     /* create sampler */
