@@ -907,7 +907,7 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
     return result;
 }
 
-bool begin_draw()
+bool begin_draw() // TODO: there are a lot of cases where we need to prefix with vk_
 {
     bool result = true;
     VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);

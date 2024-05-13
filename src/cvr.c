@@ -78,7 +78,28 @@ bool window_should_close()
     return result;
 }
 
-bool draw_shape(Shape_Type shape_type) // TODO: add wireframe parameter
+bool draw_shape(Shape_Type shape_type)
+{
+    bool result = true;
+
+    if (!ctx.pipelines[PIPELINE_DEFAULT])
+        if (!create_basic_pipeline(PIPELINE_DEFAULT))
+            nob_return_defer(false);
+
+    if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
+
+    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    if (mat_stack_p)
+        cvr_chk(vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
+    else
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+
+defer:
+    return result;
+}
+
+bool draw_shape_wireframe(Shape_Type shape_type)
 {
     bool result = true;
 
