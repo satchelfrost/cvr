@@ -10,6 +10,5 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    outColor = vec4(((fragColor) * (sin((time + (fragTexCoord.x)) * 10.0) + 1.0) / 2.0) + texture(texSampler, fragTexCoord).rgb, 1.0);
-    //outColor = texture(texSampler, fragTexCoord);
+    outColor = vec4(((fragColor) * ((sin(time) + 1.0) / 2.0)) + texture(texSampler, fragTexCoord).rgb * ((sin(time + 3.14159) + 1.0) / 2.0), 1.0);
 }

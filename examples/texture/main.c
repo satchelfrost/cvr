@@ -46,16 +46,16 @@ int main()
         begin_mode_3d(camera);
             double time = get_time();
             rotate_z(3.14259f);
+            rotate_y(time);
             push_matrix();
-                translate(0.0f, 0.0f, 0.0f);
                 scale(matrix_aspect, 1.0f, 1.0f);
                 if (!draw_texture(matrix_tex, SHAPE_QUAD)) return 1;
             pop_matrix();
 
             scale(statue_aspect, 1.0f, 1.0f);
-            translate(0.0f, 2.0f * sin(time), 1.5f);
-            rotate_y(time);
+            translate(0.0f, 0.0f, 1.0f);
             if (!draw_texture(statue_tex, SHAPE_QUAD)) return 1;
+            rotate_x(time);
             draw_shape_wireframe(SHAPE_CUBE);
 
         end_mode_3d();
