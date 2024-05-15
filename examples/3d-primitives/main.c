@@ -1,6 +1,5 @@
 #include "cvr.h"
 #include "ext/raylib-5.0/raymath.h"
-#include <stddef.h>
 
 Shape_Type shape = SHAPE_CUBE;
 

@@ -25,7 +25,7 @@ bool load_texture(const char *name, Texture *texture)
 int main()
 {
     Camera camera = {
-        .position   = {0.0f, 0.0f, 2.0f},
+        .position   = {0.0f, 1.0f, 4.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = 45.0f,
@@ -47,13 +47,13 @@ int main()
             double time = get_time();
             rotate_z(3.14259f);
             push_matrix();
-                scale((sin(time) + 2.0f) * matrix_aspect / 2.0f, (sin(time) + 2.0f) / 2.0f, 1.0f);
-                rotate_y(time);
+                translate(0.0f, 0.0f, 0.0f);
+                scale(matrix_aspect, 1.0f, 1.0f);
                 if (!draw_texture(matrix_tex, SHAPE_QUAD)) return 1;
             pop_matrix();
 
-            scale(0.5f * (sin(time) + 2.0f) * statue_aspect / 2.0f, 0.5f * (sin(time) + 2.0f) / 2.0f, 1.0f);
-            translate(0.0f, sin(time), 0.0f);
+            scale(statue_aspect, 1.0f, 1.0f);
+            translate(0.0f, 2.0f * sin(time), 1.5f);
             rotate_y(time);
             if (!draw_texture(statue_tex, SHAPE_QUAD)) return 1;
             draw_shape_wireframe(SHAPE_CUBE);

@@ -364,6 +364,7 @@ bool cvr_init()
     cvr_chk(create_swpchain(), "failed to create swapchain");
     cvr_chk(create_img_views(), "failed to create image views");
     cvr_chk(create_render_pass(), "failed to create render pass");
+    cvr_chk(vk_depth_init(), "failed to init depth resources");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
 
@@ -689,6 +690,13 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
         &ctx.pipeline_layouts[pipeline_type]
     );
     vk_chk(vk_result, "failed to create pipeline layout");
+    VkPipelineDepthStencilStateCreateInfo depth_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS,
+        .maxDepthBounds = 1.0f,
+    };
 
     VkGraphicsPipelineCreateInfo pipeline_ci = {0};
     pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -701,6 +709,7 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     pipeline_ci.pMultisampleState = &multisampling_ci;
     pipeline_ci.pColorBlendState = &color_blend_ci;
     pipeline_ci.pDynamicState = &dynamic_state_ci;
+    pipeline_ci.pDepthStencilState = &depth_ci;
     pipeline_ci.layout = ctx.pipeline_layouts[pipeline_type];
     pipeline_ci.renderPass = ctx.render_pass;
     pipeline_ci.subpass = 0;
@@ -737,36 +746,61 @@ defer:
 
 bool create_render_pass()
 {
-    VkAttachmentDescription color_attach = {0};
-    color_attach.format = ctx.surface_fmt.format;
-    color_attach.samples = VK_SAMPLE_COUNT_1_BIT;
-    color_attach.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color_attach.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    color_attach.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    color_attach.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color_attach.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color_attach.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentDescription color = {
+        .format = ctx.surface_fmt.format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
 
-    VkAttachmentReference color_attach_ref = {0};
-    color_attach_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference color_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
 
-    VkSubpassDescription gfx_subpass = {0};
-    gfx_subpass.colorAttachmentCount = 1;
-    gfx_subpass.pColorAttachments = &color_attach_ref;
+    VkAttachmentDescription depth = {
+        .format = VK_FORMAT_D32_SFLOAT, // TODO: check supported formats
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
 
-    VkRenderPassCreateInfo render_pass_ci = {0};
-    render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_ci.attachmentCount = 1;
-    render_pass_ci.pAttachments = &color_attach;
-    render_pass_ci.subpassCount = 1;
-    render_pass_ci.pSubpasses = &gfx_subpass;
-    VkSubpassDependency dependency = {0};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    render_pass_ci.dependencyCount = 1;
-    render_pass_ci.pDependencies = &dependency;
+    VkAttachmentReference depth_ref = {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
+    VkSubpassDescription gfx_subpass = {
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_ref,
+        .pDepthStencilAttachment = &depth_ref,
+    };
+
+    VkAttachmentDescription attachments[] = {color, depth};
+    VkSubpassDependency dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    };
+
+    VkRenderPassCreateInfo render_pass_ci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = NOB_ARRAY_LEN(attachments),
+        .pAttachments = attachments,
+        .subpassCount = 1,
+        .pSubpasses = &gfx_subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
+    };
 
     return vk_ok(vkCreateRenderPass(ctx.device, &render_pass_ci, NULL, &ctx.render_pass));
 }
@@ -775,11 +809,13 @@ bool create_frame_buffs()
 {
     nob_da_resize(&ctx.swpchain.buffs, ctx.swpchain.img_views.count);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++) {
+        VkImageView attachments[] = {ctx.swpchain.img_views.items[i], ctx.depth_img_view};
+
         VkFramebufferCreateInfo frame_buff_ci = {0};
         frame_buff_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         frame_buff_ci.renderPass = ctx.render_pass;
-        frame_buff_ci.attachmentCount = 1;
-        frame_buff_ci.pAttachments = &ctx.swpchain.img_views.items[i];
+        frame_buff_ci.attachmentCount = NOB_ARRAY_LEN(attachments);
+        frame_buff_ci.pAttachments = attachments;
         frame_buff_ci.width =  ctx.extent.width;
         frame_buff_ci.height = ctx.extent.height;
         frame_buff_ci.layers = 1;
@@ -799,13 +835,25 @@ void cvr_begin_render_pass(Color color)
     begin_rp.renderPass = ctx.render_pass;
     begin_rp.framebuffer = ctx.swpchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = ctx.extent;
-    VkClearValue clear_color = {0};
-    clear_color.color.float32[0] = color.r / 255.0f;
-    clear_color.color.float32[1] = color.g / 255.0f;
-    clear_color.color.float32[2] = color.b / 255.0f;
-    clear_color.color.float32[3] = color.a / 255.0f;
-    begin_rp.clearValueCount = 1;
-    begin_rp.pClearValues = &clear_color;
+    VkClearValue clear_color = {
+        .color = {
+            {
+                color.r / 255.0f,
+                color.g / 255.0f,
+                color.b / 255.0f,
+                color.a / 255.0f,
+            }
+        }
+    };
+    VkClearValue clear_depth = {
+        .depthStencil = {
+            .depth = 1.0f,
+            .stencil = 0,
+        }
+    };
+    VkClearValue clear_values[] = {clear_color, clear_depth};
+    begin_rp.clearValueCount = NOB_ARRAY_LEN(clear_values);
+    begin_rp.pClearValues = clear_values;
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
@@ -1400,6 +1448,10 @@ VkExtent2D choose_swp_extent()
 
 void cleanup_swpchain()
 {
+    vkDestroyImageView(ctx.device, ctx.depth_img_view, NULL);
+    vkDestroyImage(ctx.device, ctx.depth_img.handle, NULL);
+    vkFreeMemory(ctx.device, ctx.depth_img.mem, NULL);
+
     for (size_t i = 0; i < ctx.swpchain.buffs.count; i++)
         vkDestroyFramebuffer(ctx.device, ctx.swpchain.buffs.items[i], NULL);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)
@@ -1740,7 +1792,7 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
     VkImageCreateInfo img_ci = {
         .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType   = VK_IMAGE_TYPE_2D,
-        .format      = VK_FORMAT_R8G8B8A8_SRGB,
+        .format      = img->format,
         .extent      = {img->extent.width, img->extent.height, 1},
         .mipLevels   = 1,
         .arrayLayers = 1,
