@@ -28,7 +28,7 @@ int main()
                         translate(i, 1.0f, j);
                         scale(1.0f, sin(2 * time + i / 2.0f) + 1.0f, 1.0f);
                         scale(1.0f, cos(2 * time + j / 2.0f) + 1.0f, 1.0f);
-                        draw_shape(shape);
+                        draw_shape_wireframe(shape);
                         pop_matrix();
                     }
                 }

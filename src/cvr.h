@@ -199,6 +199,7 @@ bool init_window(int width, int height, const char *title); /* Initialize window
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
 bool draw_shape(Shape_Type shape_type);
+bool draw_shape_wireframe(Shape_Type shape_type);
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 double get_time();
@@ -241,7 +242,6 @@ typedef struct {
 
 Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
-// void draw_texture(Texture texture, int pos_x, int pos_x, Color tint);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 
 #endif // CVR_H_

@@ -73,6 +73,8 @@ typedef struct {
     VkExtent2D extent;
     VkImage handle;
     VkDeviceMemory mem;
+    VkImageAspectFlags aspect_mask;
+    VkFormat format;
 } Vk_Image;
 
 typedef struct {
@@ -132,6 +134,8 @@ typedef struct {
     Vk_Swpchain swpchain;
     UBOS ubos;
     Vk_Textures textures;
+    Vk_Image depth_img;
+    VkImageView depth_img_view;
     VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet ubo_descriptor_sets[MAX_FRAMES_IN_FLIGHT];
@@ -146,14 +150,15 @@ bool create_device();
 bool create_surface();
 bool create_swpchain();
 bool create_img_views();
-bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view);
+bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool create_basic_pipeline(Pipeline_Type pipeline_type);
 bool create_shader_module(const char *file_name, VkShaderModule *module);
 bool create_render_pass();
 bool create_frame_buffs();
 bool recreate_swpchain();
+bool vk_depth_init();
 
-bool create_ubos();
+bool create_ubos(); // TODO: renamings in order, prefix with _vk e.g. vk_ubos_init
 void cvr_update_ubos(float time);
 bool create_descriptor_set_layout();
 bool create_descriptor_pool();
@@ -359,6 +364,7 @@ bool cvr_init()
     cvr_chk(create_swpchain(), "failed to create swapchain");
     cvr_chk(create_img_views(), "failed to create image views");
     cvr_chk(create_render_pass(), "failed to create render pass");
+    cvr_chk(vk_depth_init(), "failed to init depth resources");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
 
@@ -537,18 +543,18 @@ bool create_swpchain()
     }
 }
 
-bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view)
+bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
 {
     VkImageViewCreateInfo img_view_ci = {0};
     img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    img_view_ci.image = img;
+    img_view_ci.image = img.handle;
     img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    img_view_ci.format = fmt;
+    img_view_ci.format = img.format;
     img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
     img_view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
     img_view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
     img_view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    img_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    img_view_ci.subresourceRange.aspectMask = img.aspect_mask;
     img_view_ci.subresourceRange.baseMipLevel = 0;
     img_view_ci.subresourceRange.levelCount = 1;
     img_view_ci.subresourceRange.baseArrayLayer = 0;
@@ -558,18 +564,21 @@ bool create_img_view(VkImage img, VkFormat fmt, VkImageView *img_view)
 
 bool create_img_views()
 {
+    bool result = true;
+
     nob_da_resize(&ctx.swpchain.img_views, ctx.swpchain.imgs.count);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)  {
-        bool view_created = create_img_view(
-            ctx.swpchain.imgs.items[i],
-            ctx.surface_fmt.format,
-            &ctx.swpchain.img_views.items[i]
-        );
-        if (!view_created)
-            return false;
+        Vk_Image img = {
+            .handle = ctx.swpchain.imgs.items[i],
+            .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .format = ctx.surface_fmt.format,
+        };
+        result = vk_img_view_init(img, &ctx.swpchain.img_views.items[i]);
+        cvr_chk(result, "failed to initialize image view");
     }
 
-    return true;
+defer:
+    return result;
 }
 
 bool create_basic_pipeline(Pipeline_Type pipeline_type)
@@ -659,7 +668,7 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
-    if (pipeline_type != PIPELINE_DEFAULT)  {
+    if (pipeline_type == PIPELINE_TEXTURE)  {
         for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
             if (ctx.set_layouts[i])
                 nob_da_append(&set_layouts, ctx.set_layouts[i]);
@@ -681,6 +690,13 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
         &ctx.pipeline_layouts[pipeline_type]
     );
     vk_chk(vk_result, "failed to create pipeline layout");
+    VkPipelineDepthStencilStateCreateInfo depth_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS,
+        .maxDepthBounds = 1.0f,
+    };
 
     VkGraphicsPipelineCreateInfo pipeline_ci = {0};
     pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -693,6 +709,7 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     pipeline_ci.pMultisampleState = &multisampling_ci;
     pipeline_ci.pColorBlendState = &color_blend_ci;
     pipeline_ci.pDynamicState = &dynamic_state_ci;
+    pipeline_ci.pDepthStencilState = &depth_ci;
     pipeline_ci.layout = ctx.pipeline_layouts[pipeline_type];
     pipeline_ci.renderPass = ctx.render_pass;
     pipeline_ci.subpass = 0;
@@ -729,36 +746,61 @@ defer:
 
 bool create_render_pass()
 {
-    VkAttachmentDescription color_attach = {0};
-    color_attach.format = ctx.surface_fmt.format;
-    color_attach.samples = VK_SAMPLE_COUNT_1_BIT;
-    color_attach.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color_attach.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    color_attach.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    color_attach.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color_attach.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color_attach.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentDescription color = {
+        .format = ctx.surface_fmt.format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
 
-    VkAttachmentReference color_attach_ref = {0};
-    color_attach_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference color_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
 
-    VkSubpassDescription gfx_subpass = {0};
-    gfx_subpass.colorAttachmentCount = 1;
-    gfx_subpass.pColorAttachments = &color_attach_ref;
+    VkAttachmentDescription depth = {
+        .format = VK_FORMAT_D32_SFLOAT, // TODO: check supported formats
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
 
-    VkRenderPassCreateInfo render_pass_ci = {0};
-    render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_ci.attachmentCount = 1;
-    render_pass_ci.pAttachments = &color_attach;
-    render_pass_ci.subpassCount = 1;
-    render_pass_ci.pSubpasses = &gfx_subpass;
-    VkSubpassDependency dependency = {0};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    render_pass_ci.dependencyCount = 1;
-    render_pass_ci.pDependencies = &dependency;
+    VkAttachmentReference depth_ref = {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
+    VkSubpassDescription gfx_subpass = {
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_ref,
+        .pDepthStencilAttachment = &depth_ref,
+    };
+
+    VkAttachmentDescription attachments[] = {color, depth};
+    VkSubpassDependency dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    };
+
+    VkRenderPassCreateInfo render_pass_ci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = NOB_ARRAY_LEN(attachments),
+        .pAttachments = attachments,
+        .subpassCount = 1,
+        .pSubpasses = &gfx_subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
+    };
 
     return vk_ok(vkCreateRenderPass(ctx.device, &render_pass_ci, NULL, &ctx.render_pass));
 }
@@ -767,11 +809,13 @@ bool create_frame_buffs()
 {
     nob_da_resize(&ctx.swpchain.buffs, ctx.swpchain.img_views.count);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++) {
+        VkImageView attachments[] = {ctx.swpchain.img_views.items[i], ctx.depth_img_view};
+
         VkFramebufferCreateInfo frame_buff_ci = {0};
         frame_buff_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         frame_buff_ci.renderPass = ctx.render_pass;
-        frame_buff_ci.attachmentCount = 1;
-        frame_buff_ci.pAttachments = &ctx.swpchain.img_views.items[i];
+        frame_buff_ci.attachmentCount = NOB_ARRAY_LEN(attachments);
+        frame_buff_ci.pAttachments = attachments;
         frame_buff_ci.width =  ctx.extent.width;
         frame_buff_ci.height = ctx.extent.height;
         frame_buff_ci.layers = 1;
@@ -791,13 +835,25 @@ void cvr_begin_render_pass(Color color)
     begin_rp.renderPass = ctx.render_pass;
     begin_rp.framebuffer = ctx.swpchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = ctx.extent;
-    VkClearValue clear_color = {0};
-    clear_color.color.float32[0] = color.r / 255.0f;
-    clear_color.color.float32[1] = color.g / 255.0f;
-    clear_color.color.float32[2] = color.b / 255.0f;
-    clear_color.color.float32[3] = color.a / 255.0f;
-    begin_rp.clearValueCount = 1;
-    begin_rp.pClearValues = &clear_color;
+    VkClearValue clear_color = {
+        .color = {
+            {
+                color.r / 255.0f,
+                color.g / 255.0f,
+                color.b / 255.0f,
+                color.a / 255.0f,
+            }
+        }
+    };
+    VkClearValue clear_depth = {
+        .depthStencil = {
+            .depth = 1.0f,
+            .stencil = 0,
+        }
+    };
+    VkClearValue clear_values[] = {clear_color, clear_depth};
+    begin_rp.clearValueCount = NOB_ARRAY_LEN(clear_values);
+    begin_rp.pClearValues = clear_values;
     vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
@@ -821,20 +877,22 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
 
-    if (ctx.ubos.active) {
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
-        );
-    }
+    if (pipeline_type == PIPELINE_TEXTURE) {
+        if (ctx.ubos.active) {
+            vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
+            );
+        }
 
-    for (size_t i = 0; i < ctx.textures.count; i++) {
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[pipeline_type], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
-        );
+        for (size_t i = 0; i < ctx.textures.count; i++) {
+            vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[pipeline_type], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+            );
+        }
     }
 
     Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
@@ -907,7 +965,7 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
     return result;
 }
 
-bool begin_draw()
+bool begin_draw() // TODO: there are a lot of cases where we need to prefix with vk_
 {
     bool result = true;
     VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
@@ -1003,7 +1061,27 @@ bool recreate_swpchain()
 
     cvr_chk(create_swpchain(), "failed to recreate swapchain");
     cvr_chk(create_img_views(), "failed to recreate image views");
+    cvr_chk(vk_depth_init(), "failed to init depth resources");
     cvr_chk(create_frame_buffs(), "failed to recreate frame buffers");
+
+defer:
+    return result;
+}
+
+bool vk_depth_init()
+{
+    bool result = true;
+
+    ctx.depth_img.extent = ctx.extent;
+    ctx.depth_img.aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    ctx.depth_img.format = VK_FORMAT_D32_SFLOAT; // TODO: check supported formats
+    result = vk_img_init(
+        &ctx.depth_img,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to initialize depth image");
+    result = vk_img_view_init(ctx.depth_img, &ctx.depth_img_view);
 
 defer:
     return result;
@@ -1371,6 +1449,10 @@ VkExtent2D choose_swp_extent()
 
 void cleanup_swpchain()
 {
+    vkDestroyImageView(ctx.device, ctx.depth_img_view, NULL);
+    vkDestroyImage(ctx.device, ctx.depth_img.handle, NULL);
+    vkFreeMemory(ctx.device, ctx.depth_img.mem, NULL);
+
     for (size_t i = 0; i < ctx.swpchain.buffs.count; i++)
         vkDestroyFramebuffer(ctx.device, ctx.swpchain.buffs.items[i], NULL);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)
@@ -1711,7 +1793,7 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
     VkImageCreateInfo img_ci = {
         .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType   = VK_IMAGE_TYPE_2D,
-        .format      = VK_FORMAT_R8G8B8A8_SRGB,
+        .format      = img->format,
         .extent      = {img->extent.width, img->extent.height, 1},
         .mipLevels   = 1,
         .arrayLayers = 1,
@@ -1972,10 +2054,9 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
 
     /* create the image */
     Vk_Image vk_img = {
-        .extent  = {
-            width,
-            height
-        }
+        .extent  = {width, height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = fmt,
     };
     result = vk_img_init(
         &vk_img,
@@ -1998,7 +2079,7 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
 
     /* create image view */
     VkImageView img_view;
-    result = create_img_view(vk_img.handle, fmt, &img_view);
+    result = vk_img_view_init(vk_img, &img_view);
     cvr_chk(result, "failed to create image view");
 
     /* create sampler */
