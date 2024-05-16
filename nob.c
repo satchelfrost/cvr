@@ -98,6 +98,17 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         }
     },
+    {
+        .name = "movement",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
 };
 
 static const char *cvr[] = {

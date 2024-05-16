@@ -30,6 +30,11 @@ typedef struct {
 } Keyboard;
 
 typedef struct {
+    Vector2 prev_pos;
+    Vector2 curr_pos;
+} Mouse;
+
+typedef struct {
     Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
     const Vertex *verts;
@@ -37,6 +42,7 @@ typedef struct {
 } Shape;
 
 Keyboard keyboard = {0};
+Mouse mouse = {0};
 static clock_t time_begin;
 #define MAX_MAT_STACK 1024 * 1024
 Matrix mat_stack[MAX_MAT_STACK];
@@ -45,6 +51,7 @@ Shape shapes[SHAPE_COUNT];
 bool shader_res_allocated = false;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
+static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
 void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
@@ -60,6 +67,7 @@ bool init_window(int width, int height, const char *title)
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
     glfwSetKeyCallback(ctx.window, key_callback);
+    glfwSetCursorPosCallback(ctx.window, mouse_cursor_pos_callback);
 
     /* Initialize vulkan stuff */
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
@@ -209,6 +217,8 @@ void poll_input_events()
         keyboard.prev_key_state[i] = keyboard.curr_key_state[i];
         keyboard.key_repeat_in_frame[i] = 0;
     }
+
+    mouse.prev_pos = mouse.curr_pos;
 }
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
@@ -434,4 +444,32 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 
 defer:
     return result;
+}
+
+void update_camera_free(Camera *camera)
+{
+    (void) camera;
+
+    /* Get mouse delta */
+    Vector2 delta = { 0 };
+    delta.x = mouse.curr_pos.x - mouse.prev_pos.x;
+    delta.y = mouse.curr_pos.y - mouse.prev_pos.y;
+}
+
+static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y)
+{
+    (void) window;
+
+    mouse.curr_pos.x = x;
+    mouse.curr_pos.y = y;
+}
+
+int get_mouse_x()
+{
+    return (int)mouse.curr_pos.x;
+}
+
+int get_mouse_y()
+{
+    return (int)mouse.curr_pos.y;
 }

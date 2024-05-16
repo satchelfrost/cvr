@@ -203,6 +203,9 @@ bool draw_shape_wireframe(Shape_Type shape_type);
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 double get_time();
+void update_camera_free(Camera *camera);
+int get_mouse_x();
+int get_mouse_y();
 
 void begin_drawing(Color color);             /*  vulkan for commands, set clear color */
 void begin_mode_3d(Camera camera);
