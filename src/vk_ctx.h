@@ -1061,6 +1061,7 @@ bool recreate_swpchain()
 
     cvr_chk(create_swpchain(), "failed to recreate swapchain");
     cvr_chk(create_img_views(), "failed to recreate image views");
+    cvr_chk(vk_depth_init(), "failed to init depth resources");
     cvr_chk(create_frame_buffs(), "failed to recreate frame buffers");
 
 defer:
