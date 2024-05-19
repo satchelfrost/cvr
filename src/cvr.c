@@ -47,6 +47,13 @@ typedef struct {
     const uint16_t *idxs;
 } Shape;
 
+typedef struct {
+    Vk_Buffer *items;
+    size_t count;
+    size_t capacity;
+} Point_Clouds;
+
+Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
 static clock_t time_begin;
@@ -77,10 +84,8 @@ bool init_window(int width, int height, const char *title)
     glfwSetMouseButtonCallback(ctx.window, mouse_button_callback);
     glfwSetCursorPosCallback(ctx.window, mouse_cursor_pos_callback);
 
-    /* Initialize vulkan stuff */
-    cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
+    cvr_chk(vk_init(), "failed to initialize Vulkan context");
 
-    /* Start the clock */
     time_begin = clock();
 
 defer:
@@ -323,11 +328,6 @@ void scale(float x, float y, float z)
         nob_log(NOB_ERROR, "no matrix available to scale");
 }
 
-void enable_point_topology()
-{
-    core_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-}
-
 bool alloc_shape_res(Shape_Type shape_type)
 {
     bool result = true;
@@ -561,4 +561,63 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
 bool is_mouse_button_down(int button)
 {
     return mouse.curr_button_state[button] == GLFW_PRESS;
+}
+
+bool upload_point_cloud(Buffer_Descriptor desc, size_t *id)
+{
+    Vk_Buffer buff = {
+        .count = desc.count,
+        .size  = desc.size,
+    };
+    if (!vtx_buff_init(&buff, desc.items)) {
+        nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
+        return false;
+    }
+
+    *id = point_clouds.count;
+    nob_da_append(&point_clouds, buff);
+    return true;
+}
+
+void destroy_point_cloud(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device); // TODO: alternatives?
+
+    for (size_t i = 0; i < point_clouds.count; i++) {
+        if (i == id && point_clouds.items[i].handle)
+            vk_buff_destroy(point_clouds.items[i]);
+    }
+}
+
+bool draw_point_cloud(size_t id)
+{
+    bool result = true;
+
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
+        if (!create_basic_pipeline(PIPELINE_POINT_CLOUD))
+            nob_return_defer(false);
+
+    Vk_Buffer vtx_buff = {0};
+    for (size_t i = 0; i < point_clouds.count; i++) {
+        if (i == id && point_clouds.items[i].handle) {
+            vtx_buff = point_clouds.items[i];
+        }
+    }
+
+    if (!vtx_buff.handle) {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
+        nob_return_defer(false);
+    }
+
+    if (mat_stack_p) {
+        Vk_Buffer dummy = {0};
+        if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mat_stack[mat_stack_p - 1]))
+            nob_return_defer(false);
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
 }

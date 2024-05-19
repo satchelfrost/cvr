@@ -232,7 +232,6 @@ void rotate_z(float angle);
 void rotate_xyz(Vector3 angle);
 void rotate_zyx(Vector3 angle);
 void scale(float x, float y, float z);
-void enable_point_topology();
 
 typedef struct {
     void *data;
@@ -253,9 +252,19 @@ typedef struct {
     int format;
 } Texture;
 
+typedef struct {
+    void *items;
+    size_t size;
+    size_t count;
+} Buffer_Descriptor;
+
 Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 bool is_mouse_button_down(int button);
+
+bool upload_point_cloud(Buffer_Descriptor desc, size_t *id);
+void destroy_point_cloud(size_t id);
+bool draw_point_cloud(size_t id);
 
 #endif // CVR_H_

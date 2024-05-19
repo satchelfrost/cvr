@@ -15,15 +15,14 @@ int main()
     };
 
     init_window(800, 600, "Psychedelic");
-    enable_point_topology();
 
     while (!window_should_close()) {
         if (is_key_pressed(KEY_SPACE)) shape = (shape + 1) % SHAPE_COUNT;
 
         begin_drawing(BLUE);
             begin_mode_3d(camera);
-                for (size_t k = 0; k < 8; k++) {
-                    rotate_z(45.0f * DEG2RAD);
+                for (size_t k = 0; k < 4; k++) {
+                    rotate_z(11.25f * DEG2RAD);
                     double time = get_time();
                     float step = sin(time) * 0.5f + 0.5f;
                     for (size_t i = 0; i < 13; i++) {

@@ -109,6 +109,22 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         }
     },
+    {
+        .name = "point-cloud",
+        .shaders = {
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "point-cloud.vert",
+                "point-cloud.frag"
+            },
+            .count = 4
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
 };
 
 static const char *cvr[] = {
