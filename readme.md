@@ -1,22 +1,41 @@
 # C Vulkan Renderer
-> **__NOTE:__** Currently only supports Linux
 
-C Vulkan Renderer (or simply cvr) is a framework very similar to [raylib](https://github.com/raysan5/raylib), but using Vulkan instead of OpenGL. The API tries to emulate raylib in its simplicity, while making any modifications that might be necessary for Vulkan; or things I deem to be convenient at any given time.
+C Vulkan Renderer (or simply cvr) is a framework heavily inspired by [raylib](https://github.com/raysan5/raylib), but with a Vulkan backend instead of OpenGL. Like raylib, cvr is written in C, and has a very similar API. There are deviations here and there, but the general idea of simplicity is still the same. For example, drawing a rotating cube, should take less than 30 lines of code.
 
-**What this project is not**:
-* This is not a Vulkan backend for raylib.
-    - cvr and raylib are separate projects with different goals. Creating a Vulkan backend for raylib would likely be a pain, and I'm not even sure the original creator would want to go in that direction in the first place. This project exists soley to answer questions like: "What if raylib supported Vulkan?", "What would that look like?", and "Would it make Vulkan easier to use?".
-* This project is not even close to a drop-in replacement for raylib.
-    - Over time this will become less true, but it's probably best to keep your expectations low. This is really just an on-going experiment for fun.
+```c
+#include "cvr.h"
 
-**Goals of the project**:
-* The ability to iterate fast, and test out different ideas in Vulkan.
-* Basic examples like Phong lighting, and skinned animation (currently not implemented).
-* Simplicity.
-    - I don't want too many layers of indirection from the API to the actual implementation. You should still be able to look at the Vulkan implementation without going blind (at least thats the hope).
+int main()
+{
+    Camera camera = {
+        .position   = {0.0f, 1.0f, 2.0f},
+        .target     = {0.0f, 0.0f, 0.0f},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    };
 
+    init_window(500, 500, "cube");
+
+    while(!window_should_close()) {
+        begin_drawing(BEIGE);
+        begin_mode_3d(camera);
+            rotate_y(get_time());
+            if (!draw_shape(SHAPE_CUBE)) return 1;
+        end_mode_3d();
+        end_drawing();
+    }
+
+    close_window();
+    return 0;
+}
+```
+
+For now, cvr is more of an experiment, and one should not expect feature parity with raylib.
 
 ## Required libraries for building
+
+> **__NOTE:__** Currently only tested on Linux. I know it's in C, but my excuse is that I haven't had the need to test on Windows or Mac.
 
 Vulkan & GLFW
 
