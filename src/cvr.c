@@ -17,6 +17,10 @@
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
 #define MAX_CHAR_PRESSED_QUEUE 16
+#define CAMERA_MOVE_SPEED 0.01f
+#define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
+#define CAMERA_ROTATION_SPEED 0.0003f
+#define MAX_MOUSE_BUTTONS 8
 
 typedef struct {
     int exit_key;
@@ -30,6 +34,13 @@ typedef struct {
 } Keyboard;
 
 typedef struct {
+    Vector2 prev_pos;
+    Vector2 curr_pos;
+    char curr_button_state[MAX_MOUSE_BUTTONS];
+    char prev_button_state[MAX_MOUSE_BUTTONS];
+} Mouse;
+
+typedef struct {
     Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
     const Vertex *verts;
@@ -37,6 +48,7 @@ typedef struct {
 } Shape;
 
 Keyboard keyboard = {0};
+Mouse mouse = {0};
 static clock_t time_begin;
 #define MAX_MAT_STACK 1024 * 1024
 Matrix mat_stack[MAX_MAT_STACK];
@@ -45,6 +57,8 @@ Shape shapes[SHAPE_COUNT];
 bool shader_res_allocated = false;
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
+static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
+static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
@@ -60,6 +74,8 @@ bool init_window(int width, int height, const char *title)
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
     glfwSetKeyCallback(ctx.window, key_callback);
+    glfwSetMouseButtonCallback(ctx.window, mouse_button_callback);
+    glfwSetCursorPosCallback(ctx.window, mouse_cursor_pos_callback);
 
     /* Initialize vulkan stuff */
     cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
@@ -209,6 +225,10 @@ void poll_input_events()
         keyboard.prev_key_state[i] = keyboard.curr_key_state[i];
         keyboard.key_repeat_in_frame[i] = 0;
     }
+
+    mouse.prev_pos = mouse.curr_pos;
+    for (int i = 0; i < MAX_MOUSE_BUTTONS; i++)
+        mouse.prev_button_state[i] = mouse.curr_button_state[i];
 }
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
@@ -434,4 +454,111 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 
 defer:
     return result;
+}
+
+Vector3 get_camera_forward(Camera *camera)
+{
+    return Vector3Normalize(Vector3Subtract(camera->target, camera->position));
+}
+
+Vector3 get_camera_up(Camera *camera)
+{
+    return Vector3Normalize(camera->up);
+}
+
+Vector3 get_camera_right(Camera *camera)
+{
+    Vector3 forward = get_camera_forward(camera);
+    Vector3 up = get_camera_up(camera);
+    return Vector3CrossProduct(forward, up);
+}
+
+void camera_move_forward(Camera *camera, float distance)
+{
+    Vector3 forward = get_camera_forward(camera);
+    forward = Vector3Scale(forward, distance);
+    camera->position = Vector3Add(camera->position, forward);
+    camera->target = Vector3Add(camera->target, forward);
+}
+
+void camera_move_right(Camera *camera, float distance)
+{
+    Vector3 right = get_camera_right(camera);
+    right = Vector3Scale(right, distance);
+    camera->position = Vector3Add(camera->position, right);
+    camera->target = Vector3Add(camera->target, right);
+}
+
+Vector2 get_mouse_delta()
+{
+    Vector2 delta = {
+        .x = mouse.curr_pos.x - mouse.prev_pos.x,
+        .y = mouse.curr_pos.y - mouse.prev_pos.y
+    };
+    return delta;
+}
+
+void camera_yaw(Camera *camera, float angle)
+{
+    Vector3 up = get_camera_up(camera);
+    Vector3 target_pos = Vector3Subtract(camera->target, camera->position);
+    target_pos = Vector3RotateByAxisAngle(target_pos, up, angle);
+    camera->target = Vector3Add(camera->position, target_pos);
+}
+
+void camera_pitch(Camera *camera, float angle)
+{
+    Vector3 right = get_camera_right(camera);
+    Vector3 target_pos = Vector3Subtract(camera->target, camera->position);
+    target_pos = Vector3RotateByAxisAngle(target_pos, right, angle);
+    camera->target = Vector3Add(camera->position, target_pos);
+}
+
+void update_camera_free(Camera *camera) // TODO: really need delta time in here
+{
+    Vector2 delta = get_mouse_delta();
+    if (is_mouse_button_down(MOUSE_BUTTON_RIGHT)) {
+        camera_yaw(camera, -delta.x * CAMERA_MOUSE_MOVE_SENSITIVITY);
+        camera_pitch(camera, -delta.y * CAMERA_MOUSE_MOVE_SENSITIVITY);
+    }
+
+    if (is_key_down(KEY_K)) camera_pitch(camera, -CAMERA_ROTATION_SPEED);
+    if (is_key_down(KEY_I)) camera_pitch(camera, CAMERA_ROTATION_SPEED);
+    if (is_key_down(KEY_L)) camera_yaw(camera, -CAMERA_ROTATION_SPEED);
+    if (is_key_down(KEY_J)) camera_yaw(camera, CAMERA_ROTATION_SPEED);
+
+    if (is_key_down(KEY_W)) camera_move_forward(camera, CAMERA_MOVE_SPEED);
+    if (is_key_down(KEY_A)) camera_move_right(camera, -CAMERA_MOVE_SPEED);
+    if (is_key_down(KEY_S)) camera_move_forward(camera, -CAMERA_MOVE_SPEED);
+    if (is_key_down(KEY_D)) camera_move_right(camera, CAMERA_MOVE_SPEED);
+}
+
+static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y)
+{
+    (void) window;
+
+    mouse.curr_pos.x = x;
+    mouse.curr_pos.y = y;
+}
+
+int get_mouse_x()
+{
+    return (int)mouse.curr_pos.x;
+}
+
+int get_mouse_y()
+{
+    return (int)mouse.curr_pos.y;
+}
+
+static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+{
+    (void) window;
+    (void) mods;
+    mouse.curr_button_state[button] = action;
+}
+
+bool is_mouse_button_down(int button)
+{
+    return mouse.curr_button_state[button] == GLFW_PRESS;
 }

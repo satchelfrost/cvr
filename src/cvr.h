@@ -167,6 +167,16 @@ typedef enum {
 } Keyboard_Key;
 
 typedef enum {
+    MOUSE_BUTTON_LEFT    = 0,
+    MOUSE_BUTTON_RIGHT   = 1,
+    MOUSE_BUTTON_MIDDLE  = 2,
+    MOUSE_BUTTON_SIDE    = 3,
+    MOUSE_BUTTON_EXTRA   = 4,
+    MOUSE_BUTTON_FORWARD = 5,
+    MOUSE_BUTTON_BACK    = 6,
+} Mouse_Button;
+
+typedef enum {
     PERSPECTIVE,
     ORTHOGRAPHIC
 } Camera_Projection;
@@ -203,6 +213,9 @@ bool draw_shape_wireframe(Shape_Type shape_type);
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 double get_time();
+void update_camera_free(Camera *camera);
+int get_mouse_x();
+int get_mouse_y();
 
 void begin_drawing(Color color);             /*  vulkan for commands, set clear color */
 void begin_mode_3d(Camera camera);
@@ -243,5 +256,6 @@ typedef struct {
 Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
+bool is_mouse_button_down(int button);
 
 #endif // CVR_H_
