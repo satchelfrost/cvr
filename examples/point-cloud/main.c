@@ -42,8 +42,6 @@ bool read_vtx(const char *file, Vertices *verts)
         read_attr(r, sv);
         read_attr(g, sv);
         read_attr(b, sv);
-        if (i < 50)
-            nob_log(NOB_INFO, "first vertx %.2f, %.2f, %.2f", x, y, z);
 
         Vertex vert = {
             .pos = {x, y, z},
