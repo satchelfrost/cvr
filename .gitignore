@@ -5,3 +5,4 @@ nob.old
 compile_commands.json
 .cache
 /res
+arena_*

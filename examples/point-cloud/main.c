@@ -6,7 +6,7 @@
     do {                                      \
         memcpy(&attr, sv.data, sizeof(attr)); \
         sv.data  += sizeof(attr);             \
-        sv.count += sizeof(attr);             \
+        sv.count -= sizeof(attr);             \
     } while(0)
 
 typedef struct {
@@ -28,10 +28,8 @@ bool read_vtx(const char *file, Vertices *verts)
 
     Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
     size_t vtx_count = 0;
-    memcpy(&vtx_count, sv.data, sizeof(vtx_count));
-
-    /* skip vertex count field */
-    sv.data += 4;
+    read_attr(vtx_count, sv);
+    nob_log(NOB_INFO, "count %zu", vtx_count);
 
     for (size_t i = 0; i < vtx_count; i++) {
         float x, y, z;
@@ -59,7 +57,9 @@ defer:
 int main()
 {
     Vertices verts = {0};
-    if (!read_vtx("res/arena_5060224_f32.vtx", &verts)) return 1;
+    if (!read_vtx("res/arena_5060224_f32.vtx", &verts)) {
+        if (!read_vtx("res/flowers.vtx", &verts)) return 1;
+    }
     nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
 
     Camera camera = {
@@ -85,7 +85,7 @@ int main()
 
         begin_drawing(BLUE);
         begin_mode_3d(camera);
-            if (!draw_shape(SHAPE_CUBE)) return 1;
+            // if (!draw_shape(SHAPE_CUBE)) return 1;
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             if (!draw_point_cloud(id)) return 1;
