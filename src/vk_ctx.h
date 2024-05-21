@@ -102,6 +102,7 @@ typedef struct {
 typedef enum {
     PIPELINE_DEFAULT = 0,
     PIPELINE_WIREFRAME,
+    PIPELINE_POINT_CLOUD,
     PIPELINE_TEXTURE,
     PIPELINE_COUNT,
 } Pipeline_Type;
@@ -143,7 +144,7 @@ typedef struct {
 } Vk_Context;
 
 /* CVR render functions */
-bool cvr_init();
+bool vk_init();
 bool cvr_destroy();
 bool create_instance();
 bool create_device();
@@ -223,7 +224,6 @@ void cvr_begin_render_pass(Color color);
 
 typedef struct {
     Camera camera;
-    VkPrimitiveTopology topology;
     Matrix view;
     Matrix proj;
 } Core_State;
@@ -348,7 +348,7 @@ typedef struct {
     float time;
 } UBO;
 
-bool cvr_init()
+bool vk_init()
 {
     bool result = true;
 
@@ -367,9 +367,6 @@ bool cvr_init()
     cvr_chk(vk_depth_init(), "failed to init depth resources");
     cvr_chk(create_frame_buffs(), "failed to create frame buffers");
     cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
-
-    /* Set the default topology to triangle list */
-    core_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
 defer:
     return result;
@@ -587,12 +584,21 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
 
     char *vert_shader_name;
     char *frag_shader_name;
-    if (pipeline_type == PIPELINE_TEXTURE) {
+    switch (pipeline_type) {
+    case PIPELINE_TEXTURE: {
         vert_shader_name = nob_temp_sprintf("./res/texture.vert.spv");
         frag_shader_name = nob_temp_sprintf("./res/texture.frag.spv");
-    } else {
+    } break;
+    case PIPELINE_POINT_CLOUD: {
+        vert_shader_name = nob_temp_sprintf("./res/point-cloud.vert.spv");
+        frag_shader_name = nob_temp_sprintf("./res/point-cloud.frag.spv");
+    } break;
+    case PIPELINE_DEFAULT:
+    case PIPELINE_WIREFRAME:
+    default: {
         vert_shader_name = nob_temp_sprintf("./res/default.vert.spv");
         frag_shader_name = nob_temp_sprintf("./res/default.frag.spv");
+    } break;
     }
 
     VkPipelineShaderStageCreateInfo vert_ci = {0};
@@ -629,7 +635,10 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {0};
     input_assembly_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_ci.topology = core_state.topology;
+    if (pipeline_type == PIPELINE_POINT_CLOUD)
+        input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    else
+        input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     VkViewport viewport = {0};
     viewport.width = (float) ctx.extent.width;
@@ -875,7 +884,9 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
 
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+
+    if (pipeline_type != PIPELINE_POINT_CLOUD)
+        vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
 
     if (pipeline_type == PIPELINE_TEXTURE) {
         if (ctx.ubos.active) {
@@ -908,12 +919,15 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
         &mat
     );
 
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    if (pipeline_type == PIPELINE_POINT_CLOUD)
+        vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
+    else
+        vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 
     return result;
 }
 
-bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
+bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model) // TODO: i think one could just use vk_draw instead
 {
     bool result = true;
 

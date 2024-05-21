@@ -36,6 +36,8 @@ typedef struct {
 typedef struct {
     Vector2 prev_pos;
     Vector2 curr_pos;
+    Vector2 curr_wheel_move;
+    Vector2 prev_wheel_move;
     char curr_button_state[MAX_MOUSE_BUTTONS];
     char prev_button_state[MAX_MOUSE_BUTTONS];
 } Mouse;
@@ -47,6 +49,13 @@ typedef struct {
     const uint16_t *idxs;
 } Shape;
 
+typedef struct {
+    Vk_Buffer *items;
+    size_t count;
+    size_t capacity;
+} Point_Clouds;
+
+Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
 static clock_t time_begin;
@@ -59,9 +68,11 @@ bool shader_res_allocated = false;
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
+static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_offset);
 void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
+float get_mouse_wheel_move();
 
 bool init_window(int width, int height, const char *title)
 {
@@ -76,11 +87,10 @@ bool init_window(int width, int height, const char *title)
     glfwSetKeyCallback(ctx.window, key_callback);
     glfwSetMouseButtonCallback(ctx.window, mouse_button_callback);
     glfwSetCursorPosCallback(ctx.window, mouse_cursor_pos_callback);
+    glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
 
-    /* Initialize vulkan stuff */
-    cvr_chk(cvr_init(), "failed to initialize C Vulkan Renderer");
+    cvr_chk(vk_init(), "failed to initialize Vulkan context");
 
-    /* Start the clock */
     time_begin = clock();
 
 defer:
@@ -229,6 +239,19 @@ void poll_input_events()
     mouse.prev_pos = mouse.curr_pos;
     for (int i = 0; i < MAX_MOUSE_BUTTONS; i++)
         mouse.prev_button_state[i] = mouse.curr_button_state[i];
+
+    mouse.prev_wheel_move = mouse.curr_wheel_move;
+    mouse.curr_wheel_move = (Vector2){ 0.0f, 0.0f };
+}
+
+float get_mouse_wheel_move()
+{
+    float result = 0.0f;
+
+    if (fabsf(mouse.curr_wheel_move.x) > fabsf(mouse.curr_wheel_move.y)) result = (float)mouse.curr_wheel_move.x;
+    else result = (float)mouse.curr_wheel_move.y;
+
+    return result;
 }
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
@@ -321,11 +344,6 @@ void scale(float x, float y, float z)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixScale(x, y, z), mat_stack[mat_stack_p - 1]);
     else
         nob_log(NOB_ERROR, "no matrix available to scale");
-}
-
-void enable_point_topology()
-{
-    core_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 }
 
 bool alloc_shape_res(Shape_Type shape_type)
@@ -514,6 +532,15 @@ void camera_pitch(Camera *camera, float angle)
     camera->target = Vector3Add(camera->position, target_pos);
 }
 
+void camera_move_to_target(Camera *camera, float delta)
+{
+    float distance = Vector3Distance(camera->position, camera->target);
+    distance += delta;
+    if (distance <= 0) distance = 0.001f;
+    Vector3 forward = get_camera_forward(camera);
+    camera->position = Vector3Add(camera->target, Vector3Scale(forward, -distance));
+}
+
 void update_camera_free(Camera *camera) // TODO: really need delta time in here
 {
     Vector2 delta = get_mouse_delta();
@@ -527,10 +554,16 @@ void update_camera_free(Camera *camera) // TODO: really need delta time in here
     if (is_key_down(KEY_L)) camera_yaw(camera, -CAMERA_ROTATION_SPEED);
     if (is_key_down(KEY_J)) camera_yaw(camera, CAMERA_ROTATION_SPEED);
 
-    if (is_key_down(KEY_W)) camera_move_forward(camera, CAMERA_MOVE_SPEED);
-    if (is_key_down(KEY_A)) camera_move_right(camera, -CAMERA_MOVE_SPEED);
-    if (is_key_down(KEY_S)) camera_move_forward(camera, -CAMERA_MOVE_SPEED);
-    if (is_key_down(KEY_D)) camera_move_right(camera, CAMERA_MOVE_SPEED);
+    float move_speed = CAMERA_MOVE_SPEED;
+    if (is_key_down(KEY_LEFT_SHIFT))
+        move_speed *= 5.0f;
+
+    if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
+    if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);
+    if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);
+    if (is_key_down(KEY_D)) camera_move_right(camera, move_speed);
+
+    camera_move_to_target(camera, -get_mouse_wheel_move());
 }
 
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y)
@@ -561,4 +594,73 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
 bool is_mouse_button_down(int button)
 {
     return mouse.curr_button_state[button] == GLFW_PRESS;
+}
+
+bool upload_point_cloud(Buffer_Descriptor desc, size_t *id)
+{
+    Vk_Buffer buff = {
+        .count = desc.count,
+        .size  = desc.size,
+    };
+    if (!vtx_buff_init(&buff, desc.items)) {
+        nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
+        return false;
+    }
+
+    *id = point_clouds.count;
+    nob_da_append(&point_clouds, buff);
+    return true;
+}
+
+void destroy_point_cloud(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device); // TODO: alternatives?
+
+    for (size_t i = 0; i < point_clouds.count; i++) {
+        if (i == id && point_clouds.items[i].handle)
+            vk_buff_destroy(point_clouds.items[i]);
+    }
+}
+
+bool draw_point_cloud(size_t id)
+{
+    bool result = true;
+
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
+        if (!create_basic_pipeline(PIPELINE_POINT_CLOUD))
+            nob_return_defer(false);
+
+    Vk_Buffer vtx_buff = {0};
+    for (size_t i = 0; i < point_clouds.count; i++) {
+        if (i == id && point_clouds.items[i].handle) {
+            vtx_buff = point_clouds.items[i];
+        }
+    }
+
+    if (!vtx_buff.handle) {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
+        nob_return_defer(false);
+    }
+
+    if (mat_stack_p) {
+        Vk_Buffer dummy = {0};
+        if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mat_stack[mat_stack_p - 1]))
+            nob_return_defer(false);
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
+static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_offset)
+{
+    (void) window;
+    Vector2 offsets = {
+        .x = x_offset,
+        .y = y_offset
+    };
+    mouse.curr_wheel_move = offsets;
 }
