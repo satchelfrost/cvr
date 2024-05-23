@@ -208,19 +208,23 @@ typedef enum {
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
-bool draw_shape(Shape_Type shape_type);
-bool draw_shape_wireframe(Shape_Type shape_type);
+bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
+bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
+void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
+void begin_mode_3d(Camera camera);                          /* Set camera and push a matrix */
+void end_mode_3d();                                         /* Pops matrix, checks for errors */
+void end_drawing();                                         /* Submits commands, presents, and polls for input */
+void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
+
 bool is_key_pressed(int key);
 bool is_key_down(int key);
-double get_time();
-void update_camera_free(Camera *camera);
 int get_mouse_x();
 int get_mouse_y();
 
-void begin_drawing(Color color);             /*  vulkan for commands, set clear color */
-void begin_mode_3d(Camera camera);
-void end_mode_3d();                              /* Submits commands, presents, and polls for input */
-void end_drawing();                              /* Submits commands, presents, and polls for input */
+double get_frame_time();
+double get_time();
+int get_fps();
+void set_target_fps(int fps);
 
 void push_matrix();
 void pop_matrix();

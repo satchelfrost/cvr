@@ -21,6 +21,9 @@
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
 #define CAMERA_ROTATION_SPEED 0.0003f
 #define MAX_MOUSE_BUTTONS 8
+#define FPS_CAPTURE_FRAMES_COUNT 30
+#define FPS_AVERAGE_TIME_SECONDS 0.5
+#define FPS_STEP (FPS_AVERAGE_TIME_SECONDS/FPS_CAPTURE_FRAMES_COUNT)
 
 typedef struct {
     int exit_key;
@@ -43,6 +46,16 @@ typedef struct {
 } Mouse;
 
 typedef struct {
+    double curr;
+    double prev;
+    double update;
+    double draw;
+    double frame;
+    double target;
+    size_t frame_count;
+} Time;
+
+typedef struct {
     Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
     const Vertex *verts;
@@ -58,6 +71,7 @@ typedef struct {
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
+Time cvr_time = {0};
 static clock_t time_begin;
 #define MAX_MAT_STACK 1024 * 1024
 Matrix mat_stack[MAX_MAT_STACK];
@@ -156,8 +170,50 @@ void begin_mode_3d(Camera camera)
 
 void begin_drawing(Color color)
 {
+    cvr_time.curr   = get_time();
+    cvr_time.update = cvr_time.curr - cvr_time.prev;
+    cvr_time.prev   = cvr_time.curr;
+
     begin_draw();
     cvr_begin_render_pass(color);
+}
+
+static void wait_time(double seconds)
+{
+    if (seconds <= 0) return;
+
+    /* for now wait time only supports linux */ // TODO: Windows
+    struct timespec req = {0};
+    time_t sec = seconds;
+    long nsec = (seconds - sec) * 1000000000L;
+    req.tv_sec = sec;
+    req.tv_nsec = nsec;
+    
+    while (nanosleep(&req, &req) == -1) continue;
+}
+
+void end_drawing()
+{
+    cvr_update_ubos(get_time());
+    end_draw();
+
+    cvr_time.curr = get_time();
+    cvr_time.draw = cvr_time.curr - cvr_time.prev;
+    cvr_time.prev = cvr_time.curr;
+    cvr_time.frame = cvr_time.update + cvr_time.draw;
+
+    if (cvr_time.frame < cvr_time.target) {
+        //nob_log(NOB_INFO, "need to wait for %02.03f ms", (float) (cvr_time.target - cvr_time.frame) * 1000.0f);
+        wait_time(cvr_time.target - cvr_time.frame);
+
+        cvr_time.curr = get_time();
+        double wait = cvr_time.curr - cvr_time.prev;
+        cvr_time.prev = cvr_time.curr;
+        cvr_time.frame += wait;
+    }
+
+    poll_input_events();
+    cvr_time.frame_count++;
 }
 
 void push_matrix()
@@ -194,13 +250,6 @@ void end_mode_3d()
 
     if (leftover)
         nob_log(NOB_WARNING, "%d matrix stack(s) leftover", leftover);
-}
-
-void end_drawing()
-{
-    cvr_update_ubos(get_time());
-    end_draw();
-    poll_input_events();
 }
 
 bool is_key_pressed(int key)
@@ -663,4 +712,49 @@ static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_
         .y = y_offset
     };
     mouse.curr_wheel_move = offsets;
+}
+
+double get_frame_time()
+{
+    return cvr_time.frame;	
+}
+
+int get_fps()
+{
+    int fps = 0;
+
+    static int index = 0;
+    static double history[FPS_CAPTURE_FRAMES_COUNT] = {0};
+    static double average = 0, last = 0;
+    double fps_frame = get_frame_time();
+
+    if (cvr_time.frame_count == 0) {
+        average = 0;
+        last = 0;
+        index = 0;
+
+        for (int i = 0; i < FPS_CAPTURE_FRAMES_COUNT; i++) history[i] = 0;
+    }
+
+    if (fps_frame == 0) return 0;
+
+    if ((get_time() - last) > FPS_STEP)
+    {
+        last = get_time();
+        index = (index + 1) % FPS_CAPTURE_FRAMES_COUNT;
+        average -= history[index];
+        history[index] = fps_frame / FPS_CAPTURE_FRAMES_COUNT;
+        average += history[index];
+    }
+
+    fps = (int)roundf((float)1.0f/average);
+
+    return fps;
+}
+
+void set_target_fps(int fps)
+{
+    if (fps < 1) cvr_time.target = 0.0;
+    else cvr_time.target = 1.0 / (double) fps;
+    nob_log(NOB_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
 }
