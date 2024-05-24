@@ -13,15 +13,7 @@ int main()
 
     init_window(500, 500, "depth");
 
-    int fps = 0;
-
     while(!window_should_close()) {
-	int curr_fps = get_fps();
-	if (curr_fps != fps) {
-	    fps = curr_fps;
-            nob_log(NOB_INFO, "FPS %d", fps);
-	}
-
         begin_drawing(BEIGE);
         begin_mode_3d(camera);
             rotate_y(get_time());

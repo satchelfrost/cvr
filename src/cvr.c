@@ -168,6 +168,30 @@ void begin_mode_3d(Camera camera)
     push_matrix();
 }
 
+static void wait_time(double seconds)
+{
+    if (seconds <= 0) return;
+
+    /* prepare for partial busy wait loop */
+    double destination_time = get_time() + seconds;
+    double sleep_secs = seconds - seconds * 0.05;
+
+    /* for now wait time only supports linux */ // TODO: Windows
+    struct timespec req = {0};
+    time_t sec = sleep_secs;
+    long nsec = (sleep_secs - sec) * 1000000000L;
+    req.tv_sec = sec;
+    req.tv_nsec = nsec;
+
+    //nob_log(NOB_INFO, "sleeping for %lld ns", nsec);
+    //nob_log(NOB_INFO, "sleeping for %.4f s", (float)seconds);
+
+    while (nanosleep(&req, &req) == -1) continue;
+
+    /* partial busy wait loop */
+    while (get_time() < destination_time) {}
+}
+
 void begin_drawing(Color color)
 {
     cvr_time.curr   = get_time();
@@ -176,20 +200,6 @@ void begin_drawing(Color color)
 
     begin_draw();
     cvr_begin_render_pass(color);
-}
-
-static void wait_time(double seconds)
-{
-    if (seconds <= 0) return;
-
-    /* for now wait time only supports linux */ // TODO: Windows
-    struct timespec req = {0};
-    time_t sec = seconds;
-    long nsec = (seconds - sec) * 1000000000L;
-    req.tv_sec = sec;
-    req.tv_nsec = nsec;
-    
-    while (nanosleep(&req, &req) == -1) continue;
 }
 
 void end_drawing()
@@ -203,7 +213,6 @@ void end_drawing()
     cvr_time.frame = cvr_time.update + cvr_time.draw;
 
     if (cvr_time.frame < cvr_time.target) {
-        //nob_log(NOB_INFO, "need to wait for %02.03f ms", (float) (cvr_time.target - cvr_time.frame) * 1000.0f);
         wait_time(cvr_time.target - cvr_time.frame);
 
         cvr_time.curr = get_time();

@@ -80,14 +80,7 @@ int main()
     };
     if (!upload_point_cloud(desc, &id)) return 1;
 
-    set_target_fps(60);
-    int fps = 0;
     while (!window_should_close()) {
-	int curr_fps = get_fps();
-	if (curr_fps != fps) {
-	    fps = curr_fps;
-            nob_log(NOB_INFO, "FPS %d", fps);
-	}
         update_camera_free(&camera);
 
         begin_drawing(BLUE);
