@@ -209,7 +209,6 @@ typedef struct {
 
 void cvr_set_proj(Camera camera);
 void cvr_set_view(Camera camera);
-void cvr_set_view_proj(Camera camera);
 
 #ifndef CVR_COLOR
 typedef struct Color {

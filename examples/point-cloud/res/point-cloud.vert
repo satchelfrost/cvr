@@ -13,7 +13,7 @@ layout(location = 0) out vec3 fragColor;
 
 void main()
 {
-    gl_PointSize = 4.0;
+    gl_PointSize = 3.0;
     gl_Position = push_const.mvp * vec4(inPosition, 1.0);
     fragColor = inColor;
 }

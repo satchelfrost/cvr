@@ -614,7 +614,7 @@ void update_camera_free(Camera *camera) // TODO: really need delta time in here
 
     float move_speed = CAMERA_MOVE_SPEED;
     if (is_key_down(KEY_LEFT_SHIFT))
-        move_speed *= 5.0f;
+        move_speed *= 10.0f;
 
     if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);

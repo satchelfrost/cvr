@@ -53,22 +53,43 @@ defer:
     return result;
 }
 
-
-int main()
-{
-    Vertices verts = {0};
-    if (!read_vtx("res/arena_5060224_f32.vtx", &verts)) {
-        if (!read_vtx("res/flowers.vtx", &verts)) return 1;
-    }
-    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
-
-    Camera camera = {
-        .position   = {0.0f, 1.0f, 2.0f},
+Camera cameras[] = {
+    {
+        .position   = {0.0f, 1.0f, 5.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
-    };
+    },
+    {
+        .position   = {-5.0f, 2.0f, 10.0f},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {0.0f, 0.0f, 0.0f},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    {
+        .position   = {-5.0f, 4.0f, 20.0f},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {0.0f, 0.0f, 0.0f},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    }
+};
+
+int main()
+{
+    Vertices verts = {0};
+    // if (!read_vtx("res/arena_5060224_f32.vtx", &verts)) {
+    if (!read_vtx("res/arena_50602232_f32.vtx", &verts)) {
+    // if (!read_vtx("res/arena_506022320_f32.vtx", &verts)) {
+        if (!read_vtx("res/flowers.vtx", &verts)) return 1;
+    }
+    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
+
+    /* set the current camera */
+    int cam_idx = 0;
+    Camera *camera = &cameras[cam_idx];
 
     init_window(1600, 900, "point cloud");
 
@@ -80,12 +101,36 @@ int main()
     };
     if (!upload_point_cloud(desc, &id)) return 1;
 
+    int fps = 0;
     while (!window_should_close()) {
-        update_camera_free(&camera);
+        int curr_fps = get_fps();
+        if (curr_fps != fps) {
+            nob_log(NOB_INFO, "FPS %d", curr_fps);
+            fps = curr_fps;
+        }
+
+        if (is_key_pressed(KEY_SPACE)) {
+            cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
+            camera = &cameras[cam_idx];
+        }
+
+        update_camera_free(camera);
 
         begin_drawing(BLUE);
-        begin_mode_3d(camera);
-            // if (!draw_shape(SHAPE_CUBE)) return 1;
+        begin_mode_3d(*camera);
+            /* draw the other cameras as cubes */
+            for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
+                if (camera == &cameras[i]) continue;
+                push_matrix();
+                    translate(
+                        cameras[i].position.x,
+                        cameras[i].position.y,
+                        cameras[i].position.z
+                    );
+                    if (!draw_shape(SHAPE_CUBE)) return 1;
+                pop_matrix();
+            }
+
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             if (!draw_point_cloud(id)) return 1;
