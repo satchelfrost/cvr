@@ -17,12 +17,12 @@
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
 #define MAX_CHAR_PRESSED_QUEUE 16
-#define CAMERA_MOVE_SPEED 0.01f
+#define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
 #define CAMERA_ROTATION_SPEED 0.0003f
 #define MAX_MOUSE_BUTTONS 8
 #define FPS_CAPTURE_FRAMES_COUNT 30
-#define FPS_AVERAGE_TIME_SECONDS 0.5
+#define FPS_AVERAGE_TIME_SECONDS 0.5f
 #define FPS_STEP (FPS_AVERAGE_TIME_SECONDS/FPS_CAPTURE_FRAMES_COUNT)
 
 typedef struct {
@@ -72,7 +72,6 @@ Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
 Time cvr_time = {0};
-static clock_t time_begin;
 #define MAX_MAT_STACK 1024 * 1024
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
@@ -104,8 +103,6 @@ bool init_window(int width, int height, const char *title)
     glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
 
     cvr_chk(vk_init(), "failed to initialize Vulkan context");
-
-    time_begin = clock();
 
 defer:
     return result;
@@ -182,9 +179,6 @@ static void wait_time(double seconds)
     long nsec = (sleep_secs - sec) * 1000000000L;
     req.tv_sec = sec;
     req.tv_nsec = nsec;
-
-    //nob_log(NOB_INFO, "sleeping for %lld ns", nsec);
-    //nob_log(NOB_INFO, "sleeping for %.4f s", (float)seconds);
 
     while (nanosleep(&req, &req) == -1) continue;
 
@@ -336,8 +330,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
 double get_time()
 {
-    clock_t curr_time = clock();
-    return (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
+    return glfwGetTime();
 }
 
 void translate(float x, float y, float z)
@@ -599,7 +592,7 @@ void camera_move_to_target(Camera *camera, float delta)
     camera->position = Vector3Add(camera->target, Vector3Scale(forward, -distance));
 }
 
-void update_camera_free(Camera *camera) // TODO: really need delta time in here
+void update_camera_free(Camera *camera)
 {
     Vector2 delta = get_mouse_delta();
     if (is_mouse_button_down(MOUSE_BUTTON_RIGHT)) {
@@ -612,9 +605,10 @@ void update_camera_free(Camera *camera) // TODO: really need delta time in here
     if (is_key_down(KEY_L)) camera_yaw(camera, -CAMERA_ROTATION_SPEED);
     if (is_key_down(KEY_J)) camera_yaw(camera, CAMERA_ROTATION_SPEED);
 
-    float move_speed = CAMERA_MOVE_SPEED;
+    float move_speed = CAMERA_MOVE_SPEED * get_frame_time();
     if (is_key_down(KEY_LEFT_SHIFT))
         move_speed *= 10.0f;
+    // nob_log(NOB_INFO, "move speed %.5f", move_speed);
 
     if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);
@@ -654,19 +648,19 @@ bool is_mouse_button_down(int button)
     return mouse.curr_button_state[button] == GLFW_PRESS;
 }
 
-bool upload_point_cloud(Buffer_Descriptor desc, size_t *id)
+bool upload_point_cloud(Buffer buff, size_t *id)
 {
-    Vk_Buffer buff = {
-        .count = desc.count,
-        .size  = desc.size,
+    Vk_Buffer vk_buff = {
+        .count = buff.count,
+        .size  = buff.size,
     };
-    if (!vtx_buff_init(&buff, desc.items)) {
+    if (!vtx_buff_init(&vk_buff, buff.items)) {
         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
         return false;
     }
 
     *id = point_clouds.count;
-    nob_da_append(&point_clouds, buff);
+    nob_da_append(&point_clouds, vk_buff);
     return true;
 }
 
@@ -728,7 +722,7 @@ double get_frame_time()
     return cvr_time.frame;	
 }
 
-int get_fps()
+int get_average_fps()
 {
     int fps = 0;
 
@@ -759,6 +753,13 @@ int get_fps()
     fps = (int)roundf((float)1.0f/average);
 
     return fps;
+}
+
+int get_fps()
+{
+    double frame_time = get_frame_time();
+    if (frame_time == 0) return 0;
+    else return (int)roundf(1.0f / frame_time);
 }
 
 void set_target_fps(int fps)

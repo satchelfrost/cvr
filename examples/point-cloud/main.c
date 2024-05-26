@@ -2,6 +2,12 @@
 #include "ext/nob.h"
 #include "geometry.h"
 
+/* Number of verts for point cloud files */
+#define S  "5060224"
+#define M  "50602232"
+#define L  "101204464"
+#define XL "506022320"
+
 #define read_attr(attr, sv)                   \
     do {                                      \
         memcpy(&attr, sv.data, sizeof(attr)); \
@@ -10,7 +16,7 @@
     } while(0)
 
 typedef struct {
-    Vertex *items;
+    Small_Vertex *items;
     size_t count;
     size_t capacity;
 } Vertices;
@@ -41,9 +47,9 @@ bool read_vtx(const char *file, Vertices *verts)
         read_attr(g, sv);
         read_attr(b, sv);
 
-        Vertex vert = {
+        Small_Vertex vert = {
             .pos = {x, y, z},
-            .color = {r / 255.0f, g / 255.0f, b / 255.0f},
+            .r = r, .g = g, .b = b,
         };
         nob_da_append(verts, vert);
     }
@@ -51,6 +57,16 @@ bool read_vtx(const char *file, Vertices *verts)
 defer:
     nob_sb_free(sb);
     return result;
+}
+
+void log_fps()
+{
+    static int fps = -1;
+    int curr_fps = get_fps();
+    if (curr_fps != fps) {
+        nob_log(NOB_INFO, "FPS %d", curr_fps);
+        fps = curr_fps;
+    }
 }
 
 Camera cameras[] = {
@@ -80,34 +96,26 @@ Camera cameras[] = {
 int main()
 {
     Vertices verts = {0};
-    // if (!read_vtx("res/arena_5060224_f32.vtx", &verts)) {
-    if (!read_vtx("res/arena_50602232_f32.vtx", &verts)) {
-    // if (!read_vtx("res/arena_506022320_f32.vtx", &verts)) {
+    if (!read_vtx("res/arena_"M"_f32.vtx", &verts))
         if (!read_vtx("res/flowers.vtx", &verts)) return 1;
-    }
     nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
 
-    /* set the current camera */
-    int cam_idx = 0;
-    Camera *camera = &cameras[cam_idx];
-
     init_window(1600, 900, "point cloud");
+    set_target_fps(60);
 
     size_t id;
-    Buffer_Descriptor desc = {
+    Buffer buff = {
         .items = verts.items,
         .count = verts.count,
         .size  = verts.count * sizeof(*verts.items),
     };
-    if (!upload_point_cloud(desc, &id)) return 1;
+    if (!upload_point_cloud(buff, &id)) return 1;
+    nob_da_free(verts);
 
-    int fps = 0;
+    int cam_idx = 0;
+    Camera *camera = &cameras[cam_idx];
     while (!window_should_close()) {
-        int curr_fps = get_fps();
-        if (curr_fps != fps) {
-            nob_log(NOB_INFO, "FPS %d", curr_fps);
-            fps = curr_fps;
-        }
+        log_fps();
 
         if (is_key_pressed(KEY_SPACE)) {
             cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
@@ -125,8 +133,7 @@ int main()
                     translate(
                         cameras[i].position.x,
                         cameras[i].position.y,
-                        cameras[i].position.z
-                    );
+                        cameras[i].position.z);
                     if (!draw_shape(SHAPE_CUBE)) return 1;
                 pop_matrix();
             }
@@ -140,7 +147,5 @@ int main()
 
     destroy_point_cloud(id);
     close_window();
-
-    nob_da_free(verts);
     return 0;
 }

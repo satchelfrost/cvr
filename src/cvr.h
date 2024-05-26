@@ -224,6 +224,7 @@ int get_mouse_y();
 double get_frame_time();
 double get_time();
 int get_fps();
+int get_average_fps();
 void set_target_fps(int fps);
 
 void push_matrix();
@@ -260,14 +261,14 @@ typedef struct {
     void *items;
     size_t size;
     size_t count;
-} Buffer_Descriptor;
+} Buffer;
 
 Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 bool is_mouse_button_down(int button);
 
-bool upload_point_cloud(Buffer_Descriptor desc, size_t *id);
+bool upload_point_cloud(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 bool draw_point_cloud(size_t id);
 

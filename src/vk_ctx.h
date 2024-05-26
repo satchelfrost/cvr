@@ -10,7 +10,7 @@
 #include "ext/nob.h"
 #include "nob_ext.h"
 
-#define GLFW_INCLUDE_VULKAN
+#define GLFW_INCLUDE_VULKAN // TODO: would like to move this into cvr.c
 #include <GLFW/glfw3.h>
 
 /* Common macro definitions */
@@ -327,14 +327,14 @@ static const char *device_exts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 Ext_Manager ext_manager = {0};
 
 /* Vertex attributes */
-VkVertexInputBindingDescription get_binding_desc();
+VkVertexInputBindingDescription get_binding_desc(Pipeline_Type pipeline_type);
 typedef struct {
     VkVertexInputAttributeDescription *items;
     size_t count;
     size_t capacity;
 } VtxAttrDescs;
 
-void get_attr_descs(VtxAttrDescs *attr_descs);
+void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type);
 
 /* Manages frames in flight */
 static uint32_t curr_frame = 0;
@@ -625,8 +625,8 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     VkPipelineVertexInputStateCreateInfo vertex_input_ci = {0};
     vertex_input_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     VtxAttrDescs vert_attrs = {0};
-    get_attr_descs(&vert_attrs);
-    VkVertexInputBindingDescription binding_desc = get_binding_desc();
+    get_attr_descs(&vert_attrs, pipeline_type);
+    VkVertexInputBindingDescription binding_desc = get_binding_desc(pipeline_type);
     vertex_input_ci.vertexBindingDescriptionCount = 1;
     vertex_input_ci.pVertexBindingDescriptions = &binding_desc;
     vertex_input_ci.vertexAttributeDescriptionCount = vert_attrs.count;
@@ -1630,35 +1630,57 @@ bool device_exts_supported(VkPhysicalDevice phys_device)
     return false;
 }
 
-VkVertexInputBindingDescription get_binding_desc()
+VkVertexInputBindingDescription get_binding_desc(Pipeline_Type pipeline_type)
 {
     VkVertexInputBindingDescription bindingDescription = {0};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    if (pipeline_type == PIPELINE_POINT_CLOUD) {
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Small_Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    } else {
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    }
     return bindingDescription;
 }
 
-void get_attr_descs(VtxAttrDescs *attr_descs)
+void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type)
 {
     VkVertexInputAttributeDescription desc = {0};
-    desc.binding = 0;
-    desc.location = 0;
-    desc.format = VK_FORMAT_R32G32B32_SFLOAT;
-    desc.offset = offsetof(Vertex, pos);
-    nob_da_append(attr_descs, desc);
 
-    desc.binding = 0;
-    desc.location = 1;
-    desc.format = VK_FORMAT_R32G32B32_SFLOAT;
-    desc.offset = offsetof(Vertex, color);
-    nob_da_append(attr_descs, desc);
+    /* for point clouds use small vertex */
+    if (pipeline_type == PIPELINE_POINT_CLOUD) {
+        desc.binding = 0;
+        desc.location = 0;
+        desc.format = VK_FORMAT_R32G32B32_SFLOAT;
+        desc.offset = 0;
+        nob_da_append(attr_descs, desc);
 
-    desc.binding = 0;
-    desc.location = 2;
-    desc.format = VK_FORMAT_R32G32_SFLOAT;
-    desc.offset = offsetof(Vertex, tex_coord);
-    nob_da_append(attr_descs, desc);
+        desc.binding = 0;
+        desc.location = 1;
+        desc.format = VK_FORMAT_R8G8B8_UINT;
+        desc.offset = 12;
+        nob_da_append(attr_descs, desc);
+    } else {
+        desc.binding = 0;
+        desc.location = 0;
+        desc.format = VK_FORMAT_R32G32B32_SFLOAT;
+        desc.offset = offsetof(Vertex, pos);
+        nob_da_append(attr_descs, desc);
+
+        desc.binding = 0;
+        desc.location = 1;
+        desc.format = VK_FORMAT_R32G32B32_SFLOAT;
+        desc.offset = offsetof(Vertex, color);
+        nob_da_append(attr_descs, desc);
+
+        desc.binding = 0;
+        desc.location = 2;
+        desc.format = VK_FORMAT_R32G32_SFLOAT;
+        desc.offset = offsetof(Vertex, tex_coord);
+        nob_da_append(attr_descs, desc);
+    }
 }
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)

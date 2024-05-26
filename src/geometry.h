@@ -10,6 +10,11 @@ typedef struct {
     Vector2 tex_coord;
 } Vertex; 
 
+typedef struct {
+    Vector3 pos;
+    uint8_t r, g, b;
+} Small_Vertex;
+
 #define Red 1, 0, 0
 #define DarkRed 0.25f, 0, 0
 #define Green 0, 1, 0

@@ -6,8 +6,8 @@ layout(push_constant) uniform constants
 } push_const;
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inColor;
-layout(location = 2) in vec2 inUv;
+layout(location = 1) in uvec3 inColor;
+//layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec3 fragColor;
 
@@ -15,5 +15,5 @@ void main()
 {
     gl_PointSize = 3.0;
     gl_Position = push_const.mvp * vec4(inPosition, 1.0);
-    fragColor = inColor;
+    fragColor = vec3(inColor) / 255.0;
 }
