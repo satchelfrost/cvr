@@ -116,9 +116,11 @@ static Example examples[] = {
                 "default.vert",
                 "default.frag",
                 "point-cloud.vert",
-                "point-cloud.frag"
+                "point-cloud.frag",
+                "texture.vert",
+                "texture.frag"
             },
-            .count = 4
+            .count = 6
         },
         .c_files = {
             .names = default_c_file_names,
@@ -194,6 +196,7 @@ bool compile_shaders(const char *example_path, Shaders shaders)
 
     const char *input_folder = nob_temp_sprintf("%s/res", example_path);
 
+    nob_log(NOB_INFO, "SHADERS");
     for (size_t i = 0; i < shaders.count; i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.spv", output_folder, shaders.names[i]);
         const char *input_path = nob_temp_sprintf("%s/%s", input_folder, shaders.names[i]);
@@ -402,11 +405,8 @@ int main(int argc, char **argv)
                 strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
                 continue;
 
-            // nob_log(NOB_INFO, "File name %s", file_name);
             const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
             const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
-            // nob_log(NOB_INFO, "source path %s", src_path);
-            // nob_log(NOB_INFO, "destination path %s", dst_path);
             if (!nob_copy_file(src_path, dst_path)) return 1;
         }
 

@@ -202,6 +202,7 @@ typedef enum {
     SHAPE_CUBE = 0,
     SHAPE_QUAD,
     SHAPE_TETRAHEDRON,
+    SHAPE_CAM,
     SHAPE_COUNT,
 } Shape_Type;
 

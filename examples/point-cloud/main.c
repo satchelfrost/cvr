@@ -100,8 +100,17 @@ int main()
         if (!read_vtx("res/flowers.vtx", &verts)) return 1;
     nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
 
+    Image img = load_image("res/out.png");
+    if (img.data) {
+        nob_log(NOB_INFO, "image loaded successfully");
+        nob_log(NOB_INFO, "width, height, %d, %d,", img.width, img.height);
+        nob_log(NOB_INFO, "aspect ratio %.2f", (float)img.width / img.height);
+    }
+
     init_window(1600, 900, "point cloud");
     set_target_fps(60);
+
+    Texture tex = load_texture_from_image(img);
 
     size_t id;
     Buffer buff = {
@@ -133,10 +142,16 @@ int main()
                     translate(
                         cameras[i].position.x,
                         cameras[i].position.y,
-                        cameras[i].position.z);
-                    if (!draw_shape(SHAPE_CUBE)) return 1;
+                        cameras[i].position.z
+                    );
+                    if (!draw_shape_wireframe(SHAPE_CAM)) return 1;
+                    rotate_z(PI);
+                    translate(0.0f, 0.0f, 0.5f);
+                    scale(1.0f * 1.333f * 0.75, 1.0f * 0.75, 1.0f * 0.75);
+                    if (!draw_texture(tex, SHAPE_QUAD)) return 1;
                 pop_matrix();
             }
+
 
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
@@ -145,6 +160,7 @@ int main()
         end_drawing();
     }
 
+    unload_texture(tex);
     destroy_point_cloud(id);
     close_window();
     return 0;
