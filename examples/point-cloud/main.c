@@ -2,7 +2,7 @@
 #include "ext/nob.h"
 #include "geometry.h"
 
-/* Number of verts for point cloud files */
+/* point cloud sizes */
 #define S  "5060224"
 #define M  "50602232"
 #define L  "101204464"
@@ -21,6 +21,12 @@ typedef struct {
     size_t capacity;
 } Vertices;
 
+typedef struct {
+    Vertices verts;
+    Buffer buff;
+    size_t id;
+} Point_Cloud;
+
 bool read_vtx(const char *file, Vertices *verts)
 {
     bool result = true;
@@ -35,7 +41,6 @@ bool read_vtx(const char *file, Vertices *verts)
     Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
     size_t vtx_count = 0;
     read_attr(vtx_count, sv);
-    nob_log(NOB_INFO, "count %zu", vtx_count);
 
     for (size_t i = 0; i < vtx_count; i++) {
         float x, y, z;
@@ -69,6 +74,25 @@ void log_fps()
     }
 }
 
+bool load_points(const char *name, Point_Cloud *point_cloud)
+{
+    bool result = true;
+
+    Vertices verts = {0};
+    if (!read_vtx(name, &verts))
+        if (!read_vtx("res/flowers.vtx", &verts))
+            nob_return_defer(false);
+    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
+
+    point_cloud->buff.items = verts.items;
+    point_cloud->buff.count = verts.count;
+    point_cloud->buff.size  = verts.count * sizeof(*verts.items);
+    point_cloud->verts = verts;
+
+defer:
+    return result;
+}
+
 Camera cameras[] = {
     {
         .position   = {0.0f, 1.0f, 5.0f},
@@ -95,47 +119,47 @@ Camera cameras[] = {
 
 int main()
 {
-    Vertices verts = {0};
-    if (!read_vtx("res/arena_"M"_f32.vtx", &verts))
-        if (!read_vtx("res/flowers.vtx", &verts)) return 1;
-    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
-
+    /* load resources into main memory */
+    Point_Cloud hres = {0};
+    if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
+    Point_Cloud lres = {0};
+    if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
     Image img = load_image("res/out.png");
-    if (img.data) {
-        nob_log(NOB_INFO, "image loaded successfully");
-        nob_log(NOB_INFO, "width, height, %d, %d,", img.width, img.height);
-        nob_log(NOB_INFO, "aspect ratio %.2f", (float)img.width / img.height);
+    if (!img.data) {
+        nob_log(NOB_ERROR, "failed to load png file");
+        return 1;
     }
 
+    /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
     set_target_fps(60);
 
+    /* upload resources to GPU */
     Texture tex = load_texture_from_image(img);
+    free(img.data);
+    if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
+    if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
+    nob_da_free(hres.verts);
+    nob_da_free(lres.verts);
 
-    size_t id;
-    Buffer buff = {
-        .items = verts.items,
-        .count = verts.count,
-        .size  = verts.count * sizeof(*verts.items),
-    };
-    if (!upload_point_cloud(buff, &id)) return 1;
-    nob_da_free(verts);
-
+    bool use_hres = true;
     int cam_idx = 0;
     Camera *camera = &cameras[cam_idx];
     while (!window_should_close()) {
         log_fps();
 
+        /* input */
         if (is_key_pressed(KEY_SPACE)) {
             cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
             camera = &cameras[cam_idx];
         }
-
+        if (is_key_pressed(KEY_P)) use_hres = !use_hres;
         update_camera_free(camera);
 
+        /* draw */
         begin_drawing(BLUE);
         begin_mode_3d(*camera);
-            /* draw the other cameras as cubes */
+            /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
                 push_matrix();
@@ -152,16 +176,17 @@ int main()
                 pop_matrix();
             }
 
-
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
+            size_t id = (use_hres) ? hres.id : lres.id;
             if (!draw_point_cloud(id)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
     unload_texture(tex);
-    destroy_point_cloud(id);
+    destroy_point_cloud(hres.id);
+    destroy_point_cloud(lres.id);
     close_window();
     return 0;
 }
