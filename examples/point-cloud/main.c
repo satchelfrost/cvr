@@ -33,10 +33,7 @@ bool read_vtx(const char *file, Vertices *verts)
 
     nob_log(NOB_INFO, "reading vtx file %s", file);
     Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file, &sb)) {
-        nob_log(NOB_ERROR, "failed to read %s", file);
-        nob_return_defer(false);
-    }
+    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
 
     Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
     size_t vtx_count = 0;
@@ -79,9 +76,13 @@ bool load_points(const char *name, Point_Cloud *point_cloud)
     bool result = true;
 
     Vertices verts = {0};
-    if (!read_vtx(name, &verts))
-        if (!read_vtx("res/flowers.vtx", &verts))
+    if (!read_vtx(name, &verts)) {
+        nob_log(NOB_WARNING, "loading default instead");
+        if (!read_vtx("res/flowers.vtx", &verts)) {
+            nob_log(NOB_ERROR, "failed to load default point cloud");
             nob_return_defer(false);
+        }
+    }
     nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
 
     point_cloud->buff.items = verts.items;
