@@ -768,3 +768,12 @@ void set_target_fps(int fps)
     else cvr_time.target = 1.0 / (double) fps;
     nob_log(NOB_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
 }
+
+void look_at(Camera camera)
+{
+    Matrix inv = MatrixInvert(MatrixLookAt(camera.position, camera.target, camera.up));
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(inv, mat_stack[mat_stack_p - 1]);
+    else
+        nob_log(NOB_ERROR, "no matrix available to translate");
+}

@@ -103,14 +103,14 @@ Camera cameras[] = {
         .projection = PERSPECTIVE,
     },
     {
-        .position   = {-5.0f, 2.0f, 10.0f},
+        .position   = {0.0f, 1.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
     {
-        .position   = {-5.0f, 4.0f, 20.0f},
+        .position   = {0.0f, 1.0f, 20.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -160,16 +160,14 @@ int main()
         /* draw */
         begin_drawing(BLUE);
         begin_mode_3d(*camera);
+            if (!draw_shape(SHAPE_CUBE)) return 1;
             /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
                 push_matrix();
-                    translate(
-                        cameras[i].position.x,
-                        cameras[i].position.y,
-                        cameras[i].position.z
-                    );
+                    look_at(cameras[i]);
                     if (!draw_shape_wireframe(SHAPE_CAM)) return 1;
+
                     rotate_z(PI);
                     translate(0.0f, 0.0f, 0.5f);
                     scale(1.0f * 1.333f * 0.75, 1.0f * 0.75, 1.0f * 0.75);
