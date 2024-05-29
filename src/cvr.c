@@ -773,7 +773,7 @@ void look_at(Camera camera)
 {
     Matrix inv = MatrixInvert(MatrixLookAt(camera.position, camera.target, camera.up));
     if (mat_stack_p > 0)
-        mat_stack[mat_stack_p - 1] = MatrixMultiply(inv, mat_stack[mat_stack_p - 1]);
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(mat_stack[mat_stack_p - 1], inv);
     else
         nob_log(NOB_ERROR, "no matrix available to translate");
 }

@@ -160,7 +160,6 @@ int main()
         /* draw */
         begin_drawing(BLUE);
         begin_mode_3d(*camera);
-            if (!draw_shape(SHAPE_CUBE)) return 1;
             /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
