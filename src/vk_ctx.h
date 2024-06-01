@@ -110,6 +110,7 @@ typedef enum {
 typedef enum {
     SET_LAYOUT_UBO = 0,
     SET_LAYOUT_TEX,
+    SET_LAYOUT_POINT_CLOUD,
     SET_LAYOUT_COUNT,
 } Set_Layout_Type;
 
@@ -143,27 +144,26 @@ typedef struct {
     VkPipeline pipelines[PIPELINE_COUNT];
 } Vk_Context;
 
-/* CVR render functions */
 bool vk_init();
-bool cvr_destroy();
-bool create_instance();
-bool create_device();
-bool create_surface();
-bool create_swpchain();
-bool create_img_views();
+bool vk_destroy();
+bool vk_instance_init();
+bool vk_device_init();
+bool vk_surface_init();
+bool vk_swpchain_init();
+bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
-bool create_basic_pipeline(Pipeline_Type pipeline_type);
-bool create_shader_module(const char *file_name, VkShaderModule *module);
-bool create_render_pass();
-bool create_frame_buffs();
-bool recreate_swpchain();
+bool vk_basic_pl_init(Pipeline_Type pipeline_type);
+bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
+bool vk_render_pass_init();
+bool vk_frame_buffs_init();
+bool vk_recreate_swpchain();
 bool vk_depth_init();
 
-bool create_ubos(); // TODO: renamings in order, prefix with _vk e.g. vk_ubos_init
-void cvr_update_ubos(float time);
-bool create_descriptor_set_layout();
-bool create_descriptor_pool();
-bool create_descriptor_sets();
+bool vk_ubos_init();
+void vk_ubos_update(float time);
+bool vk_descriptor_set_layout_init();
+bool vk_descriptor_pool_init();
+bool vk_descriptor_sets_init();
 
 /* Manages synchronization info and gets ready for vulkan commands. */
 bool begin_draw();
@@ -353,25 +353,25 @@ bool vk_init()
 
     init_ext_managner();
 
-    cvr_chk(create_instance(), "failed to create instance");
+    cvr_chk(vk_instance_init(), "failed to create instance");
 #ifdef ENABLE_VALIDATION
     cvr_chk(setup_debug_msgr(), "failed to setup debug messenger");
 #endif
-    cvr_chk(create_surface(), "failed to create vulkan surface");
+    cvr_chk(vk_surface_init(), "failed to create vulkan surface");
     cvr_chk(pick_phys_device(), "failed to find suitable GPU");
-    cvr_chk(create_device(), "failed to create logical device");
-    cvr_chk(create_swpchain(), "failed to create swapchain");
-    cvr_chk(create_img_views(), "failed to create image views");
-    cvr_chk(create_render_pass(), "failed to create render pass");
+    cvr_chk(vk_device_init(), "failed to create logical device");
+    cvr_chk(vk_swpchain_init(), "failed to create swapchain");
+    cvr_chk(vk_img_views_init(), "failed to create image views");
+    cvr_chk(vk_render_pass_init(), "failed to create render pass");
     cvr_chk(vk_depth_init(), "failed to init depth resources");
-    cvr_chk(create_frame_buffs(), "failed to create frame buffers");
+    cvr_chk(vk_frame_buffs_init(), "failed to create frame buffers");
     cvr_chk(cmd_man_init(), "failed to create vulkan command manager");
 
 defer:
     return result;
 }
 
-bool cvr_destroy()
+bool vk_destroy()
 {
     cmd_man_destroy(&cmd_man);
     cleanup_swpchain();
@@ -398,7 +398,7 @@ bool cvr_destroy()
     return true;
 }
 
-bool create_instance()
+bool vk_instance_init()
 {
     bool result = true;
 #ifdef ENABLE_VALIDATION
@@ -444,7 +444,7 @@ typedef struct {
     size_t capacity;
 } Queue_Create_Infos;
 
-bool create_device()
+bool vk_device_init()
 {
     Queue_Fams queue_fams = find_queue_fams(ctx.phys_device);
 
@@ -491,12 +491,12 @@ defer:
     return result;
 }
 
-bool create_surface()
+bool vk_surface_init()
 {
     return vk_ok(glfwCreateWindowSurface(ctx.instance, ctx.window, NULL, &ctx.surface));
 }
 
-bool create_swpchain()
+bool vk_swpchain_init()
 {
     VkSurfaceCapabilitiesKHR capabilities = {0};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.phys_device, ctx.surface, &capabilities);
@@ -558,7 +558,7 @@ bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
     return vk_ok(vkCreateImageView(ctx.device, &img_view_ci, NULL, img_view));
 }
 
-bool create_img_views()
+bool vk_img_views_init()
 {
     bool result = true;
 
@@ -577,41 +577,41 @@ defer:
     return result;
 }
 
-bool create_basic_pipeline(Pipeline_Type pipeline_type)
+bool vk_basic_pl_init(Pipeline_Type pipeline_type)
 {
     bool result = true;
 
     char *vert_shader_name;
     char *frag_shader_name;
     switch (pipeline_type) {
-    case PIPELINE_TEXTURE: {
+    case PIPELINE_TEXTURE:
         vert_shader_name = nob_temp_sprintf("./res/texture.vert.spv");
         frag_shader_name = nob_temp_sprintf("./res/texture.frag.spv");
-    } break;
-    case PIPELINE_POINT_CLOUD: {
+        break;
+    case PIPELINE_POINT_CLOUD:
         vert_shader_name = nob_temp_sprintf("./res/point-cloud.vert.spv");
         frag_shader_name = nob_temp_sprintf("./res/point-cloud.frag.spv");
-    } break;
+        break;
     case PIPELINE_DEFAULT:
     case PIPELINE_WIREFRAME:
-    default: {
+    default:
         vert_shader_name = nob_temp_sprintf("./res/default.vert.spv");
         frag_shader_name = nob_temp_sprintf("./res/default.frag.spv");
-    } break;
+        break;
     }
 
     VkPipelineShaderStageCreateInfo vert_ci = {0};
     vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vert_ci.pName = "main";
-    if (!create_shader_module(vert_shader_name, &vert_ci.module))
+    if (!vk_shader_mod_init(vert_shader_name, &vert_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo frag_ci = {0};
     frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_ci.pName = "main";
-    if (!create_shader_module(frag_shader_name, &frag_ci.module))
+    if (!vk_shader_mod_init(frag_shader_name, &frag_ci.module))
         nob_return_defer(false);
 
     VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
@@ -676,11 +676,9 @@ bool create_basic_pipeline(Pipeline_Type pipeline_type)
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
-    if (pipeline_type == PIPELINE_TEXTURE)  {
-        for (size_t i = 0; i < SET_LAYOUT_COUNT; i++) {
-            if (ctx.set_layouts[i])
-                nob_da_append(&set_layouts, ctx.set_layouts[i]);
-        }
+    if (pipeline_type == PIPELINE_TEXTURE) {
+        nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_UBO]);
+        nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_TEX]);
     }
     pipeline_layout_ci.pSetLayouts = set_layouts.items;
     pipeline_layout_ci.setLayoutCount = set_layouts.count;
@@ -733,7 +731,7 @@ defer:
     return result;
 }
 
-bool create_shader_module(const char *file_name, VkShaderModule *module)
+bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
     bool result = true;
     Nob_String_Builder sb = {};
@@ -752,7 +750,7 @@ defer:
     return result;
 }
 
-bool create_render_pass()
+bool vk_render_pass_init()
 {
     VkAttachmentDescription color = {
         .format = ctx.surface_fmt.format,
@@ -813,7 +811,7 @@ bool create_render_pass()
     return vk_ok(vkCreateRenderPass(ctx.device, &render_pass_ci, NULL, &ctx.render_pass));
 }
 
-bool create_frame_buffs()
+bool vk_frame_buffs_init()
 {
     nob_da_resize(&ctx.swpchain.buffs, ctx.swpchain.img_views.count);
     for (size_t i = 0; i < ctx.swpchain.img_views.count; i++) {
@@ -992,7 +990,7 @@ bool begin_draw() // TODO: there are a lot of cases where we need to prefix with
         &img_idx
     );
     if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
-        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+        cvr_chk(vk_swpchain_init(), "failed to recreate swapchain");
     } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
         nob_log(NOB_ERROR, "failed to acquire swapchain image");
         nob_return_defer(false);
@@ -1045,7 +1043,7 @@ bool end_draw()
     VkResult vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
     if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swpchain.buff_resized) {
         ctx.swpchain.buff_resized = false;
-        cvr_chk(recreate_swpchain(), "failed to recreate swapchain");
+        cvr_chk(vk_recreate_swpchain(), "failed to recreate swapchain");
     } else if (!vk_ok(vk_result)) {
         nob_log(NOB_ERROR, "failed to present queue");
         nob_return_defer(false);
@@ -1057,7 +1055,7 @@ defer:
     return result;
 }
 
-bool recreate_swpchain()
+bool vk_recreate_swpchain()
 {
     bool result = true;
 
@@ -1072,10 +1070,10 @@ bool recreate_swpchain()
 
     cleanup_swpchain();
 
-    cvr_chk(create_swpchain(), "failed to recreate swapchain");
-    cvr_chk(create_img_views(), "failed to recreate image views");
+    cvr_chk(vk_swpchain_init(), "failed to recreate swapchain");
+    cvr_chk(vk_img_views_init(), "failed to recreate image views");
     cvr_chk(vk_depth_init(), "failed to init depth resources");
-    cvr_chk(create_frame_buffs(), "failed to recreate frame buffers");
+    cvr_chk(vk_frame_buffs_init(), "failed to recreate frame buffers");
 
 defer:
     return result;
@@ -1100,7 +1098,7 @@ defer:
     return result;
 }
 
-bool create_ubos()
+bool vk_ubos_init()
 {
     bool result = true;
 
@@ -1122,7 +1120,7 @@ defer:
      return result;
 }
 
-void cvr_update_ubos(float time)
+void vk_ubos_update(float time)
 {
     if (!ctx.ubos.active) return;
 
@@ -1136,7 +1134,7 @@ void cvr_update_ubos(float time)
     memcpy(ctx.ubos.items[curr_frame].mapped, &ubo, sizeof(ubo));
 }
 
-bool create_descriptor_set_layout()
+bool vk_descriptor_set_layout_init()
 {
     bool result = true;
 
@@ -1157,11 +1155,14 @@ bool create_descriptor_set_layout()
     vk_chk(vk_result, "failed to create descriptor set layout for uniform buffer");
 
     if (ctx.textures.count) {
-        set_layout_binding.binding = 1;
+        set_layout_binding.binding = 0;
         set_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_TEX]);
         vk_chk(vk_result, "failed to create descriptor set layout for texture");
+    } else {
+        nob_log(NOB_ERROR, "descriptor set layout cannot be created when texture is not loaded");
+        nob_return_defer(false);
     }
 
 defer:
@@ -1174,7 +1175,7 @@ typedef struct {
     size_t capacity;
 } Vk_Descriptor_Pool_Sizes;
 
-bool create_descriptor_pool()
+bool vk_descriptor_pool_init()
 {
     bool result = true;
 
@@ -1191,6 +1192,9 @@ bool create_descriptor_pool()
         pool_size.descriptorCount = ctx.textures.count * MAX_FRAMES_IN_FLIGHT;
         nob_da_append(&pool_sizes, pool_size);
         max_sets += ctx.textures.count * MAX_FRAMES_IN_FLIGHT;
+    } else {
+        nob_log(NOB_ERROR, "descriptor pool cannot be created when texture is not loaded");
+        nob_return_defer(false);
     }
 
     VkDescriptorPoolCreateInfo pool_ci = {0};
@@ -1207,7 +1211,7 @@ defer:
     return result;
 }
 
-bool create_descriptor_sets()
+bool vk_descriptor_sets_init()
 {
     bool result = true;
 
@@ -1254,7 +1258,7 @@ bool create_descriptor_sets()
 
         /* update texture descriptor sets */
         write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.dstBinding = 1;
+        write.dstBinding = 0;
         for (size_t tex = 0; tex < ctx.textures.count; tex++) {
             VkDescriptorImageInfo img_info = {
                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

@@ -122,7 +122,7 @@ int main()
 {
     /* load resources into main memory */
     Point_Cloud hres = {0};
-    if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
+    if (!load_points("res/arena_"S"_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
     if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
     Image img = load_image("res/out.png");

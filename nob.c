@@ -196,7 +196,6 @@ bool compile_shaders(const char *example_path, Shaders shaders)
 
     const char *input_folder = nob_temp_sprintf("%s/res", example_path);
 
-    nob_log(NOB_INFO, "SHADERS");
     for (size_t i = 0; i < shaders.count; i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.spv", output_folder, shaders.names[i]);
         const char *input_path = nob_temp_sprintf("%s/%s", input_folder, shaders.names[i]);

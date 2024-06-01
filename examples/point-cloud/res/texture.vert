@@ -5,7 +5,7 @@ layout(push_constant) uniform constants
     mat4 mvp;
 } push_const;
 
-layout(binding = 0) uniform UniformBufferObject
+layout(set = 0, binding = 0) uniform UniformBufferObject
 {
     mat4 model;
     mat4 view;
@@ -19,12 +19,10 @@ layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragUv;
-layout(location = 2) out float time;
 
 void main()
 {
     gl_Position = push_const.mvp * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragUv = inUv;
-    time = ubo.time;
 }

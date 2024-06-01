@@ -120,7 +120,7 @@ bool draw_shape(Shape_Type shape_type)
     bool result = true;
 
     if (!ctx.pipelines[PIPELINE_DEFAULT])
-        if (!create_basic_pipeline(PIPELINE_DEFAULT))
+        if (!vk_basic_pl_init(PIPELINE_DEFAULT))
             nob_return_defer(false);
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
@@ -141,7 +141,7 @@ bool draw_shape_wireframe(Shape_Type shape_type)
     bool result = true;
 
     if (!ctx.pipelines[PIPELINE_WIREFRAME])
-        if (!create_basic_pipeline(PIPELINE_WIREFRAME))
+        if (!vk_basic_pl_init(PIPELINE_WIREFRAME))
             nob_return_defer(false);
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
@@ -198,7 +198,7 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    cvr_update_ubos(get_time());
+    vk_ubos_update(get_time());
     end_draw();
 
     cvr_time.curr = get_time();
@@ -455,7 +455,7 @@ void close_window()
     vkDeviceWaitIdle(ctx.device);
 
     destroy_shape_res();
-    cvr_destroy();
+    vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
 }
@@ -499,15 +499,15 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
     bool result = true;
 
     if (!shader_res_allocated) {
-        if (!create_ubos())                  nob_return_defer(false);
-        if (!create_descriptor_set_layout()) nob_return_defer(false);
-        if (!create_descriptor_pool())       nob_return_defer(false);
-        if (!create_descriptor_sets())       nob_return_defer(false);
+        if (!vk_ubos_init())                nob_return_defer(false);
+        if (!vk_descriptor_set_layout_init()) nob_return_defer(false);
+        if (!vk_descriptor_pool_init())       nob_return_defer(false);
+        if (!vk_descriptor_sets_init())       nob_return_defer(false);
         shader_res_allocated = true;
     }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])
-        if (!create_basic_pipeline(PIPELINE_TEXTURE))
+        if (!vk_basic_pl_init(PIPELINE_TEXTURE))
             nob_return_defer(false);
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
@@ -679,7 +679,7 @@ bool draw_point_cloud(size_t id)
     bool result = true;
 
     if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-        if (!create_basic_pipeline(PIPELINE_POINT_CLOUD))
+        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
             nob_return_defer(false);
 
     Vk_Buffer vtx_buff = {0};
