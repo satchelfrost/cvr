@@ -133,7 +133,7 @@ int main()
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
-    set_target_fps(60);
+    // set_target_fps(60);
 
     /* upload resources to GPU */
     Texture tex = load_texture_from_image(img);

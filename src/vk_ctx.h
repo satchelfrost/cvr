@@ -26,7 +26,6 @@
     } while (0)
 #define vk_chk(vk_result, msg) cvr_chk(vk_ok(vk_result), msg)
 #define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
-#define MAX_FRAMES_IN_FLIGHT 2
 
 typedef struct {
     uint32_t gfx_idx;
@@ -59,7 +58,7 @@ typedef struct {
     Img_Views img_views;
     Frame_Buffs buffs;
     bool buff_resized;
-} Vk_Swpchain;
+} Vk_Swapchain;
 
 typedef struct {
     size_t size;
@@ -78,19 +77,12 @@ typedef struct {
 } Vk_Image;
 
 typedef struct {
-    Vk_Buffer *items;
-    size_t count;
-    size_t capacity;
-    bool active;
-} UBOS;
-
-typedef struct {
     VkImageView view;
     VkSampler sampler;
     Vk_Image img;
     size_t id;
     bool active;
-    VkDescriptorSet descriptor_sets[MAX_FRAMES_IN_FLIGHT];
+    VkDescriptorSet descriptor_set;
 } Vk_Texture;
 
 typedef struct {
@@ -133,14 +125,14 @@ typedef struct {
     VkExtent2D extent;
     VkRenderPass render_pass;
     VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
-    Vk_Swpchain swpchain;
-    UBOS ubos;
+    Vk_Swapchain swapchain;
+    Vk_Buffer ubo;
     Vk_Textures textures;
     Vk_Image depth_img;
     VkImageView depth_img_view;
     VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
     VkDescriptorPool descriptor_pool;
-    VkDescriptorSet ubo_descriptor_sets[MAX_FRAMES_IN_FLIGHT];
+    VkDescriptorSet ubo_descriptor_set;
     VkPipeline pipelines[PIPELINE_COUNT];
 } Vk_Context;
 
@@ -149,27 +141,27 @@ bool vk_destroy();
 bool vk_instance_init();
 bool vk_device_init();
 bool vk_surface_init();
-bool vk_swpchain_init();
+bool vk_swapchain_init();
 bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
 bool vk_frame_buffs_init();
-bool vk_recreate_swpchain();
+bool vk_recreate_swapchain();
 bool vk_depth_init();
 
-bool vk_ubos_init();
-void vk_ubos_update(float time);
+bool vk_ubo_init();
+void vk_ubo_update(float time);
 bool vk_descriptor_set_layout_init();
 bool vk_descriptor_pool_init();
 bool vk_descriptor_sets_init();
 
 /* Manages synchronization info and gets ready for vulkan commands. */
-bool begin_draw();
+bool vk_begin_drawing();
 
 /* Submits vulkan commands. */
-bool end_draw();
+bool vk_end_drawing();
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
@@ -187,13 +179,13 @@ typedef struct {
 } U32_Set;
 
 void populate_set(int arr[], size_t arr_size, U32_Set *set);
-bool swpchain_adequate(VkPhysicalDevice phys_device);
-VkSurfaceFormatKHR choose_swpchain_fmt();
+bool swapchain_adequate(VkPhysicalDevice phys_device);
+VkSurfaceFormatKHR choose_swapchain_fmt();
 VkPresentModeKHR choose_present_mode();
 VkExtent2D choose_swp_extent();
 bool is_device_suitable(VkPhysicalDevice phys_device);
 bool pick_phys_device();
-void cleanup_swpchain();
+void cleanup_swapchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 void frame_buff_resized(GLFWwindow* window, int width, int height);
 
@@ -219,7 +211,7 @@ typedef struct Color {
 } Color;
 #endif
 
-void cvr_begin_render_pass(Color color);
+void vk_begin_render_pass(Color color);
 
 typedef struct {
     Camera camera;
@@ -247,32 +239,12 @@ typedef struct {
 Vk_Context ctx = {0};
 Core_State core_state = {0};
 
-/* Manage vulkan command and sync info */
-typedef struct {
-    VkCommandBuffer *items;
-    size_t count;
-    size_t capacity;
-} Cmd_Buffs;
-
-typedef struct {
-    VkSemaphore *items;
-    size_t count;
-    size_t capacity;
-} Semaphores;
-
-typedef struct {
-    VkFence *items;
-    size_t count;
-    size_t capacity;
-} Fences;
-
 typedef struct {
     VkCommandPool pool;
-    size_t frames_in_flight;
-    Cmd_Buffs buffs;
-    Semaphores img_avail_sems;
-    Semaphores render_fin_sems;
-    Fences fences;
+    VkCommandBuffer buff;
+    VkSemaphore img_avail_sem;
+    VkSemaphore render_fin_sem;
+    VkFence fence;
 } Vk_Cmd_Man;
 static Vk_Cmd_Man cmd_man = {0};
 
@@ -336,8 +308,7 @@ typedef struct {
 
 void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type);
 
-/* Manages frames in flight */
-static uint32_t curr_frame = 0;
+/* current image index (only zero if there's only one image) */
 static uint32_t img_idx = 0;
 
 typedef struct {
@@ -360,7 +331,7 @@ bool vk_init()
     cvr_chk(vk_surface_init(), "failed to create vulkan surface");
     cvr_chk(pick_phys_device(), "failed to find suitable GPU");
     cvr_chk(vk_device_init(), "failed to create logical device");
-    cvr_chk(vk_swpchain_init(), "failed to create swapchain");
+    cvr_chk(vk_swapchain_init(), "failed to create swapchain");
     cvr_chk(vk_img_views_init(), "failed to create image views");
     cvr_chk(vk_render_pass_init(), "failed to create render pass");
     cvr_chk(vk_depth_init(), "failed to init depth resources");
@@ -374,17 +345,15 @@ defer:
 bool vk_destroy()
 {
     cmd_man_destroy(&cmd_man);
-    cleanup_swpchain();
-    for (size_t i = 0; i < ctx.ubos.count; i++)
-        vk_buff_destroy(ctx.ubos.items[i]);
-    nob_da_free(ctx.ubos);
+    cleanup_swapchain();
+    vk_buff_destroy(ctx.ubo);
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
     for (size_t i = 0; i < SET_LAYOUT_COUNT; i++)
         vkDestroyDescriptorSetLayout(ctx.device, ctx.set_layouts[i], NULL);
-    for (size_t i = 0; i < PIPELINE_COUNT; i++)
+    for (size_t i = 0; i < PIPELINE_COUNT; i++) {
         vkDestroyPipeline(ctx.device, ctx.pipelines[i], NULL);
-    for (size_t i = 0; i < PIPELINE_COUNT; i++)
         vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layouts[i], NULL);
+    }
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
 #ifdef ENABLE_VALIDATION
@@ -496,43 +465,43 @@ bool vk_surface_init()
     return vk_ok(glfwCreateWindowSurface(ctx.instance, ctx.window, NULL, &ctx.surface));
 }
 
-bool vk_swpchain_init()
+bool vk_swapchain_init()
 {
     VkSurfaceCapabilitiesKHR capabilities = {0};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.phys_device, ctx.surface, &capabilities);
-    ctx.surface_fmt = choose_swpchain_fmt();
+    ctx.surface_fmt = choose_swapchain_fmt();
     uint32_t img_count = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && img_count > capabilities.maxImageCount)
         img_count = capabilities.maxImageCount;
 
-    VkSwapchainCreateInfoKHR swpchain_ci = {0};
-    swpchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    swpchain_ci.surface = ctx.surface;
-    swpchain_ci.minImageCount = img_count;
-    swpchain_ci.imageFormat = ctx.surface_fmt.format;
-    swpchain_ci.imageColorSpace = ctx.surface_fmt.colorSpace;
-    swpchain_ci.imageExtent = ctx.extent = choose_swp_extent();
-    swpchain_ci.imageArrayLayers = 1;
-    swpchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    VkSwapchainCreateInfoKHR swapchain_ci = {0};
+    swapchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_ci.surface = ctx.surface;
+    swapchain_ci.minImageCount = img_count;
+    swapchain_ci.imageFormat = ctx.surface_fmt.format;
+    swapchain_ci.imageColorSpace = ctx.surface_fmt.colorSpace;
+    swapchain_ci.imageExtent = ctx.extent = choose_swp_extent();
+    swapchain_ci.imageArrayLayers = 1;
+    swapchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     Queue_Fams queue_fams = find_queue_fams(ctx.phys_device);
     uint32_t queue_fam_idxs[] = {queue_fams.gfx_idx, queue_fams.present_idx};
     if (queue_fams.gfx_idx != queue_fams.present_idx) {
-        swpchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        swpchain_ci.queueFamilyIndexCount = NOB_ARRAY_LEN(queue_fam_idxs);
-        swpchain_ci.pQueueFamilyIndices = queue_fam_idxs;
+        swapchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        swapchain_ci.queueFamilyIndexCount = NOB_ARRAY_LEN(queue_fam_idxs);
+        swapchain_ci.pQueueFamilyIndices = queue_fam_idxs;
     } else {
-        swpchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
-    swpchain_ci.clipped = VK_TRUE;
-    swpchain_ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swpchain_ci.presentMode = choose_present_mode();
-    swpchain_ci.preTransform = capabilities.currentTransform;
+    swapchain_ci.clipped = VK_TRUE;
+    swapchain_ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchain_ci.presentMode = choose_present_mode();
+    swapchain_ci.preTransform = capabilities.currentTransform;
 
-    if (vk_ok(vkCreateSwapchainKHR(ctx.device, &swpchain_ci, NULL, &ctx.swpchain.handle))) {
+    if (vk_ok(vkCreateSwapchainKHR(ctx.device, &swapchain_ci, NULL, &ctx.swapchain.handle))) {
         uint32_t img_count = 0;
-        vkGetSwapchainImagesKHR(ctx.device, ctx.swpchain.handle, &img_count, NULL);
-        nob_da_resize(&ctx.swpchain.imgs, img_count);
-        vkGetSwapchainImagesKHR(ctx.device, ctx.swpchain.handle, &img_count, ctx.swpchain.imgs.items);
+        vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &img_count, NULL);
+        nob_da_resize(&ctx.swapchain.imgs, img_count);
+        vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &img_count, ctx.swapchain.imgs.items);
         return true;
     } else {
         return false;
@@ -562,14 +531,14 @@ bool vk_img_views_init()
 {
     bool result = true;
 
-    nob_da_resize(&ctx.swpchain.img_views, ctx.swpchain.imgs.count);
-    for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)  {
+    nob_da_resize(&ctx.swapchain.img_views, ctx.swapchain.imgs.count);
+    for (size_t i = 0; i < ctx.swapchain.img_views.count; i++)  {
         Vk_Image img = {
-            .handle = ctx.swpchain.imgs.items[i],
+            .handle = ctx.swapchain.imgs.items[i],
             .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
             .format = ctx.surface_fmt.format,
         };
-        result = vk_img_view_init(img, &ctx.swpchain.img_views.items[i]);
+        result = vk_img_view_init(img, &ctx.swapchain.img_views.items[i]);
         cvr_chk(result, "failed to initialize image view");
     }
 
@@ -813,9 +782,9 @@ bool vk_render_pass_init()
 
 bool vk_frame_buffs_init()
 {
-    nob_da_resize(&ctx.swpchain.buffs, ctx.swpchain.img_views.count);
-    for (size_t i = 0; i < ctx.swpchain.img_views.count; i++) {
-        VkImageView attachments[] = {ctx.swpchain.img_views.items[i], ctx.depth_img_view};
+    nob_da_resize(&ctx.swapchain.buffs, ctx.swapchain.img_views.count);
+    for (size_t i = 0; i < ctx.swapchain.img_views.count; i++) {
+        VkImageView attachments[] = {ctx.swapchain.img_views.items[i], ctx.depth_img_view};
 
         VkFramebufferCreateInfo frame_buff_ci = {0};
         frame_buff_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -825,21 +794,19 @@ bool vk_frame_buffs_init()
         frame_buff_ci.width =  ctx.extent.width;
         frame_buff_ci.height = ctx.extent.height;
         frame_buff_ci.layers = 1;
-        if (!vk_ok(vkCreateFramebuffer(ctx.device, &frame_buff_ci, NULL, &ctx.swpchain.buffs.items[i])))
+        if (!vk_ok(vkCreateFramebuffer(ctx.device, &frame_buff_ci, NULL, &ctx.swapchain.buffs.items[i])))
             return false;
     }
 
     return true;
 }
 
-void cvr_begin_render_pass(Color color)
+void vk_begin_render_pass(Color color)
 {
-    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
-
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     begin_rp.renderPass = ctx.render_pass;
-    begin_rp.framebuffer = ctx.swpchain.buffs.items[img_idx];
+    begin_rp.framebuffer = ctx.swapchain.buffs.items[img_idx];
     begin_rp.renderArea.extent = ctx.extent;
     VkClearValue clear_color = {
         .color = {
@@ -860,14 +827,14 @@ void cvr_begin_render_pass(Color color)
     VkClearValue clear_values[] = {clear_color, clear_depth};
     begin_rp.clearValueCount = NOB_ARRAY_LEN(clear_values);
     begin_rp.pClearValues = clear_values;
-    vkCmdBeginRenderPass(cmd_buffer, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(cmd_man.buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
 {
     bool result = true;
 
-    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+    VkCommandBuffer cmd_buffer = cmd_man.buff;
 
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pipeline_type]);
     VkViewport viewport = {0};
@@ -886,19 +853,18 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
         vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
 
     if (pipeline_type == PIPELINE_TEXTURE) {
-        if (ctx.ubos.active) {
-            vkCmdBindDescriptorSets(
-                cmd_buffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
-            );
-        }
+        vkCmdBindDescriptorSets(
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
+        );
 
         for (size_t i = 0; i < ctx.textures.count; i++) {
             vkCmdBindDescriptorSets(
                 cmd_buffer,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                ctx.pipeline_layouts[pipeline_type], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+                ctx.pipeline_layouts[pipeline_type], 1, 1,
+                &ctx.textures.items[i].descriptor_set, 0, NULL
             );
         }
     }
@@ -928,7 +894,7 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
 {
     bool result = true;
 
-    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+    VkCommandBuffer cmd_buffer = cmd_man.buff;
 
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_TEXTURE]);
     VkViewport viewport = {0};
@@ -946,7 +912,8 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
     vkCmdBindDescriptorSets(
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1, &ctx.ubo_descriptor_sets[curr_frame], 0, NULL
+        ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1,
+        &ctx.ubo_descriptor_set, 0, NULL
     );
 
     for (size_t i = 0; i < ctx.textures.count; i++) {
@@ -954,7 +921,8 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
         vkCmdBindDescriptorSets(
             cmd_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[PIPELINE_TEXTURE], 1, 1, &ctx.textures.items[i].descriptor_sets[curr_frame], 0, NULL
+            ctx.pipeline_layouts[PIPELINE_TEXTURE], 1, 1,
+            &ctx.textures.items[i].descriptor_set, 0, NULL
         );
     }
 
@@ -976,21 +944,25 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
     return result;
 }
 
-bool begin_draw() // TODO: there are a lot of cases where we need to prefix with vk_
+bool vk_begin_drawing()
 {
     bool result = true;
-    VkResult vk_result = vkWaitForFences(ctx.device, 1, &cmd_man.fences.items[curr_frame], VK_TRUE, UINT64_MAX);
+
+    VkResult vk_result = vkWaitForFences(
+        ctx.device, 1, &cmd_man.fence, VK_TRUE, UINT64_MAX
+    );
     vk_chk(vk_result, "failed to wait for fences");
 
     vk_result = vkAcquireNextImageKHR(ctx.device,
-        ctx.swpchain.handle,
+        ctx.swapchain.handle,
         UINT64_MAX,
-        cmd_man.img_avail_sems.items[curr_frame],
+        cmd_man.img_avail_sem,
         VK_NULL_HANDLE,
         &img_idx
     );
+
     if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
-        cvr_chk(vk_swpchain_init(), "failed to recreate swapchain");
+        cvr_chk(vk_swapchain_init(), "failed to recreate swapchain");
     } else if (!vk_ok(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
         nob_log(NOB_ERROR, "failed to acquire swapchain image");
         nob_return_defer(false);
@@ -998,23 +970,22 @@ bool begin_draw() // TODO: there are a lot of cases where we need to prefix with
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fences.items[curr_frame]), "failed to reset fences");
-    vk_chk(vkResetCommandBuffer(cmd_man.buffs.items[curr_frame], 0), "failed to reset cmd buffer");
+    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fence), "failed to reset fences");
+    vk_chk(vkResetCommandBuffer(cmd_man.buff, 0), "failed to reset cmd buffer");
 
-    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
     VkCommandBufferBeginInfo beginInfo = {0};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    vk_chk(vkBeginCommandBuffer(cmd_buffer, &beginInfo), "failed to begin command buffer");
+    vk_chk(vkBeginCommandBuffer(cmd_man.buff, &beginInfo), "failed to begin command buffer");
 
 defer:
     return result;
 }
 
-bool end_draw()
+bool vk_end_drawing()
 {
     bool result = true;
 
-    VkCommandBuffer cmd_buffer = cmd_man.buffs.items[curr_frame];
+    VkCommandBuffer cmd_buffer = cmd_man.buff;
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
 
@@ -1022,40 +993,38 @@ bool end_draw()
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &cmd_man.img_avail_sems.items[curr_frame];
+    submit.pWaitSemaphores = &cmd_man.img_avail_sem;
     submit.pWaitDstStageMask = wait_stages;
     submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd_man.buffs.items[curr_frame];
+    submit.pCommandBuffers = &cmd_man.buff;
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
+    submit.pSignalSemaphores = &cmd_man.render_fin_sem;
 
-    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fences.items[curr_frame]), "failed to submit command");
+    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence), "failed to submit command");
 
     VkPresentInfoKHR present = {0};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &cmd_man.render_fin_sems.items[curr_frame];
+    present.pWaitSemaphores = &cmd_man.render_fin_sem;
     present.swapchainCount = 1;
-    present.pSwapchains = &ctx.swpchain.handle;
+    present.pSwapchains = &ctx.swapchain.handle;
     present.pImageIndices = &img_idx;
 
     VkResult vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swpchain.buff_resized) {
-        ctx.swpchain.buff_resized = false;
-        cvr_chk(vk_recreate_swpchain(), "failed to recreate swapchain");
+    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swapchain.buff_resized) {
+        ctx.swapchain.buff_resized = false;
+        cvr_chk(vk_recreate_swapchain(), "failed to recreate swapchain");
     } else if (!vk_ok(vk_result)) {
         nob_log(NOB_ERROR, "failed to present queue");
         nob_return_defer(false);
     }
 
-    curr_frame = (curr_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-
 defer:
     return result;
 }
 
-bool vk_recreate_swpchain()
+bool vk_recreate_swapchain()
 {
     bool result = true;
 
@@ -1068,9 +1037,9 @@ bool vk_recreate_swpchain()
 
     vkDeviceWaitIdle(ctx.device);
 
-    cleanup_swpchain();
+    cleanup_swapchain();
 
-    cvr_chk(vk_swpchain_init(), "failed to recreate swapchain");
+    cvr_chk(vk_swapchain_init(), "failed to recreate swapchain");
     cvr_chk(vk_img_views_init(), "failed to recreate image views");
     cvr_chk(vk_depth_init(), "failed to init depth resources");
     cvr_chk(vk_frame_buffs_init(), "failed to recreate frame buffers");
@@ -1098,31 +1067,26 @@ defer:
     return result;
 }
 
-bool vk_ubos_init()
+bool vk_ubo_init()
 {
     bool result = true;
 
-    nob_da_resize(&ctx.ubos, MAX_FRAMES_IN_FLIGHT);
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        Vk_Buffer *buff = &ctx.ubos.items[i];
-        buff->size = sizeof(UBO);
-        result = vk_buff_init(
-            buff,
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-        );
-        cvr_chk(result, "failed to create uniform buffer");
-        vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
-    }
-    ctx.ubos.active = true;
+    ctx.ubo.size = sizeof(UBO);
+    result = vk_buff_init(
+        &ctx.ubo,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create uniform buffer");
+    vkMapMemory(ctx.device, ctx.ubo.mem, 0, ctx.ubo.size, 0, &ctx.ubo.mapped);
 
 defer:
      return result;
 }
 
-void vk_ubos_update(float time)
+void vk_ubo_update(float time)
 {
-    if (!ctx.ubos.active) return;
+    if (!ctx.ubo.handle) return;
 
     UBO ubo = {
         .model = MatrixToFloatV(MatrixIdentity()),
@@ -1131,7 +1095,7 @@ void vk_ubos_update(float time)
         .time = time,
     };
 
-    memcpy(ctx.ubos.items[curr_frame].mapped, &ubo, sizeof(ubo));
+    memcpy(ctx.ubo.mapped, &ubo, sizeof(ubo));
 }
 
 bool vk_descriptor_set_layout_init()
@@ -1182,16 +1146,16 @@ bool vk_descriptor_pool_init()
     Vk_Descriptor_Pool_Sizes pool_sizes = {0};
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = MAX_FRAMES_IN_FLIGHT,
+        .descriptorCount = 1,
     };
-    uint32_t max_sets = MAX_FRAMES_IN_FLIGHT;
+    uint32_t max_sets = 1;
     nob_da_append(&pool_sizes, pool_size);
 
     if (ctx.textures.count) {
         pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        pool_size.descriptorCount = ctx.textures.count * MAX_FRAMES_IN_FLIGHT;
+        pool_size.descriptorCount = ctx.textures.count;
         nob_da_append(&pool_sizes, pool_size);
-        max_sets += ctx.textures.count * MAX_FRAMES_IN_FLIGHT;
+        max_sets += ctx.textures.count;
     } else {
         nob_log(NOB_ERROR, "descriptor pool cannot be created when texture is not loaded");
         nob_return_defer(false);
@@ -1216,59 +1180,50 @@ bool vk_descriptor_sets_init()
     bool result = true;
 
     /* allocate uniform buffer descriptor sets */
-    VkDescriptorSetLayout set_layouts[MAX_FRAMES_IN_FLIGHT];
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        set_layouts[i] = ctx.set_layouts[SET_LAYOUT_UBO];
-
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc.descriptorPool = ctx.descriptor_pool;
-    alloc.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
-    alloc.pSetLayouts = set_layouts;
-
-    VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.ubo_descriptor_sets);
-    vk_chk(vk_result, "failed to allocate descriptor sets");
+    alloc.descriptorSetCount = 1;
+    alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_UBO];
+    VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.ubo_descriptor_set);
+    vk_chk(vk_result, "failed to allocate ubo descriptor set");
 
     /* allocate texture descriptor sets */
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-        set_layouts[i] = ctx.set_layouts[SET_LAYOUT_TEX];
-
+    alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_TEX];
     for (size_t i = 0; i < ctx.textures.count; i++) {
-        vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, ctx.textures.items[i].descriptor_sets);
-        vk_chk(vk_result, "failed to allocate descriptor sets");
+        vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.textures.items[i].descriptor_set);
+        vk_chk(vk_result, "failed to allocate texture descriptor set");
     }
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        /* update uniform buffer descriptor sets */
-        VkDescriptorBufferInfo buff_info = {
-            .buffer = ctx.ubos.items[i].handle,
-            .offset = 0,
-            .range = sizeof(UBO),
-        };
-        VkWriteDescriptorSet write = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = ctx.ubo_descriptor_sets[i],
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = 1,
-            .pBufferInfo = &buff_info,
-        };
-        vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
+    /* update uniform buffer descriptor sets */
+    VkDescriptorBufferInfo buff_info = {
+        .buffer = ctx.ubo.handle,
+        .offset = 0,
+        .range = sizeof(UBO),
+    };
+    VkWriteDescriptorSet write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ctx.ubo_descriptor_set,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .pBufferInfo = &buff_info,
+    };
+    vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
 
-        /* update texture descriptor sets */
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.dstBinding = 0;
-        for (size_t tex = 0; tex < ctx.textures.count; tex++) {
-            VkDescriptorImageInfo img_info = {
-                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .imageView = ctx.textures.items[tex].view,
-                .sampler = ctx.textures.items[tex].sampler,
-            };
-            write.pImageInfo = &img_info;
-            write.dstSet = ctx.textures.items[tex].descriptor_sets[i];
-            vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
-        }
+    /* update texture descriptor sets */
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.dstBinding = 0;
+    for (size_t tex = 0; tex < ctx.textures.count; tex++) {
+        VkDescriptorImageInfo img_info = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView = ctx.textures.items[tex].view,
+            .sampler = ctx.textures.items[tex].sampler,
+        };
+        write.pImageInfo = &img_info;
+        write.dstSet = ctx.textures.items[tex].descriptor_set;
+        vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
     }
 
 defer:
@@ -1288,7 +1243,7 @@ bool is_device_suitable(VkPhysicalDevice phys_device)
     result &= (features.geometryShader);
     cvr_chk(queue_fams.has_gfx && queue_fams.has_present, "requested indices not present");
     cvr_chk(device_exts_supported(phys_device), "device extensions not supported");
-    cvr_chk(swpchain_adequate(phys_device), "swapchain was not adequate");
+    cvr_chk(swapchain_adequate(phys_device), "swapchain was not adequate");
 
 defer:
     return result;
@@ -1400,7 +1355,7 @@ void populate_set(int arr[], size_t arr_size, U32_Set *set)
     }
 }
 
-bool swpchain_adequate(VkPhysicalDevice phys_device)
+bool swapchain_adequate(VkPhysicalDevice phys_device)
 {
     uint32_t surface_fmt_count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys_device, ctx.surface, &surface_fmt_count, NULL);
@@ -1412,7 +1367,7 @@ bool swpchain_adequate(VkPhysicalDevice phys_device)
     return true;
 }
 
-VkSurfaceFormatKHR choose_swpchain_fmt()
+VkSurfaceFormatKHR choose_swapchain_fmt()
 {
     uint32_t surface_fmt_count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.phys_device, ctx.surface, &surface_fmt_count, NULL);
@@ -1464,21 +1419,21 @@ VkExtent2D choose_swp_extent()
     }
 }
 
-void cleanup_swpchain()
+void cleanup_swapchain()
 {
     vkDestroyImageView(ctx.device, ctx.depth_img_view, NULL);
     vkDestroyImage(ctx.device, ctx.depth_img.handle, NULL);
     vkFreeMemory(ctx.device, ctx.depth_img.mem, NULL);
 
-    for (size_t i = 0; i < ctx.swpchain.buffs.count; i++)
-        vkDestroyFramebuffer(ctx.device, ctx.swpchain.buffs.items[i], NULL);
-    for (size_t i = 0; i < ctx.swpchain.img_views.count; i++)
-        vkDestroyImageView(ctx.device, ctx.swpchain.img_views.items[i], NULL);
-    vkDestroySwapchainKHR(ctx.device, ctx.swpchain.handle, NULL);
+    for (size_t i = 0; i < ctx.swapchain.buffs.count; i++)
+        vkDestroyFramebuffer(ctx.device, ctx.swapchain.buffs.items[i], NULL);
+    for (size_t i = 0; i < ctx.swapchain.img_views.count; i++)
+        vkDestroyImageView(ctx.device, ctx.swapchain.img_views.items[i], NULL);
+    vkDestroySwapchainKHR(ctx.device, ctx.swapchain.handle, NULL);
 
-    nob_da_reset(ctx.swpchain.buffs);
-    nob_da_reset(ctx.swpchain.img_views);
-    nob_da_reset(ctx.swpchain.imgs);
+    nob_da_reset(ctx.swapchain.buffs);
+    nob_da_reset(ctx.swapchain.img_views);
+    nob_da_reset(ctx.swapchain.imgs);
 }
 
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx)
@@ -1500,7 +1455,7 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     (void)window;
     (void)width;
     (void)height;
-    ctx.swpchain.buff_resized = true;
+    ctx.swapchain.buff_resized = true;
 }
 
 void cvr_set_proj(Camera camera)
@@ -1863,28 +1818,12 @@ defer:
 bool cmd_man_init()
 {
     bool result = true;
-    cmd_man.frames_in_flight = MAX_FRAMES_IN_FLIGHT;
     cvr_chk(cmd_pool_create(), "failed to create command pool");
     cvr_chk(cmd_buff_create(), "failed to create cmd buffers");
     cvr_chk(cmd_syncs_create(), "failed to create cmd sync objects");
 
 defer:
     return result;
-}
-
-void cmd_man_destroy()
-{
-    for (size_t i = 0; i < cmd_man.frames_in_flight; i++) {
-        vkDestroySemaphore(ctx.device, cmd_man.img_avail_sems.items[i], NULL);
-        vkDestroySemaphore(ctx.device, cmd_man.render_fin_sems.items[i], NULL);
-        vkDestroyFence(ctx.device, cmd_man.fences.items[i], NULL);
-    }
-    vkDestroyCommandPool(ctx.device, cmd_man.pool, NULL);
-
-    nob_da_reset(cmd_man.buffs);
-    nob_da_reset(cmd_man.img_avail_sems);
-    nob_da_reset(cmd_man.render_fin_sems);
-    nob_da_reset(cmd_man.fences);
 }
 
 bool cmd_pool_create()
@@ -1908,9 +1847,16 @@ bool cmd_buff_create()
     ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     ci.commandPool = cmd_man.pool;
     ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    nob_da_resize(&cmd_man.buffs, cmd_man.frames_in_flight);
-    ci.commandBufferCount = cmd_man.buffs.count;
-    return vk_ok(vkAllocateCommandBuffers(ctx.device, &ci, cmd_man.buffs.items));
+    ci.commandBufferCount = 1;
+    return vk_ok(vkAllocateCommandBuffers(ctx.device, &ci, &cmd_man.buff));
+}
+
+void cmd_man_destroy()
+{
+    vkDestroySemaphore(ctx.device, cmd_man.img_avail_sem, NULL);
+    vkDestroySemaphore(ctx.device, cmd_man.render_fin_sem, NULL);
+    vkDestroyFence(ctx.device, cmd_man.fence, NULL);
+    vkDestroyCommandPool(ctx.device, cmd_man.pool, NULL);
 }
 
 bool cmd_syncs_create()
@@ -1921,19 +1867,13 @@ bool cmd_syncs_create()
     VkFenceCreateInfo fence_ci = {0};
     fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    size_t num_syncs = cmd_man.frames_in_flight;
-    nob_da_resize(&cmd_man.img_avail_sems, num_syncs);
-    nob_da_resize(&cmd_man.render_fin_sems, num_syncs);
-    nob_da_resize(&cmd_man.fences, num_syncs);
     VkResult vk_result;
-    for (size_t i = 0; i < num_syncs; i++) {
-        vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.img_avail_sems.items[i]);
-        vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.render_fin_sems.items[i]);
-        vk_chk(vk_result, "failed to create semaphore");
-        vk_result = vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.fences.items[i]);
-        vk_chk(vk_result, "failed to create fence");
-    }
+    vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.img_avail_sem);
+    vk_chk(vk_result, "failed to create semaphore");
+    vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.render_fin_sem);
+    vk_chk(vk_result, "failed to create semaphore");
+    vk_result = vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.fence);
+    vk_chk(vk_result, "failed to create fence");
 
 defer:
     return result;

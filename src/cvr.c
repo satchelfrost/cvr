@@ -192,14 +192,14 @@ void begin_drawing(Color color)
     cvr_time.update = cvr_time.curr - cvr_time.prev;
     cvr_time.prev   = cvr_time.curr;
 
-    begin_draw();
-    cvr_begin_render_pass(color);
+    vk_begin_drawing();
+    vk_begin_render_pass(color);
 }
 
 void end_drawing()
 {
-    vk_ubos_update(get_time());
-    end_draw();
+    vk_ubo_update(get_time());
+    vk_end_drawing();
 
     cvr_time.curr = get_time();
     cvr_time.draw = cvr_time.curr - cvr_time.prev;
@@ -499,7 +499,7 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
     bool result = true;
 
     if (!shader_res_allocated) {
-        if (!vk_ubos_init())                nob_return_defer(false);
+        if (!vk_ubo_init())                   nob_return_defer(false);
         if (!vk_descriptor_set_layout_init()) nob_return_defer(false);
         if (!vk_descriptor_pool_init())       nob_return_defer(false);
         if (!vk_descriptor_sets_init())       nob_return_defer(false);
