@@ -1,0 +1,2 @@
+note that this example may not work because some of the information is
+currently private. Check the other point cloud example.

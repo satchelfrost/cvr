@@ -91,7 +91,7 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-bool shader_res_allocated = false;
+bool tex_res_allocated = false;
 Vk_Buffer texture_example = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
@@ -565,11 +565,11 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!shader_res_allocated) {
+    if (!tex_res_allocated) {
         texture_example.size = sizeof(Texture_UBO);
         if (!vk_ubo_init(&texture_example)) nob_return_defer(false);
         if (!vk_tex_init())                 nob_return_defer(false);
-        shader_res_allocated = true;
+        tex_res_allocated = true;
     }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])

@@ -113,6 +113,20 @@ static Example examples[] = {
         .name = "point-cloud",
         .shaders = {
             .names = (const char *[]) {
+                "point-cloud.vert",
+                "point-cloud.frag",
+            },
+            .count = 2
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
+    {
+        .name = "adv-point-cloud",
+        .shaders = {
+            .names = (const char *[]) {
                 "default.vert",
                 "default.frag",
                 "point-cloud.vert",
