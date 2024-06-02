@@ -68,6 +68,21 @@ typedef struct {
     size_t capacity;
 } Point_Clouds;
 
+/* Uniform buffer object for texture example */
+typedef struct {
+    float16 model;
+    float16 view;
+    float16 proj;
+    float time;
+} Texture_UBO;
+
+typedef struct {
+    Matrix view;
+    Matrix proj;
+    Matrix viewProj;
+} Matrices;
+
+Matrices matrices = {0};
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
@@ -77,6 +92,7 @@ Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
 bool shader_res_allocated = false;
+Vk_Buffer texture_example = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -127,10 +143,16 @@ bool draw_shape(Shape_Type shape_type)
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
-    if (mat_stack_p)
-        cvr_chk(vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
-    else
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    result = vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
 
 defer:
     return result;
@@ -148,20 +170,56 @@ bool draw_shape_wireframe(Shape_Type shape_type)
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
-    if (mat_stack_p)
-        cvr_chk(vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
-    else
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    result = vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mvp);
 
 defer:
     return result;
 }
 
+void cvr_set_proj(Camera camera)
+{
+    Matrix proj = {0};
+    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double top = camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
+
+    /* Vulkan */
+    proj.m5 *= -1.0f;
+
+    matrices.proj = proj;
+}
+
+void cvr_set_view(Camera camera)
+{
+    matrices.view = MatrixLookAt(camera.position, camera.target, camera.up);
+}
+
 void begin_mode_3d(Camera camera)
 {
-    core_state.camera = camera;
     cvr_set_proj(camera);
     cvr_set_view(camera);
+    matrices.viewProj = MatrixMultiply(matrices.view, matrices.proj);
+
     push_matrix();
 }
 
@@ -198,7 +256,15 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    vk_ubo_update(get_time());
+    if (texture_example.handle) {
+        Texture_UBO ubo = {
+            .model = MatrixToFloatV(MatrixIdentity()),
+            .view  = MatrixToFloatV(matrices.view),
+            .proj  = MatrixToFloatV(matrices.proj),
+            .time = get_time(),
+        };
+        memcpy(texture_example.mapped, &ubo, sizeof(Texture_UBO));
+    }
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -454,6 +520,7 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
+    if (texture_example.handle) vk_buff_destroy(texture_example);
     destroy_shape_res();
     vk_destroy();
     glfwDestroyWindow(ctx.window);
@@ -499,10 +566,11 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
     bool result = true;
 
     if (!shader_res_allocated) {
-        if (!vk_ubo_init())                   nob_return_defer(false);
-        if (!vk_descriptor_set_layout_init()) nob_return_defer(false);
-        if (!vk_descriptor_pool_init())       nob_return_defer(false);
-        if (!vk_descriptor_sets_init())       nob_return_defer(false);
+        texture_example.size = sizeof(Texture_UBO);
+        if (!vk_descriptor_pool_init())           nob_return_defer(false);
+        if (!vk_ubo_init(&texture_example))       nob_return_defer(false);
+        if (!vk_tex_descriptor_set_layout_init()) nob_return_defer(false);
+        if (!vk_tex_descriptor_sets_init())       nob_return_defer(false);
         shader_res_allocated = true;
     }
 
@@ -514,12 +582,18 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+
+    Matrix model = {0};
     if (mat_stack_p) {
-        vk_draw_texture(texture.id, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]);
+        model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
         nob_return_defer(false);
     }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
+        nob_return_defer(false);
 
 defer:
     return result;
@@ -694,14 +768,18 @@ bool draw_point_cloud(size_t id)
         nob_return_defer(false);
     }
 
+    Matrix model = {0};
     if (mat_stack_p) {
-        Vk_Buffer dummy = {0};
-        if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mat_stack[mat_stack_p - 1]))
-            nob_return_defer(false);
+        model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
         nob_return_defer(false);
     }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Vk_Buffer dummy = {0};
+    if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mvp))
+        nob_return_defer(false);
 
 defer:
     return result;

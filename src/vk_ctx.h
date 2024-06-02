@@ -126,7 +126,6 @@ typedef struct {
     VkRenderPass render_pass;
     VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
     Vk_Swapchain swapchain;
-    Vk_Buffer ubo;
     Vk_Textures textures;
     Vk_Image depth_img;
     VkImageView depth_img_view;
@@ -151,11 +150,11 @@ bool vk_frame_buffs_init();
 bool vk_recreate_swapchain();
 bool vk_depth_init();
 
-bool vk_ubo_init();
-void vk_ubo_update(float time);
-bool vk_descriptor_set_layout_init();
+bool vk_ubo_init(Vk_Buffer *buff);
+bool vk_ubo_descriptor_set_layout_init();
+bool vk_tex_descriptor_set_layout_init();
 bool vk_descriptor_pool_init();
-bool vk_descriptor_sets_init();
+bool vk_tex_descriptor_sets_init();
 
 /* Manages synchronization info and gets ready for vulkan commands. */
 bool vk_begin_drawing();
@@ -163,8 +162,8 @@ bool vk_begin_drawing();
 /* Submits vulkan commands. */
 bool vk_end_drawing();
 
-bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
-bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model);
+bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
@@ -213,12 +212,6 @@ typedef struct Color {
 
 void vk_begin_render_pass(Color color);
 
-typedef struct {
-    Camera camera;
-    Matrix view;
-    Matrix proj;
-} Core_State;
-
 #endif // VK_CTX_H_
 
 /***********************************************************************************
@@ -237,7 +230,6 @@ typedef struct {
 #define Z_FAR 1000.0
 
 Vk_Context ctx = {0};
-Core_State core_state = {0};
 
 typedef struct {
     VkCommandPool pool;
@@ -311,13 +303,6 @@ void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type);
 /* current image index (only zero if there's only one image) */
 static uint32_t img_idx = 0;
 
-typedef struct {
-    float16 model;
-    float16 view;
-    float16 proj;
-    float time;
-} UBO;
-
 bool vk_init()
 {
     bool result = true;
@@ -346,7 +331,6 @@ bool vk_destroy()
 {
     cmd_man_destroy(&cmd_man);
     cleanup_swapchain();
-    vk_buff_destroy(ctx.ubo);
     vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
     for (size_t i = 0; i < SET_LAYOUT_COUNT; i++)
         vkDestroyDescriptorSetLayout(ctx.device, ctx.set_layouts[i], NULL);
@@ -830,7 +814,7 @@ void vk_begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_man.buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model)
+bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
     bool result = true;
 
@@ -869,9 +853,6 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
         }
     }
 
-    Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
-    Matrix mvp = MatrixMultiply(model, viewProj);
-
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
         cmd_buffer,
@@ -890,7 +871,7 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     return result;
 }
 
-bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix model) // TODO: i think one could just use vk_draw instead
+bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp) // TODO: i think one could just use vk_draw instead
 {
     bool result = true;
 
@@ -925,9 +906,6 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
             &ctx.textures.items[i].descriptor_set, 0, NULL
         );
     }
-
-    Matrix viewProj = MatrixMultiply(core_state.view, core_state.proj);
-    Matrix mvp = MatrixMultiply(model, viewProj);
 
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
@@ -1067,38 +1045,56 @@ defer:
     return result;
 }
 
-bool vk_ubo_init()
+bool vk_ubo_init(Vk_Buffer *buff)
 {
     bool result = true;
 
-    ctx.ubo.size = sizeof(UBO);
+    /* initialize the buffer resource */
+    if (buff->size == 0) {
+        nob_log(NOB_ERROR, "must specify ubo size");
+        nob_return_defer(false);
+    }
     result = vk_buff_init(
-        &ctx.ubo,
+        buff,
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    cvr_chk(result, "failed to create uniform buffer");
-    vkMapMemory(ctx.device, ctx.ubo.mem, 0, ctx.ubo.size, 0, &ctx.ubo.mapped);
+    if (!result) nob_return_defer(false);
+    vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
+
+    vk_ubo_descriptor_set_layout_init();
+
+    /* allocate uniform buffer descriptor sets */
+    VkDescriptorSetAllocateInfo alloc = {0};
+    alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc.descriptorPool = ctx.descriptor_pool;
+    alloc.descriptorSetCount = 1;
+    alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_UBO];
+    VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.ubo_descriptor_set);
+    vk_chk(vk_result, "failed to allocate ubo descriptor set");
+
+    /* update uniform buffer descriptor sets */
+    VkDescriptorBufferInfo buff_info = {
+        .buffer = buff->handle,
+        .offset = 0,
+        .range = buff->size,
+    };
+    VkWriteDescriptorSet write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ctx.ubo_descriptor_set,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .pBufferInfo = &buff_info,
+    };
+    vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
 
 defer:
      return result;
 }
 
-void vk_ubo_update(float time)
-{
-    if (!ctx.ubo.handle) return;
-
-    UBO ubo = {
-        .model = MatrixToFloatV(MatrixIdentity()),
-        .view  = MatrixToFloatV(core_state.view),
-        .proj  = MatrixToFloatV(core_state.proj),
-        .time = time,
-    };
-
-    memcpy(ctx.ubo.mapped, &ubo, sizeof(ubo));
-}
-
-bool vk_descriptor_set_layout_init()
+bool vk_ubo_descriptor_set_layout_init()
 {
     bool result = true;
 
@@ -1118,16 +1114,33 @@ bool vk_descriptor_set_layout_init()
     VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_UBO]);
     vk_chk(vk_result, "failed to create descriptor set layout for uniform buffer");
 
-    if (ctx.textures.count) {
-        set_layout_binding.binding = 0;
-        set_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_TEX]);
-        vk_chk(vk_result, "failed to create descriptor set layout for texture");
-    } else {
-        nob_log(NOB_ERROR, "descriptor set layout cannot be created when texture is not loaded");
-        nob_return_defer(false);
-    }
+defer:
+    return result;
+}
+
+bool vk_tex_descriptor_set_layout_init()
+{
+    bool result = true;
+
+    VkDescriptorSetLayoutBinding set_layout_binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &set_layout_binding,
+    };
+
+    vk_chk(
+        vkCreateDescriptorSetLayout(
+            ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_TEX]
+        ),
+        "failed to create descriptor set layout for texture"
+    );
 
 defer:
     return result;
@@ -1175,46 +1188,31 @@ defer:
     return result;
 }
 
-bool vk_descriptor_sets_init()
+bool vk_tex_descriptor_sets_init()
 {
     bool result = true;
 
-    /* allocate uniform buffer descriptor sets */
+    /* allocate texture descriptor sets */
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc.descriptorPool = ctx.descriptor_pool;
     alloc.descriptorSetCount = 1;
-    alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_UBO];
-    VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.ubo_descriptor_set);
-    vk_chk(vk_result, "failed to allocate ubo descriptor set");
-
-    /* allocate texture descriptor sets */
     alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_TEX];
     for (size_t i = 0; i < ctx.textures.count; i++) {
-        vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.textures.items[i].descriptor_set);
-        vk_chk(vk_result, "failed to allocate texture descriptor set");
+        vk_chk(
+            vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.textures.items[i].descriptor_set),
+            "failed to allocate texture descriptor set"
+        );
     }
 
-    /* update uniform buffer descriptor sets */
-    VkDescriptorBufferInfo buff_info = {
-        .buffer = ctx.ubo.handle,
-        .offset = 0,
-        .range = sizeof(UBO),
-    };
+    /* update texture descriptor sets */
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ctx.ubo_descriptor_set,
         .dstBinding = 0,
         .dstArrayElement = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
-        .pBufferInfo = &buff_info,
     };
-    vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
-
-    /* update texture descriptor sets */
-    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.dstBinding = 0;
     for (size_t tex = 0; tex < ctx.textures.count; tex++) {
         VkDescriptorImageInfo img_info = {
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -1457,37 +1455,6 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     (void)height;
     ctx.swapchain.buff_resized = true;
 }
-
-void cvr_set_proj(Camera camera)
-{
-    Matrix proj = {0};
-    double aspect = ctx.extent.width / (double) ctx.extent.height;
-    double top = camera.fovy / 2.0;
-    double right = top * aspect;
-    switch (camera.projection) {
-    case PERSPECTIVE:
-        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
-        break;
-    case ORTHOGRAPHIC:
-        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
-        break;
-    default:
-        assert(0 && "unrecognized camera mode");
-        break;
-    }
-
-    /* Vulkan */
-    proj.m5 *= -1.0f;
-
-    core_state.proj = proj;
-
-}
-
-void cvr_set_view(Camera camera)
-{
-    core_state.view = MatrixLookAt(camera.position, camera.target, camera.up);
-}
-
 
 void init_ext_managner()
 {
