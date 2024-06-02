@@ -106,6 +106,13 @@ typedef enum {
     SET_LAYOUT_COUNT,
 } Set_Layout_Type;
 
+typedef enum {
+    POOL_UBO = 0,
+    POOL_TEX,
+    POOL_POINT_CLOUD,
+    POOL_COUNT,
+} Descriptor_Pool_Type;
+
 typedef struct {
     VkDescriptorSetLayout *items;
     size_t count;
@@ -130,7 +137,7 @@ typedef struct {
     Vk_Image depth_img;
     VkImageView depth_img_view;
     VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
-    VkDescriptorPool descriptor_pool;
+    VkDescriptorPool descriptor_pools[POOL_COUNT];
     VkDescriptorSet ubo_descriptor_set;
     VkPipeline pipelines[PIPELINE_COUNT];
 } Vk_Context;
@@ -151,9 +158,10 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 
 bool vk_ubo_init(Vk_Buffer *buff);
+bool vk_tex_init();
 bool vk_ubo_descriptor_set_layout_init();
-bool vk_tex_descriptor_set_layout_init();
 bool vk_descriptor_pool_init();
+bool vk_tex_descriptor_set_layout_init();
 bool vk_tex_descriptor_sets_init();
 
 /* Manages synchronization info and gets ready for vulkan commands. */
@@ -331,7 +339,8 @@ bool vk_destroy()
 {
     cmd_man_destroy(&cmd_man);
     cleanup_swapchain();
-    vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pool, NULL);
+    for (size_t i = 0; i < POOL_COUNT; i++)
+        vkDestroyDescriptorPool(ctx.device, ctx.descriptor_pools[i], NULL);
     for (size_t i = 0; i < SET_LAYOUT_COUNT; i++)
         vkDestroyDescriptorSetLayout(ctx.device, ctx.set_layouts[i], NULL);
     for (size_t i = 0; i < PIPELINE_COUNT; i++) {
@@ -1062,12 +1071,13 @@ bool vk_ubo_init(Vk_Buffer *buff)
     if (!result) nob_return_defer(false);
     vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
 
-    vk_ubo_descriptor_set_layout_init();
+    if (!vk_ubo_descriptor_set_layout_init()) nob_return_defer(false);
+    if (!vk_descriptor_pool_init(POOL_UBO))   nob_return_defer(false);
 
     /* allocate uniform buffer descriptor sets */
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc.descriptorPool = ctx.descriptor_pool;
+    alloc.descriptorPool = ctx.descriptor_pools[POOL_UBO];
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_UBO];
     VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.ubo_descriptor_set);
@@ -1094,6 +1104,15 @@ defer:
      return result;
 }
 
+bool vk_tex_init()
+{
+    if (!vk_tex_descriptor_set_layout_init()) return false;
+    if (!vk_descriptor_pool_init(POOL_TEX))   return false;
+    if (!vk_tex_descriptor_sets_init())       return false;
+
+    return true;
+}
+
 bool vk_ubo_descriptor_set_layout_init()
 {
     bool result = true;
@@ -1111,8 +1130,11 @@ bool vk_ubo_descriptor_set_layout_init()
         .pBindings = &set_layout_binding,
     };
 
-    VkResult vk_result = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, &ctx.set_layouts[SET_LAYOUT_UBO]);
-    vk_chk(vk_result, "failed to create descriptor set layout for uniform buffer");
+    VkDescriptorSetLayout *layout = &ctx.set_layouts[SET_LAYOUT_UBO];
+    if (!vk_ok(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
+        nob_log(NOB_ERROR, "failed to create descriptor set layout for uniform buffer");
+        nob_return_defer(false);
+    }
 
 defer:
     return result;
@@ -1146,45 +1168,48 @@ defer:
     return result;
 }
 
-typedef struct {
-    VkDescriptorPoolSize *items;
-    size_t count;
-    size_t capacity;
-} Vk_Descriptor_Pool_Sizes;
-
-bool vk_descriptor_pool_init()
+bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type)
 {
     bool result = true;
 
-    Vk_Descriptor_Pool_Sizes pool_sizes = {0};
-    VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-    };
-    uint32_t max_sets = 1;
-    nob_da_append(&pool_sizes, pool_size);
-
-    if (ctx.textures.count) {
-        pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        pool_size.descriptorCount = ctx.textures.count;
-        nob_da_append(&pool_sizes, pool_size);
-        max_sets += ctx.textures.count;
-    } else {
-        nob_log(NOB_ERROR, "descriptor pool cannot be created when texture is not loaded");
+    uint32_t max_sets = 0;
+    VkDescriptorPoolSize pool_size = {0};
+    switch(pool_type) {
+    case POOL_UBO: {
+        pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        pool_size.descriptorCount = 1;
+        max_sets = 1;
+    } break;
+    case POOL_TEX: {
+        if (ctx.textures.count) {
+            pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            pool_size.descriptorCount = ctx.textures.count;
+            max_sets += ctx.textures.count;
+        } else {
+            nob_log(NOB_ERROR, "no textures loaded, descriptor pool failure");
+            nob_return_defer(false);
+        }
+    } break;
+    case POOL_POINT_CLOUD: {
+    } break;
+    default:
+        nob_log(NOB_ERROR, "unrecognized descriptor pool type %d", pool_type);
         nob_return_defer(false);
     }
 
     VkDescriptorPoolCreateInfo pool_ci = {0};
     pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_ci.poolSizeCount = pool_sizes.count;
-    pool_ci.pPoolSizes = pool_sizes.items;
+    pool_ci.poolSizeCount = 1;
+    pool_ci.pPoolSizes = &pool_size;
     pool_ci.maxSets = max_sets;
 
-    VkResult vk_res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, &ctx.descriptor_pool);
-    vk_chk(vk_res, "failed to create descriptor pool");
+    VkDescriptorPool *pool = &ctx.descriptor_pools[pool_type];
+    if(!vk_ok(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool))) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool");
+        nob_return_defer(false);
+    }
 
 defer:
-    nob_da_free(pool_sizes);
     return result;
 }
 
@@ -1195,7 +1220,7 @@ bool vk_tex_descriptor_sets_init()
     /* allocate texture descriptor sets */
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc.descriptorPool = ctx.descriptor_pool;
+    alloc.descriptorPool = ctx.descriptor_pools[POOL_TEX];
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &ctx.set_layouts[SET_LAYOUT_TEX];
     for (size_t i = 0; i < ctx.textures.count; i++) {

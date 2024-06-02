@@ -567,10 +567,8 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 
     if (!shader_res_allocated) {
         texture_example.size = sizeof(Texture_UBO);
-        if (!vk_descriptor_pool_init())           nob_return_defer(false);
-        if (!vk_ubo_init(&texture_example))       nob_return_defer(false);
-        if (!vk_tex_descriptor_set_layout_init()) nob_return_defer(false);
-        if (!vk_tex_descriptor_sets_init())       nob_return_defer(false);
+        if (!vk_ubo_init(&texture_example)) nob_return_defer(false);
+        if (!vk_tex_init())                 nob_return_defer(false);
         shader_res_allocated = true;
     }
 
