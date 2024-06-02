@@ -162,9 +162,11 @@ bool build_cvr()
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
+        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
         const char *comp_db = nob_temp_sprintf("build/compilation_database/%s.o.json", cvr[i]);
         nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, 1)) {
+        if (nob_needs_rebuild(output_path, &input_path, 1) ||
+            nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
             if (gen_comp_db && using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
@@ -292,10 +294,12 @@ defer:
 void log_usage(const char *program)
 {
     nob_log(NOB_INFO, "usage: %s <flags> <optional_input>", program);
+    nob_log(NOB_INFO, "    -h help (log usage)");
     nob_log(NOB_INFO, "    -c clean build");
     nob_log(NOB_INFO, "    -e <example_name> optional example");
     nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
     nob_log(NOB_INFO, "    -l list available examples");
+    nob_log(NOB_INFO, "    -k disable copying res folder for speed");
 }
 
 void print_examples()
@@ -336,6 +340,7 @@ int main(int argc, char **argv)
 
     Nob_Cmd cmd = {0};
     const char *program = nob_shift_args(&argc, &argv);
+    bool copy = true; // default is to copy res directory, -k to disable
     char *example = NULL;
     while (argc > 0) {
         char flag;
@@ -365,6 +370,9 @@ int main(int argc, char **argv)
             case 'l':
                 print_examples();
                 return 0;
+                break;
+            case 'k':
+                copy = false;
                 break;
             default:
                 nob_log(NOB_ERROR, "unrecognized flag %c", flag);
@@ -410,22 +418,24 @@ int main(int argc, char **argv)
         if (!build_example(&examples[i])) return 1;
         if (!compile_shaders(example_path, examples[i].shaders)) return 1;
 
-        Nob_File_Paths paths = {0};
-        nob_read_entire_dir(example_res, &paths);
-        for (size_t i = 0; i < paths.count; i++) {
-            const char *file_name = paths.items[i];
-            if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0||
-                strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
-                continue;
-
-            const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
-            const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
-            if (!nob_copy_file(src_path, dst_path)) return 1;
-        }
-
         /* copy res folder to root so example can be run from root */
-        nob_mkdir_if_not_exists("res");
-        if (!nob_copy_directory_recursively(build_res, "res")) return 1;
+        if (copy) {
+            Nob_File_Paths paths = {0};
+            nob_read_entire_dir(example_res, &paths);
+            for (size_t i = 0; i < paths.count; i++) {
+                const char *file_name = paths.items[i];
+                if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0||
+                        strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
+                    continue;
+
+                const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
+                const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+                if (!nob_copy_file(src_path, dst_path)) return 1;
+            }
+
+            nob_mkdir_if_not_exists("res");
+            if (!nob_copy_directory_recursively(build_res, "res")) return 1;
+        }
 
         /* run example after building */
         cmd.count = 0;
