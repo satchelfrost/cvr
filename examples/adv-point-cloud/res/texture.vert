@@ -7,10 +7,10 @@ layout(push_constant) uniform constants
 
 layout(set = 0, binding = 0) uniform UniformBufferObject
 {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    float time;
+    mat4 cammeraMvp1;
+    mat4 cammeraMvp2;
+    mat4 cammeraMvp3;
+    mat4 cammeraMvp4;
 } ubo;
 
 layout(location = 0) in vec3 inPosition;

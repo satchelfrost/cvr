@@ -76,6 +76,14 @@ typedef struct {
     float time;
 } Texture_UBO;
 
+/* Uniform buffer object for advanced point cloud example */
+typedef struct {
+    float16 camera_mvp_1;
+    float16 camera_mvp_2;
+    float16 camera_mvp_3;
+    int camera_idx;
+} Point_Cloud_UBO;
+
 typedef struct {
     Matrix view;
     Matrix proj;
@@ -256,15 +264,6 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    if (texture_example.handle) {
-        Texture_UBO ubo = {
-            .model = MatrixToFloatV(MatrixIdentity()),
-            .view  = MatrixToFloatV(matrices.view),
-            .proj  = MatrixToFloatV(matrices.proj),
-            .time = get_time(),
-        };
-        memcpy(texture_example.mapped, &ubo, sizeof(Texture_UBO));
-    }
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -592,6 +591,15 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
     if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
         nob_return_defer(false);
+
+    /* update uniform buffer for texture exaxmple */
+    Texture_UBO ubo = {
+        .model = MatrixToFloatV(MatrixIdentity()),
+        .view  = MatrixToFloatV(matrices.view),
+        .proj  = MatrixToFloatV(matrices.proj),
+        .time = get_time(),
+    };
+    memcpy(texture_example.mapped, &ubo, sizeof(Texture_UBO));
 
 defer:
     return result;
