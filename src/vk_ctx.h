@@ -1664,10 +1664,10 @@ defer:
 
 void vk_buff_destroy(Vk_Buffer buffer)
 {
-    if (!buffer.handle) {
-        nob_log(NOB_WARNING, "cannot destroy null buffer");
-        return;
-    }
+    // if (!buffer.handle) {
+    //     nob_log(NOB_WARNING, "cannot destroy null buffer");
+    //     return;
+    // }
     vkDestroyBuffer(ctx.device, buffer.handle, NULL);
     vkFreeMemory(ctx.device, buffer.mem, NULL);
     buffer.handle = NULL;

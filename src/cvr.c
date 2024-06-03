@@ -76,6 +76,11 @@ typedef struct {
     float time;
 } Texture_UBO;
 
+typedef struct {
+    Vk_Buffer buff;
+    Texture_UBO ubo;
+} Texture_Example;
+
 /* Uniform buffer object for advanced point cloud example */
 typedef struct {
     float16 camera_mvp_1;
@@ -85,11 +90,17 @@ typedef struct {
 } Point_Cloud_UBO;
 
 typedef struct {
+    Vk_Buffer buff;
+    Point_Cloud_UBO ubo;
+} Adv_Point_Cloud_Example;
+
+typedef struct {
     Matrix view;
     Matrix proj;
     Matrix viewProj;
 } Matrices;
 
+/* State */
 Matrices matrices = {0};
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
@@ -99,8 +110,8 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-bool tex_res_allocated = false;
-Vk_Buffer texture_example = {0};
+Texture_Example tex_example = {0};
+Adv_Point_Cloud_Example adv_point_cloud = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -264,6 +275,15 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
+    if (tex_example.buff.handle) {
+        /* update uniform buffer for texture exaxmple */
+        tex_example.ubo.model = MatrixToFloatV(MatrixIdentity());
+        tex_example.ubo.view  = MatrixToFloatV(matrices.view);
+        tex_example.ubo.proj  = MatrixToFloatV(matrices.proj);
+        tex_example.ubo.time = get_time();
+        memcpy(tex_example.buff.mapped, &tex_example.ubo, sizeof(Texture_UBO));
+    }
+
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -519,7 +539,7 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
-    if (texture_example.handle) vk_buff_destroy(texture_example);
+    vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
     vk_destroy();
     glfwDestroyWindow(ctx.window);
@@ -564,11 +584,10 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!tex_res_allocated) {
-        texture_example.size = sizeof(Texture_UBO);
-        if (!vk_ubo_init(&texture_example)) nob_return_defer(false);
-        if (!vk_tex_init())                 nob_return_defer(false);
-        tex_res_allocated = true;
+    if (!tex_example.buff.handle) {
+        tex_example.buff.size = sizeof(Texture_UBO);
+        if (!vk_ubo_init(&tex_example.buff)) nob_return_defer(false);
+        if (!vk_tex_init())                  nob_return_defer(false);
     }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])
@@ -591,15 +610,6 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
     if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
         nob_return_defer(false);
-
-    /* update uniform buffer for texture exaxmple */
-    Texture_UBO ubo = {
-        .model = MatrixToFloatV(MatrixIdentity()),
-        .view  = MatrixToFloatV(matrices.view),
-        .proj  = MatrixToFloatV(matrices.proj),
-        .time = get_time(),
-    };
-    memcpy(texture_example.mapped, &ubo, sizeof(Texture_UBO));
 
 defer:
     return result;
@@ -757,6 +767,48 @@ void destroy_point_cloud(size_t id)
 bool draw_point_cloud(size_t id)
 {
     bool result = true;
+
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
+        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
+            nob_return_defer(false);
+
+    Vk_Buffer vtx_buff = {0};
+    for (size_t i = 0; i < point_clouds.count; i++) {
+        if (i == id && point_clouds.items[i].handle) {
+            vtx_buff = point_clouds.items[i];
+        }
+    }
+
+    if (!vtx_buff.handle) {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
+        nob_return_defer(false);
+    }
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Vk_Buffer dummy = {0};
+    if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mvp))
+        nob_return_defer(false);
+
+defer:
+    return result;
+}
+
+bool draw_point_cloud_adv(size_t id)
+{
+    bool result = true;
+
+    if (!adv_point_cloud.buff.handle) {
+        adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
+        if (!vk_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
+    }
 
     if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
         if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
