@@ -586,8 +586,8 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 
     if (!tex_example.buff.handle) {
         tex_example.buff.size = sizeof(Texture_UBO);
-        if (!vk_ubo_init(&tex_example.buff)) nob_return_defer(false);
-        if (!vk_tex_init())                  nob_return_defer(false);
+        if (!vk_tex_ubo_init(&tex_example.buff)) nob_return_defer(false);
+        if (!vk_tex_sampler_init())              nob_return_defer(false);
     }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])
