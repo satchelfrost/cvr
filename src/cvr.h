@@ -274,5 +274,6 @@ bool upload_point_cloud(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 bool draw_point_cloud(size_t id);
 bool draw_point_cloud_adv(size_t id);
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx);
 
 #endif // CVR_H_

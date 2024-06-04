@@ -94,25 +94,45 @@ defer:
     return result;
 }
 
+void log_cameras(Camera *four_cameras)
+{
+    for (size_t i = 0; i < 4; i++) {
+        Vector3 pos = four_cameras[i].position;
+        Vector3 up  = four_cameras[i].up;
+        Vector3 tg  = four_cameras[i].target;
+        nob_log(NOB_INFO, "Camera %d", i);
+        nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+        nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
+        nob_log(NOB_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
+    }
+}
+
 Camera cameras[] = {
     {
-        .position   = {0.0f, 1.0f, 5.0f},
+        .position   = {-62.01, 18.47, 16.65},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {0.0f, 0.0f, 0.0f},
+        .target     = {-57.22, 17.16, 17.80},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
     {
-        .position   = {0.0f, 1.0f, 10.0f},
+        .position   = {-17.75, 5.40, 48.50},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {0.0f, 0.0f, 0.0f},
+        .target     = {-19.83, 3.38, 58.12},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
     {
-        .position   = {0.0f, 1.0f, 20.0f},
+        .position   = {-9.41, 4.64, 10.58},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {0.0f, 0.0f, 0.0f},
+        .target     = {-5.92, -0.39, -8.49},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    {
+        .position   = {-12.31, 8.61, 29.38},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {8.19, 1.28, 34.59},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     }
@@ -155,6 +175,7 @@ int main()
             camera = &cameras[cam_idx];
         }
         if (is_key_pressed(KEY_P)) use_hres = !use_hres;
+        if (is_key_pressed(KEY_C)) log_cameras(cameras);
         update_camera_free(camera);
 
         /* draw */
@@ -173,11 +194,13 @@ int main()
                     if (!draw_texture(tex, SHAPE_QUAD)) return 1;
                 pop_matrix();
             }
-
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             size_t id = (use_hres) ? hres.id : lres.id;
-            if (!draw_point_cloud(id)) return 1;
+            if (!draw_point_cloud_adv(id)) return 1;
+
+            update_cameras_ubo(cameras, cam_idx);
+
         end_mode_3d();
         end_drawing();
     }

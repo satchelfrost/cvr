@@ -283,7 +283,6 @@ void end_drawing()
         tex_example.ubo.time = get_time();
         memcpy(tex_example.buff.mapped, &tex_example.ubo, sizeof(Texture_UBO));
     }
-
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -539,6 +538,7 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
+    vk_buff_destroy(adv_point_cloud.buff);
     vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
     vk_destroy();
@@ -807,11 +807,11 @@ bool draw_point_cloud_adv(size_t id)
 
     if (!adv_point_cloud.buff.handle) {
         adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
-        if (!vk_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
+        if (!vk_pc_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
     }
 
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])
+        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
             nob_return_defer(false);
 
     Vk_Buffer vtx_buff = {0};
@@ -836,7 +836,7 @@ bool draw_point_cloud_adv(size_t id)
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
     Vk_Buffer dummy = {0};
-    if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mvp))
+    if (!vk_draw(PIPELINE_POINT_CLOUD_ADV, vtx_buff, dummy, mvp))
         nob_return_defer(false);
 
 defer:
@@ -907,9 +907,75 @@ void set_target_fps(int fps)
 
 void look_at(Camera camera)
 {
+    /* Note we are using MatrixInvert here because matrix look at actually
+     * takes the inverse because it assumes it will be used as a view matrix.
+     * In this case we actually want the world matrix */
     Matrix inv = MatrixInvert(MatrixLookAt(camera.position, camera.target, camera.up));
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(mat_stack[mat_stack_p - 1], inv);
     else
         nob_log(NOB_ERROR, "no matrix available to translate");
+}
+
+Matrix get_proj(Camera camera) // TODO: consolodate this
+{
+    Matrix proj = {0};
+    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double top = camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
+
+    /* Vulkan */
+    proj.m5 *= -1.0f;
+
+    return proj;
+}
+
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
+{
+    bool result = true;
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvps[3] = {0};
+    for (size_t i = 0; i < 3; i++) {
+        Matrix view = MatrixLookAt(
+            four_cameras[(cam_idx + i + 1) % 4].position,
+            four_cameras[(cam_idx + i + 1) % 4].target,
+            four_cameras[(cam_idx + i + 1) % 4].up
+        );
+        Matrix proj = get_proj(four_cameras[(cam_idx + i + 1) % 4]);
+        Matrix viewProj = MatrixMultiply(view, proj);
+        mvps[i] = MatrixMultiply(model, viewProj);
+    }
+
+    if (adv_point_cloud.buff.handle) {
+        adv_point_cloud.ubo.camera_mvp_1 = MatrixToFloatV(mvps[0]);
+        adv_point_cloud.ubo.camera_mvp_2 = MatrixToFloatV(mvps[1]);
+        adv_point_cloud.ubo.camera_mvp_3 = MatrixToFloatV(mvps[2]);
+        adv_point_cloud.ubo.camera_idx   = cam_idx;
+        memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
+    } else {
+        nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
 }
