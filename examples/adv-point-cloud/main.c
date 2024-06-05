@@ -165,22 +165,34 @@ int main()
 
     bool use_hres = false;
     int cam_idx = 0;
+    bool pilot_view_camera = true;
+    int cam_move_idx = 1;
     Camera *camera = &cameras[cam_idx];
     while (!window_should_close()) {
         log_fps();
 
         /* input */
-        if (is_key_pressed(KEY_SPACE)) {
+        if (is_key_pressed(KEY_SPACE) && pilot_view_camera) {
             cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
             camera = &cameras[cam_idx];
         }
-        if (is_key_pressed(KEY_P)) use_hres = !use_hres;
-        if (is_key_pressed(KEY_C)) log_cameras(cameras);
-        update_camera_free(camera);
+        if (is_key_pressed(KEY_R)) use_hres = !use_hres;
+        if (is_key_pressed(KEY_L)) log_cameras(cameras);
+        if (is_key_pressed(KEY_M)) cam_move_idx = (cam_move_idx + 1) % 4;
+        if (is_key_pressed(KEY_P)) pilot_view_camera = !pilot_view_camera;
+
+        if (pilot_view_camera)
+            update_camera_free(camera);
+        else
+            update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
         begin_drawing(BLUE);
-        begin_mode_3d(*camera);
+            if (pilot_view_camera)
+                begin_mode_3d(*camera);
+            else
+                begin_mode_3d(cameras[0]);
+
             /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
@@ -198,7 +210,6 @@ int main()
             rotate_x(-PI / 2);
             size_t id = (use_hres) ? hres.id : lres.id;
             if (!draw_point_cloud_adv(id)) return 1;
-
             update_cameras_ubo(cameras, cam_idx);
 
         end_mode_3d();
