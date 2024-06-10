@@ -419,6 +419,7 @@ int main(int argc, char **argv)
         if (!compile_shaders(example_path, examples[i].shaders)) return 1;
 
         /* copy res folder to root so example can be run from root */
+        nob_mkdir_if_not_exists("res");
         if (copy) {
             Nob_File_Paths paths = {0};
             nob_read_entire_dir(example_res, &paths);
@@ -432,9 +433,19 @@ int main(int argc, char **argv)
                 const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
                 if (!nob_copy_file(src_path, dst_path)) return 1;
             }
-
-            nob_mkdir_if_not_exists("res");
             if (!nob_copy_directory_recursively(build_res, "res")) return 1;
+        } else {
+            /* always make sure that shaders get copied */
+            Nob_File_Paths paths = {0};
+            nob_read_entire_dir(build_res, &paths);
+            for (size_t i = 0; i < paths.count; i++) {
+                const char *file_name = paths.items[i];
+                if (strstr(file_name, ".spv")) {
+                    const char *src_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+                    const char *dst_path = nob_temp_sprintf("res/%s", file_name);
+                    if (!nob_copy_file(src_path, dst_path)) return 1;
+                }
+            }
         }
 
         /* run example after building */
