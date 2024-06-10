@@ -107,6 +107,23 @@ void log_cameras(Camera *four_cameras)
     }
 }
 
+void log_controls()
+{
+    nob_log(NOB_INFO, "Controls:");
+    nob_log(NOB_INFO, "    SPACE - switch camera");
+    nob_log(NOB_INFO, "    KEY_R - change point cloud resolution");
+    nob_log(NOB_INFO, "    KEY_M - change camera mode");
+    nob_log(NOB_INFO, "    KEY_P - log camera info");
+}
+
+void log_camera_mode(bool pilot_curr_view)
+{
+    if (pilot_curr_view)
+        nob_log(NOB_INFO, "Camera mode: pilot current view");
+    else
+        nob_log(NOB_INFO, "Camera mode: pilot other camera view");
+}
+
 Camera cameras[] = {
     {
         .position   = {-62.01, 18.47, 16.65},
@@ -165,30 +182,38 @@ int main()
 
     bool use_hres = false;
     int cam_idx = 0;
-    bool pilot_view_camera = true;
+    bool pilot_curr_view = true;
     int cam_move_idx = 1;
     Camera *camera = &cameras[cam_idx];
+    log_controls();
+    log_camera_mode(pilot_curr_view);
     while (!window_should_close()) {
         log_fps();
 
         /* input */
-        if (is_key_pressed(KEY_SPACE) && pilot_view_camera) {
-            cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
-            camera = &cameras[cam_idx];
+        if (is_key_pressed(KEY_SPACE)) {
+            if (pilot_curr_view) {
+                cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
+                camera = &cameras[cam_idx];
+            } else {
+                cam_move_idx = (cam_move_idx + 1) % 4;
+            }
         }
         if (is_key_pressed(KEY_R)) use_hres = !use_hres;
-        if (is_key_pressed(KEY_L)) log_cameras(cameras);
-        if (is_key_pressed(KEY_M)) cam_move_idx = (cam_move_idx + 1) % 4;
-        if (is_key_pressed(KEY_P)) pilot_view_camera = !pilot_view_camera;
+        if (is_key_pressed(KEY_P)) log_cameras(cameras);
+        if (is_key_pressed(KEY_M)) {
+            pilot_curr_view = !pilot_curr_view;
+            log_camera_mode(pilot_curr_view);
+        }
 
-        if (pilot_view_camera)
+        if (pilot_curr_view)
             update_camera_free(camera);
         else
             update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
         begin_drawing(BLUE);
-            if (pilot_view_camera)
+            if (pilot_curr_view)
                 begin_mode_3d(*camera);
             else
                 begin_mode_3d(cameras[0]);

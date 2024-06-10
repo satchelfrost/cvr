@@ -19,7 +19,7 @@
 #define MAX_CHAR_PRESSED_QUEUE 16
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
-#define CAMERA_ROTATION_SPEED 0.0003f
+#define CAMERA_ROTATION_SPEED 1.0f
 #define MAX_MOUSE_BUTTONS 8
 #define FPS_CAPTURE_FRAMES_COUNT 30
 #define FPS_AVERAGE_TIME_SECONDS 0.5f
@@ -204,7 +204,7 @@ defer:
     return result;
 }
 
-void cvr_set_proj(Camera camera)
+Matrix get_proj(Camera camera)
 {
     Matrix proj = {0};
     double aspect = ctx.extent.width / (double) ctx.extent.height;
@@ -225,18 +225,13 @@ void cvr_set_proj(Camera camera)
     /* Vulkan */
     proj.m5 *= -1.0f;
 
-    matrices.proj = proj;
-}
-
-void cvr_set_view(Camera camera)
-{
-    matrices.view = MatrixLookAt(camera.position, camera.target, camera.up);
+    return proj;
 }
 
 void begin_mode_3d(Camera camera)
 {
-    cvr_set_proj(camera);
-    cvr_set_view(camera);
+    matrices.proj = get_proj(camera);
+    matrices.view = MatrixLookAt(camera.position, camera.target, camera.up);
     matrices.viewProj = MatrixMultiply(matrices.view, matrices.proj);
 
     push_matrix();
@@ -690,15 +685,17 @@ void update_camera_free(Camera *camera)
         camera_pitch(camera, -delta.y * CAMERA_MOUSE_MOVE_SENSITIVITY);
     }
 
-    if (is_key_down(KEY_K)) camera_pitch(camera, -CAMERA_ROTATION_SPEED);
-    if (is_key_down(KEY_I)) camera_pitch(camera, CAMERA_ROTATION_SPEED);
-    if (is_key_down(KEY_L)) camera_yaw(camera, -CAMERA_ROTATION_SPEED);
-    if (is_key_down(KEY_J)) camera_yaw(camera, CAMERA_ROTATION_SPEED);
+    float ft = get_frame_time();
+    float rot_speed = ft * CAMERA_ROTATION_SPEED;
+
+    if (is_key_down(KEY_K)) camera_pitch(camera, -rot_speed);
+    if (is_key_down(KEY_I)) camera_pitch(camera,  rot_speed);
+    if (is_key_down(KEY_L)) camera_yaw(camera,   -rot_speed);
+    if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
 
     float move_speed = CAMERA_MOVE_SPEED * get_frame_time();
     if (is_key_down(KEY_LEFT_SHIFT))
         move_speed *= 10.0f;
-    // nob_log(NOB_INFO, "move speed %.5f", move_speed);
 
     if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);
@@ -915,30 +912,6 @@ void look_at(Camera camera)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(mat_stack[mat_stack_p - 1], inv);
     else
         nob_log(NOB_ERROR, "no matrix available to translate");
-}
-
-Matrix get_proj(Camera camera) // TODO: consolodate this
-{
-    Matrix proj = {0};
-    double aspect = ctx.extent.width / (double) ctx.extent.height;
-    double top = camera.fovy / 2.0;
-    double right = top * aspect;
-    switch (camera.projection) {
-    case PERSPECTIVE:
-        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
-        break;
-    case ORTHOGRAPHIC:
-        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
-        break;
-    default:
-        assert(0 && "unrecognized camera mode");
-        break;
-    }
-
-    /* Vulkan */
-    proj.m5 *= -1.0f;
-
-    return proj;
 }
 
 bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
