@@ -5,6 +5,7 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
+    /* renders points as circles */
     float dist = length(2 * gl_PointCoord - 1.0);
     if (dist > 1.0)
         discard;

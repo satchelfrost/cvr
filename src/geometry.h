@@ -10,6 +10,11 @@ typedef struct {
     Vector2 tex_coord;
 } Vertex; 
 
+typedef struct {
+    Vector3 pos;
+    uint8_t r, g, b;
+} Small_Vertex;
+
 #define Red 1, 0, 0
 #define DarkRed 0.25f, 0, 0
 #define Green 0, 1, 0
@@ -80,9 +85,36 @@ static const uint16_t quad_indices[QUAD_IDXS] = {
     0, 1, 2, 2, 3, 0
 };
 
+#define CAM_VERTS 8
+static const Vertex cam_verts[CAM_VERTS] = {
+    {{-0.5f,  0.375f,  0.5f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+    {{ 0.5f,  0.375f,  0.5f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{-0.5f, -0.375f,  0.5f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+    {{ 0.5f, -0.375f,  0.5f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},
+    {{-1.0f,   0.75f, -0.5f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+    {{ 1.0f,   0.75f, -0.5f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{-1.0f,  -0.75f, -0.5f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+    {{ 1.0f,  -0.75f, -0.5f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}
+};
+
+/* clockwise winding order */
+#define CAM_IDXS 24
+static const uint16_t cam_indices[CAM_IDXS] = {
+    0, 4, 5,
+    0, 5, 1,
+    1, 5, 7,
+    1, 7, 3,
+    3, 7, 6,
+    3, 6, 2,
+    4, 2, 6,
+    4, 0, 2,
+};
+
+
 #define SHAPE_LIST \
     X(QUAD, quad)  \
     X(CUBE, cube)  \
-    X(TETRAHEDRON, tetrahedron)
+    X(TETRAHEDRON, tetrahedron) \
+    X(CAM, cam)
 
 #endif

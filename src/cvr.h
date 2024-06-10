@@ -202,6 +202,7 @@ typedef enum {
     SHAPE_CUBE = 0,
     SHAPE_QUAD,
     SHAPE_TETRAHEDRON,
+    SHAPE_CAM,
     SHAPE_COUNT,
 } Shape_Type;
 
@@ -224,6 +225,7 @@ int get_mouse_y();
 double get_frame_time();
 double get_time();
 int get_fps();
+int get_average_fps();
 void set_target_fps(int fps);
 
 void push_matrix();
@@ -236,6 +238,7 @@ void rotate_z(float angle);
 void rotate_xyz(Vector3 angle);
 void rotate_zyx(Vector3 angle);
 void scale(float x, float y, float z);
+void look_at(Camera camera);
 
 typedef struct {
     void *data;
@@ -260,15 +263,17 @@ typedef struct {
     void *items;
     size_t size;
     size_t count;
-} Buffer_Descriptor;
+} Buffer;
 
 Texture load_texture_from_image(Image img);
 void unload_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 bool is_mouse_button_down(int button);
 
-bool upload_point_cloud(Buffer_Descriptor desc, size_t *id);
+bool upload_point_cloud(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 bool draw_point_cloud(size_t id);
+bool draw_point_cloud_adv(size_t id);
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx);
 
 #endif // CVR_H_

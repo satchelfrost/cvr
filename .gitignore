@@ -6,3 +6,4 @@ compile_commands.json
 .cache
 /res
 arena_*
+out.png

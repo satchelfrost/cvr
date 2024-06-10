@@ -1,6 +1,7 @@
 #ifndef NOB_EXT_H_
 #define NOB_EXT_H_
 
+// TODO: nob da resize shouldn't set the count, that should be done manually
 /* This file contains definitions for unofficial nob, or nob extensions */
 
 #define nob_da_resize(da, new_size)                                                    \

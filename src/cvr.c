@@ -17,12 +17,12 @@
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
 #define MAX_CHAR_PRESSED_QUEUE 16
-#define CAMERA_MOVE_SPEED 0.01f
+#define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
-#define CAMERA_ROTATION_SPEED 0.0003f
+#define CAMERA_ROTATION_SPEED 1.0f
 #define MAX_MOUSE_BUTTONS 8
 #define FPS_CAPTURE_FRAMES_COUNT 30
-#define FPS_AVERAGE_TIME_SECONDS 0.5
+#define FPS_AVERAGE_TIME_SECONDS 0.5f
 #define FPS_STEP (FPS_AVERAGE_TIME_SECONDS/FPS_CAPTURE_FRAMES_COUNT)
 
 typedef struct {
@@ -68,16 +68,50 @@ typedef struct {
     size_t capacity;
 } Point_Clouds;
 
+/* Uniform buffer object for texture example */
+typedef struct {
+    float16 model;
+    float16 view;
+    float16 proj;
+    float time;
+} Texture_UBO;
+
+typedef struct {
+    Vk_Buffer buff;
+    Texture_UBO ubo;
+} Texture_Example;
+
+/* Uniform buffer object for advanced point cloud example */
+typedef struct {
+    float16 camera_mvp_1;
+    float16 camera_mvp_2;
+    float16 camera_mvp_3;
+    int camera_idx;
+} Point_Cloud_UBO;
+
+typedef struct {
+    Vk_Buffer buff;
+    Point_Cloud_UBO ubo;
+} Adv_Point_Cloud_Example;
+
+typedef struct {
+    Matrix view;
+    Matrix proj;
+    Matrix viewProj;
+} Matrices;
+
+/* State */
+Matrices matrices = {0};
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
 Time cvr_time = {0};
-static clock_t time_begin;
 #define MAX_MAT_STACK 1024 * 1024
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-bool shader_res_allocated = false;
+Texture_Example tex_example = {0};
+Adv_Point_Cloud_Example adv_point_cloud = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -105,8 +139,6 @@ bool init_window(int width, int height, const char *title)
 
     cvr_chk(vk_init(), "failed to initialize Vulkan context");
 
-    time_begin = clock();
-
 defer:
     return result;
 }
@@ -123,17 +155,23 @@ bool draw_shape(Shape_Type shape_type)
     bool result = true;
 
     if (!ctx.pipelines[PIPELINE_DEFAULT])
-        if (!create_basic_pipeline(PIPELINE_DEFAULT))
+        if (!vk_basic_pl_init(PIPELINE_DEFAULT))
             nob_return_defer(false);
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
-    if (mat_stack_p)
-        cvr_chk(vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
-    else
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    result = vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
 
 defer:
     return result;
@@ -144,27 +182,58 @@ bool draw_shape_wireframe(Shape_Type shape_type)
     bool result = true;
 
     if (!ctx.pipelines[PIPELINE_WIREFRAME])
-        if (!create_basic_pipeline(PIPELINE_WIREFRAME))
+        if (!vk_basic_pl_init(PIPELINE_WIREFRAME))
             nob_return_defer(false);
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
-    if (mat_stack_p)
-        cvr_chk(vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]), "failed to draw frame");
-    else
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    result = vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mvp);
 
 defer:
     return result;
 }
 
+Matrix get_proj(Camera camera)
+{
+    Matrix proj = {0};
+    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double top = camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
+
+    /* Vulkan */
+    proj.m5 *= -1.0f;
+
+    return proj;
+}
+
 void begin_mode_3d(Camera camera)
 {
-    core_state.camera = camera;
-    cvr_set_proj(camera);
-    cvr_set_view(camera);
+    matrices.proj = get_proj(camera);
+    matrices.view = MatrixLookAt(camera.position, camera.target, camera.up);
+    matrices.viewProj = MatrixMultiply(matrices.view, matrices.proj);
+
     push_matrix();
 }
 
@@ -183,9 +252,6 @@ static void wait_time(double seconds)
     req.tv_sec = sec;
     req.tv_nsec = nsec;
 
-    //nob_log(NOB_INFO, "sleeping for %lld ns", nsec);
-    //nob_log(NOB_INFO, "sleeping for %.4f s", (float)seconds);
-
     while (nanosleep(&req, &req) == -1) continue;
 
     /* partial busy wait loop */
@@ -198,14 +264,21 @@ void begin_drawing(Color color)
     cvr_time.update = cvr_time.curr - cvr_time.prev;
     cvr_time.prev   = cvr_time.curr;
 
-    begin_draw();
-    cvr_begin_render_pass(color);
+    vk_begin_drawing();
+    vk_begin_render_pass(color);
 }
 
 void end_drawing()
 {
-    cvr_update_ubos(get_time());
-    end_draw();
+    if (tex_example.buff.handle) {
+        /* update uniform buffer for texture exaxmple */
+        tex_example.ubo.model = MatrixToFloatV(MatrixIdentity());
+        tex_example.ubo.view  = MatrixToFloatV(matrices.view);
+        tex_example.ubo.proj  = MatrixToFloatV(matrices.proj);
+        tex_example.ubo.time = get_time();
+        memcpy(tex_example.buff.mapped, &tex_example.ubo, sizeof(Texture_UBO));
+    }
+    vk_end_drawing();
 
     cvr_time.curr = get_time();
     cvr_time.draw = cvr_time.curr - cvr_time.prev;
@@ -336,8 +409,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
 double get_time()
 {
-    clock_t curr_time = clock();
-    return (double)(curr_time - time_begin) / CLOCKS_PER_SEC;
+    return glfwGetTime();
 }
 
 void translate(float x, float y, float z)
@@ -461,8 +533,10 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
+    vk_buff_destroy(adv_point_cloud.buff);
+    vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
-    cvr_destroy();
+    vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
 }
@@ -505,28 +579,32 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!shader_res_allocated) {
-        if (!create_ubos())                  nob_return_defer(false);
-        if (!create_descriptor_set_layout()) nob_return_defer(false);
-        if (!create_descriptor_pool())       nob_return_defer(false);
-        if (!create_descriptor_sets())       nob_return_defer(false);
-        shader_res_allocated = true;
+    if (!tex_example.buff.handle) {
+        tex_example.buff.size = sizeof(Texture_UBO);
+        if (!vk_tex_ubo_init(&tex_example.buff)) nob_return_defer(false);
+        if (!vk_tex_sampler_init())              nob_return_defer(false);
     }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])
-        if (!create_basic_pipeline(PIPELINE_TEXTURE))
+        if (!vk_basic_pl_init(PIPELINE_TEXTURE))
             nob_return_defer(false);
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+
+    Matrix model = {0};
     if (mat_stack_p) {
-        vk_draw_texture(texture.id, vtx_buff, idx_buff, mat_stack[mat_stack_p - 1]);
+        model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
         nob_return_defer(false);
     }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
+        nob_return_defer(false);
 
 defer:
     return result;
@@ -599,7 +677,7 @@ void camera_move_to_target(Camera *camera, float delta)
     camera->position = Vector3Add(camera->target, Vector3Scale(forward, -distance));
 }
 
-void update_camera_free(Camera *camera) // TODO: really need delta time in here
+void update_camera_free(Camera *camera)
 {
     Vector2 delta = get_mouse_delta();
     if (is_mouse_button_down(MOUSE_BUTTON_RIGHT)) {
@@ -607,14 +685,17 @@ void update_camera_free(Camera *camera) // TODO: really need delta time in here
         camera_pitch(camera, -delta.y * CAMERA_MOUSE_MOVE_SENSITIVITY);
     }
 
-    if (is_key_down(KEY_K)) camera_pitch(camera, -CAMERA_ROTATION_SPEED);
-    if (is_key_down(KEY_I)) camera_pitch(camera, CAMERA_ROTATION_SPEED);
-    if (is_key_down(KEY_L)) camera_yaw(camera, -CAMERA_ROTATION_SPEED);
-    if (is_key_down(KEY_J)) camera_yaw(camera, CAMERA_ROTATION_SPEED);
+    float ft = get_frame_time();
+    float rot_speed = ft * CAMERA_ROTATION_SPEED;
 
-    float move_speed = CAMERA_MOVE_SPEED;
+    if (is_key_down(KEY_K)) camera_pitch(camera, -rot_speed);
+    if (is_key_down(KEY_I)) camera_pitch(camera,  rot_speed);
+    if (is_key_down(KEY_L)) camera_yaw(camera,   -rot_speed);
+    if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
+
+    float move_speed = CAMERA_MOVE_SPEED * get_frame_time();
     if (is_key_down(KEY_LEFT_SHIFT))
-        move_speed *= 5.0f;
+        move_speed *= 10.0f;
 
     if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);
@@ -654,19 +735,19 @@ bool is_mouse_button_down(int button)
     return mouse.curr_button_state[button] == GLFW_PRESS;
 }
 
-bool upload_point_cloud(Buffer_Descriptor desc, size_t *id)
+bool upload_point_cloud(Buffer buff, size_t *id)
 {
-    Vk_Buffer buff = {
-        .count = desc.count,
-        .size  = desc.size,
+    Vk_Buffer vk_buff = {
+        .count = buff.count,
+        .size  = buff.size,
     };
-    if (!vtx_buff_init(&buff, desc.items)) {
+    if (!vtx_buff_init(&vk_buff, buff.items)) {
         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
         return false;
     }
 
     *id = point_clouds.count;
-    nob_da_append(&point_clouds, buff);
+    nob_da_append(&point_clouds, vk_buff);
     return true;
 }
 
@@ -685,7 +766,7 @@ bool draw_point_cloud(size_t id)
     bool result = true;
 
     if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-        if (!create_basic_pipeline(PIPELINE_POINT_CLOUD))
+        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
             nob_return_defer(false);
 
     Vk_Buffer vtx_buff = {0};
@@ -700,14 +781,60 @@ bool draw_point_cloud(size_t id)
         nob_return_defer(false);
     }
 
+    Matrix model = {0};
     if (mat_stack_p) {
-        Vk_Buffer dummy = {0};
-        if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mat_stack[mat_stack_p - 1]))
-            nob_return_defer(false);
+        model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
         nob_return_defer(false);
     }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Vk_Buffer dummy = {0};
+    if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mvp))
+        nob_return_defer(false);
+
+defer:
+    return result;
+}
+
+bool draw_point_cloud_adv(size_t id)
+{
+    bool result = true;
+
+    if (!adv_point_cloud.buff.handle) {
+        adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
+        if (!vk_pc_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
+    }
+
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])
+        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
+            nob_return_defer(false);
+
+    Vk_Buffer vtx_buff = {0};
+    for (size_t i = 0; i < point_clouds.count; i++) {
+        if (i == id && point_clouds.items[i].handle) {
+            vtx_buff = point_clouds.items[i];
+        }
+    }
+
+    if (!vtx_buff.handle) {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
+        nob_return_defer(false);
+    }
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Vk_Buffer dummy = {0};
+    if (!vk_draw(PIPELINE_POINT_CLOUD_ADV, vtx_buff, dummy, mvp))
+        nob_return_defer(false);
 
 defer:
     return result;
@@ -728,7 +855,7 @@ double get_frame_time()
     return cvr_time.frame;	
 }
 
-int get_fps()
+int get_average_fps()
 {
     int fps = 0;
 
@@ -761,9 +888,67 @@ int get_fps()
     return fps;
 }
 
+int get_fps()
+{
+    double frame_time = get_frame_time();
+    if (frame_time == 0) return 0;
+    else return (int)roundf(1.0f / frame_time);
+}
+
 void set_target_fps(int fps)
 {
     if (fps < 1) cvr_time.target = 0.0;
     else cvr_time.target = 1.0 / (double) fps;
     nob_log(NOB_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
+}
+
+void look_at(Camera camera)
+{
+    /* Note we are using MatrixInvert here because matrix look at actually
+     * takes the inverse because it assumes it will be used as a view matrix.
+     * In this case we actually want the world matrix */
+    Matrix inv = MatrixInvert(MatrixLookAt(camera.position, camera.target, camera.up));
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(mat_stack[mat_stack_p - 1], inv);
+    else
+        nob_log(NOB_ERROR, "no matrix available to translate");
+}
+
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
+{
+    bool result = true;
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_return_defer(false);
+    }
+
+    Matrix mvps[3] = {0};
+    for (size_t i = 0; i < 3; i++) {
+        Matrix view = MatrixLookAt(
+            four_cameras[(cam_idx + i + 1) % 4].position,
+            four_cameras[(cam_idx + i + 1) % 4].target,
+            four_cameras[(cam_idx + i + 1) % 4].up
+        );
+        Matrix proj = get_proj(four_cameras[(cam_idx + i + 1) % 4]);
+        Matrix viewProj = MatrixMultiply(view, proj);
+        mvps[i] = MatrixMultiply(model, viewProj);
+    }
+
+    if (adv_point_cloud.buff.handle) {
+        adv_point_cloud.ubo.camera_mvp_1 = MatrixToFloatV(mvps[0]);
+        adv_point_cloud.ubo.camera_mvp_2 = MatrixToFloatV(mvps[1]);
+        adv_point_cloud.ubo.camera_mvp_3 = MatrixToFloatV(mvps[2]);
+        adv_point_cloud.ubo.camera_idx   = cam_idx;
+        memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
+    } else {
+        nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
 }

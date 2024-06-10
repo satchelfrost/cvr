@@ -10,10 +10,16 @@
     } while(0)
 
 typedef struct {
-    Vertex *items;
+    Small_Vertex *items;
     size_t count;
     size_t capacity;
 } Vertices;
+
+typedef struct {
+    Vertices verts;
+    Buffer buff;
+    size_t id;
+} Point_Cloud;
 
 bool read_vtx(const char *file, Vertices *verts)
 {
@@ -21,15 +27,11 @@ bool read_vtx(const char *file, Vertices *verts)
 
     nob_log(NOB_INFO, "reading vtx file %s", file);
     Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file, &sb)) {
-        nob_log(NOB_ERROR, "failed to read %s", file);
-        nob_return_defer(false);
-    }
+    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
 
     Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
     size_t vtx_count = 0;
     read_attr(vtx_count, sv);
-    nob_log(NOB_INFO, "count %zu", vtx_count);
 
     for (size_t i = 0; i < vtx_count; i++) {
         float x, y, z;
@@ -41,9 +43,9 @@ bool read_vtx(const char *file, Vertices *verts)
         read_attr(g, sv);
         read_attr(b, sv);
 
-        Vertex vert = {
+        Small_Vertex vert = {
             .pos = {x, y, z},
-            .color = {r / 255.0f, g / 255.0f, b / 255.0f},
+            .r = r, .g = g, .b = b,
         };
         nob_da_append(verts, vert);
     }
@@ -53,49 +55,68 @@ defer:
     return result;
 }
 
+void log_fps()
+{
+    static int fps = -1;
+    int curr_fps = get_fps();
+    if (curr_fps != fps) {
+        nob_log(NOB_INFO, "FPS %d", curr_fps);
+        fps = curr_fps;
+    }
+}
+
+bool load_points(const char *name, Point_Cloud *point_cloud)
+{
+    bool result = true;
+
+    Vertices verts = {0};
+    if (!read_vtx(name, &verts)) nob_return_defer(false);
+    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
+
+    point_cloud->buff.items = verts.items;
+    point_cloud->buff.count = verts.count;
+    point_cloud->buff.size  = verts.count * sizeof(*verts.items);
+    point_cloud->verts = verts;
+
+defer:
+    return result;
+}
 
 int main()
 {
-    Vertices verts = {0};
-    if (!read_vtx("res/arena_5060224_f32.vtx", &verts)) {
-        if (!read_vtx("res/flowers.vtx", &verts)) return 1;
-    }
-    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
+    /* load resources into main memory */
+    Point_Cloud flowers = {0};
+    if (!load_points("res/flowers.vtx", &flowers)) return 1;
 
+    /* initialize window and Vulkan */
+    init_window(1600, 900, "point cloud");
+    set_target_fps(60);
     Camera camera = {
-        .position   = {0.0f, 1.0f, 2.0f},
+        .position   = {0.0f, 1.0f, 5.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     };
 
-    init_window(1600, 900, "point cloud");
-
-    size_t id;
-    Buffer_Descriptor desc = {
-        .items = verts.items,
-        .count = verts.count,
-        .size  = verts.count * sizeof(*verts.items),
-    };
-    if (!upload_point_cloud(desc, &id)) return 1;
+    /* upload resources to GPU */
+    if (!upload_point_cloud(flowers.buff, &flowers.id)) return 1;
+    nob_da_free(flowers.verts);
 
     while (!window_should_close()) {
+        log_fps();
         update_camera_free(&camera);
 
         begin_drawing(BLUE);
         begin_mode_3d(camera);
-            // if (!draw_shape(SHAPE_CUBE)) return 1;
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-            if (!draw_point_cloud(id)) return 1;
+            if (!draw_point_cloud(flowers.id)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
-    destroy_point_cloud(id);
+    destroy_point_cloud(flowers.id);
     close_window();
-
-    nob_da_free(verts);
     return 0;
 }
