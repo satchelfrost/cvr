@@ -24,20 +24,33 @@ void main()
     vec4 cam2_rel_pos = cameras.mvp2 * vec4(inPosition, 1.0);
     vec4 cam3_rel_pos = cameras.mvp3 * vec4(inPosition, 1.0);
 
+    int count = 0;
+    float r = 0.0;
+    float g = 0.0;
+    float b = 0.0;
     if ((-cam1_rel_pos.w < cam1_rel_pos.x && cam1_rel_pos.x < cam1_rel_pos.w) &&
         (-cam1_rel_pos.w < cam1_rel_pos.y && cam1_rel_pos.y < cam1_rel_pos.w) &&
-        (-cam1_rel_pos.w < cam1_rel_pos.z && cam1_rel_pos.z < cam1_rel_pos.w))
-        fragColor = vec3(255, 0, 0);
-    else if ((-cam2_rel_pos.w < cam2_rel_pos.x && cam2_rel_pos.x < cam2_rel_pos.w) &&
-             (-cam2_rel_pos.w < cam2_rel_pos.y && cam2_rel_pos.y < cam2_rel_pos.w) &&
-             (-cam2_rel_pos.w < cam2_rel_pos.z && cam2_rel_pos.z < cam2_rel_pos.w))
-        fragColor = vec3(0, 255, 0);
-    else if ((-cam3_rel_pos.w < cam3_rel_pos.x && cam3_rel_pos.x < cam3_rel_pos.w) &&
-             (-cam3_rel_pos.w < cam3_rel_pos.y && cam3_rel_pos.y < cam3_rel_pos.w) &&
-             (-cam3_rel_pos.w < cam3_rel_pos.z && cam3_rel_pos.z < cam3_rel_pos.w))
-        fragColor = vec3(0, 0, 255);
-    else
+        (-cam1_rel_pos.w < cam1_rel_pos.z && cam1_rel_pos.z < cam1_rel_pos.w)) {
+        r = 1.0;
+        count++;
+    }
+    if ((-cam2_rel_pos.w < cam2_rel_pos.x && cam2_rel_pos.x < cam2_rel_pos.w) &&
+        (-cam2_rel_pos.w < cam2_rel_pos.y && cam2_rel_pos.y < cam2_rel_pos.w) &&
+        (-cam2_rel_pos.w < cam2_rel_pos.z && cam2_rel_pos.z < cam2_rel_pos.w)) {
+        g = 1.0;
+        count++;
+    }
+    if ((-cam3_rel_pos.w < cam3_rel_pos.x && cam3_rel_pos.x < cam3_rel_pos.w) &&
+        (-cam3_rel_pos.w < cam3_rel_pos.y && cam3_rel_pos.y < cam3_rel_pos.w) &&
+        (-cam3_rel_pos.w < cam3_rel_pos.z && cam3_rel_pos.z < cam3_rel_pos.w)) {
+        b = 1.0;
+        count++;
+    }
+
+    if (count == 0)
         fragColor = vec3(inColor) / 255.0;
+    else
+        fragColor = vec3(r, g, b);
 
     gl_PointSize = 3.0;
     gl_Position = push_const.mvp * vec4(inPosition, 1.0);

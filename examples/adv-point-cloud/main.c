@@ -174,6 +174,7 @@ int main()
 
     /* upload resources to GPU */
     Texture tex = load_texture_from_image(img);
+    Texture pc_tex = load_pc_texture_from_image(img);
     free(img.data);
     if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
     if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
@@ -242,6 +243,7 @@ int main()
     }
 
     unload_texture(tex);
+    unload_pc_texture(pc_tex);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
     close_window();

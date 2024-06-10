@@ -564,7 +564,22 @@ Texture load_texture_from_image(Image img)
         .format   = img.format,
     };
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id))
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, false))
+        nob_log(NOB_ERROR, "unable to load texture");
+
+    return texture;
+}
+
+Texture load_pc_texture_from_image(Image img)
+{
+    Texture texture = {
+        .width    = img.width,
+        .height   = img.height,
+        .mipmaps  = img.mipmaps,
+        .format   = img.format,
+    };
+
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, true))
         nob_log(NOB_ERROR, "unable to load texture");
 
     return texture;
@@ -573,6 +588,11 @@ Texture load_texture_from_image(Image img)
 void unload_texture(Texture texture)
 {
     vk_unload_texture(texture.id);
+}
+
+void unload_pc_texture(Texture texture)
+{
+    vk_unload_pc_texture(texture.id);
 }
 
 bool draw_texture(Texture texture, Shape_Type shape_type)
@@ -693,14 +713,14 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_L)) camera_yaw(camera,   -rot_speed);
     if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
 
-    float move_speed = CAMERA_MOVE_SPEED * get_frame_time();
+    float move_speed = CAMERA_MOVE_SPEED * ft;
     if (is_key_down(KEY_LEFT_SHIFT))
         move_speed *= 10.0f;
 
-    if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
-    if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);
+    if (is_key_down(KEY_W)) camera_move_forward(camera,  move_speed);
+    if (is_key_down(KEY_A)) camera_move_right(camera,   -move_speed);
     if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);
-    if (is_key_down(KEY_D)) camera_move_right(camera, move_speed);
+    if (is_key_down(KEY_D)) camera_move_right(camera,    move_speed);
 
     camera_move_to_target(camera, -get_mouse_wheel_move());
 }
@@ -805,6 +825,7 @@ bool draw_point_cloud_adv(size_t id)
     if (!adv_point_cloud.buff.handle) {
         adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
         if (!vk_pc_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
+        if (!vk_pc_sampler_init())                  nob_return_defer(false);
     }
 
     if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])

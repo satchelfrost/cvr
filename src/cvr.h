@@ -266,8 +266,11 @@ typedef struct {
 } Buffer;
 
 Texture load_texture_from_image(Image img);
+Texture load_pc_texture_from_image(Image img);
 void unload_texture(Texture texture);
+void unload_pc_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
+bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 
 bool upload_point_cloud(Buffer buff, size_t *id);
