@@ -5,14 +5,6 @@ layout(push_constant) uniform constants
     mat4 mvp;
 } push_const;
 
-layout(binding = 0) uniform CameraMVPs
-{
-    mat4 mvp1;
-    mat4 mvp2;
-    mat4 mvp3;
-    mat4 mvp4;
-} cameras;
-
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in uvec3 inColor;
 

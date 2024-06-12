@@ -234,6 +234,7 @@ int main()
             }
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
+
             size_t id = (use_hres) ? hres.id : lres.id;
             if (!draw_point_cloud_adv(id)) return 1;
             update_cameras_ubo(cameras, cam_idx);

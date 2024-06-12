@@ -665,6 +665,7 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
         nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_TEX_SAMPLER]);
     } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
         nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO]);
+        nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]);
     }
     pipeline_layout_ci.pSetLayouts = set_layouts.items;
     pipeline_layout_ci.setLayoutCount = set_layouts.count;
@@ -884,12 +885,20 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
                 &ctx.textures.items[i].descriptor_set, 0, NULL
             );
         }
-    } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV)  {
+    } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
         vkCmdBindDescriptorSets(
             cmd_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
             ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
         );
+        if (ctx.pc_textures.count) {
+            vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[pipeline_type], 1, 1,
+                &ctx.pc_textures.items[0].descriptor_set, 0, NULL
+            );
+        }
     }
 
     float16 mat = MatrixToFloatV(mvp);
@@ -1350,17 +1359,29 @@ bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool
 {
     bool result = true;
 
+    Vk_Textures textures;
+    switch (layout_type) {
+    case SET_LAYOUT_TEX_SAMPLER:         textures = ctx.textures;    break;
+    case SET_LAYOUT_POINT_CLOUD_SAMPLER: textures = ctx.pc_textures; break;
+    default:
+        nob_log(NOB_ERROR, "sampler layout type not recognized %d", layout_type);
+        nob_return_defer(false);
+    }
+    if (!textures.count) nob_log(NOB_ERROR, "failed to initialize texture descriptor set");
+
     /* allocate texture descriptor sets */
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc.descriptorPool = ctx.descriptor_pools[pool_type];
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &ctx.set_layouts[layout_type];
-    for (size_t i = 0; i < ctx.textures.count; i++) {
-        vk_chk(
-            vkAllocateDescriptorSets(ctx.device, &alloc, &ctx.textures.items[i].descriptor_set),
-            "failed to allocate texture descriptor set"
-        );
+    for (size_t i = 0; i < textures.count; i++) {
+        VkDescriptorSet *set = &textures.items[i].descriptor_set;
+        result = vk_ok(vkAllocateDescriptorSets(ctx.device, &alloc, set));
+        if (!result) {
+            nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
+            goto defer;
+        }
     }
 
     /* update texture descriptor sets */
@@ -1371,14 +1392,14 @@ bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
     };
-    for (size_t tex = 0; tex < ctx.textures.count; tex++) {
+    for (size_t tex = 0; tex < textures.count; tex++) {
         VkDescriptorImageInfo img_info = {
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView = ctx.textures.items[tex].view,
-            .sampler = ctx.textures.items[tex].sampler,
+            .imageView   = textures.items[tex].view,
+            .sampler     = textures.items[tex].sampler,
         };
         write.pImageInfo = &img_info;
-        write.dstSet = ctx.textures.items[tex].descriptor_set;
+        write.dstSet = textures.items[tex].descriptor_set;
         vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
     }
 
