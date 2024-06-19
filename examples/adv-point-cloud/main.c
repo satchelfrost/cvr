@@ -100,10 +100,12 @@ void log_cameras(Camera *four_cameras)
         Vector3 pos = four_cameras[i].position;
         Vector3 up  = four_cameras[i].up;
         Vector3 tg  = four_cameras[i].target;
+        float fov   = four_cameras[i].fovy;
         nob_log(NOB_INFO, "Camera %d", i);
         nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
         nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
         nob_log(NOB_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
+        nob_log(NOB_INFO, "    fovy     %.2f", fov);
     }
 }
 
@@ -127,34 +129,34 @@ void log_controls()
 }
 
 Camera cameras[] = {
-    {
-        .position   = {-62.01, 18.47, 16.65},
+    { // Camera for image view_4_ffmpeg.png
+        .position   = {-38.50, 15.30, -14.38},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-57.22, 17.16, 17.80},
+        .target     = {-18.10, 8.71, -7.94},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    {
-        .position   = {-17.75, 5.40, 48.50},
+    { // Camera for image view_3_ffmpeg.png
+        .position   = {12.24, 15.17, 69.39},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-19.83, 3.38, 58.12},
+        .target     = {-6.66, 8.88, 64.07},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    {
-        .position   = {-9.41, 4.64, 10.58},
+    { // Camera for image view_1_ffmpeg.png
+        .position   = {25.20, 9.68, 38.50},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-5.92, -0.39, -8.49},
+        .target     = {20.30, 8.86, 37.39},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    {
-        .position   = {-12.31, 8.61, 29.38},
+    { // Camera for image view_2_ffmpeg.png
+        .position   = {-54.02, 12.14, 22.01},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {8.19, 1.28, 34.59},
+        .target     = {-44.42, 9.74, 23.87},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
-    }
+    },
 };
 
 int main()
@@ -164,8 +166,7 @@ int main()
     if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
     if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
-    // const char *image_name = "res/arena_fisheye_corrected.png";
-    const char *image_name = "res/out.png";
+    const char *image_name = "res/view_3_ffmpeg.png";
     Image img = load_image(image_name);
     if (!img.data) {
         nob_log(NOB_ERROR, "failed to load png file %s", image_name);
@@ -183,6 +184,11 @@ int main()
     if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
+
+    /* debug cube params */
+    Vector3 cube_pos = {0.0f, 0.0f, 0.0f};
+    float cube_speed = 7.0f;
+    float cube_rot = 0.0f;
 
     bool use_hres = false;
     int cam_view_idx = 0;
@@ -210,9 +216,28 @@ int main()
         if (is_key_pressed(KEY_P)) log_cameras(cameras);
         update_camera_free(&cameras[cam_move_idx]);
 
+        float dt = get_frame_time();
+        if (is_key_down(KEY_RIGHT) && is_key_down(KEY_LEFT_SHIFT))
+            cube_rot += dt;
+        else if (is_key_down(KEY_RIGHT))
+            cube_pos.x += cube_speed * dt;
+        if (is_key_down(KEY_LEFT)  && is_key_down(KEY_LEFT_SHIFT))
+            cube_rot -= dt;
+        else if (is_key_down(KEY_LEFT))
+            cube_pos.x -= cube_speed * dt;
+        if (is_key_down(KEY_DOWN)) cube_pos.z += cube_speed * dt;
+        if (is_key_down(KEY_UP))   cube_pos.z -= cube_speed * dt;
+        if (is_key_down(KEY_E))    camera_move_up(&cameras[cam_move_idx],  dt);
+        if (is_key_down(KEY_Q))    camera_move_up(&cameras[cam_move_idx], -dt);
+
         /* draw */
         begin_drawing(BLUE);
             begin_mode_3d(*camera);
+            push_matrix();
+                translate(cube_pos.x, cube_pos.y, cube_pos.z);;
+                rotate_y(cube_rot);
+                if (!draw_shape(SHAPE_CUBE)) return 1;
+            pop_matrix();
 
             /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {

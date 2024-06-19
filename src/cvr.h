@@ -239,6 +239,7 @@ void rotate_xyz(Vector3 angle);
 void rotate_zyx(Vector3 angle);
 void scale(float x, float y, float z);
 void look_at(Camera camera);
+void camera_move_up(Camera *camera, float distance);
 
 typedef struct {
     void *data;

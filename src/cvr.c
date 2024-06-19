@@ -663,6 +663,14 @@ void camera_move_right(Camera *camera, float distance)
     camera->target = Vector3Add(camera->target, right);
 }
 
+void camera_move_up(Camera *camera, float distance)
+{
+    Vector3 up = get_camera_up(camera);
+    up = Vector3Scale(up, distance);
+    camera->position = Vector3Add(camera->position, up);
+    camera->target = Vector3Add(camera->target, up);
+}
+
 Vector2 get_mouse_delta()
 {
     Vector2 delta = {
