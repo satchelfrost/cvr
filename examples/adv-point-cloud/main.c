@@ -7,6 +7,7 @@
 #define M  "50602232"
 #define L  "101204464"
 #define XL "506022320"
+#define NUM_IMGS 4
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -166,11 +167,14 @@ int main()
     if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
     if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
-    const char *image_name = "res/view_3_ffmpeg.png";
-    Image img = load_image(image_name);
-    if (!img.data) {
-        nob_log(NOB_ERROR, "failed to load png file %s", image_name);
-        return 1;
+    Image imgs[NUM_IMGS] = {0};
+    for (size_t i = 0; i < NUM_IMGS; i++) {
+        const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
+        imgs[i] = load_image(img_name);
+        if (!imgs[i].data) {
+            nob_log(NOB_ERROR, "failed to load png file %s", img_name);
+            return 1;
+        }
     }
 
     /* initialize window and Vulkan */
@@ -178,25 +182,30 @@ int main()
     set_target_fps(60);
 
     /* upload resources to GPU */
-    Texture pc_tex = load_pc_texture_from_image(img);
-    free(img.data);
+    Texture texs[NUM_IMGS] = {0};
+    for (size_t i = 0; i < NUM_IMGS; i++) {
+        texs[i] = load_pc_texture_from_image(imgs[i]);
+        free(imgs[i].data);
+    }
     if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
     if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
-    /* debug cube params */
-    Vector3 cube_pos = {0.0f, 0.0f, 0.0f};
+    /* settings & logging*/
+    Vector3 cube_pos = {0.0f, 0.0f, 0.0f}; // TODO: maybe get rid of this
     float cube_speed = 7.0f;
     float cube_rot = 0.0f;
-
     bool use_hres = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
+    int curr_tex = 0;
     Camera *camera = &cameras[cam_view_idx];
     log_controls();
     nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
     nob_log(NOB_INFO, "viewing camera %d",  cam_view_idx);
+
+    /* game loop */
     while (!window_should_close()) {
         log_fps();
 
@@ -229,6 +238,7 @@ int main()
         if (is_key_down(KEY_UP))   cube_pos.z -= cube_speed * dt;
         if (is_key_down(KEY_E))    camera_move_up(&cameras[cam_move_idx],  dt);
         if (is_key_down(KEY_Q))    camera_move_up(&cameras[cam_move_idx], -dt);
+        if (is_key_pressed(KEY_B)) curr_tex = (curr_tex + 1) % NUM_IMGS;
 
         /* draw */
         begin_drawing(BLUE);
@@ -254,15 +264,16 @@ int main()
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
 
-            size_t id = (use_hres) ? hres.id : lres.id;
-            if (!draw_point_cloud_adv(id)) return 1;
+            size_t vtx_id = (use_hres) ? hres.id : lres.id;
+            if (!draw_point_cloud_adv(vtx_id, texs[curr_tex].id)) return 1;
             update_cameras_ubo(cameras, cam_view_idx);
 
         end_mode_3d();
         end_drawing();
     }
 
-    unload_pc_texture(pc_tex);
+    /* cleanup */
+    for (size_t i = 0; i < NUM_IMGS; i++) unload_pc_texture(texs[i]);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
     close_window();

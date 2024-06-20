@@ -826,7 +826,7 @@ defer:
     return result;
 }
 
-bool draw_point_cloud_adv(size_t id)
+bool draw_point_cloud_adv(size_t vtx_id, size_t tex_id)
 {
     bool result = true;
 
@@ -842,13 +842,13 @@ bool draw_point_cloud_adv(size_t id)
 
     Vk_Buffer vtx_buff = {0};
     for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle) {
+        if (i == vtx_id && point_clouds.items[i].handle) {
             vtx_buff = point_clouds.items[i];
         }
     }
 
     if (!vtx_buff.handle) {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", vtx_id);
         nob_return_defer(false);
     }
 
@@ -861,8 +861,7 @@ bool draw_point_cloud_adv(size_t id)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    Vk_Buffer dummy = {0};
-    if (!vk_draw(PIPELINE_POINT_CLOUD_ADV, vtx_buff, dummy, mvp))
+    if (!vk_draw_adv_point_cloud(tex_id, vtx_buff, mvp))
         nob_return_defer(false);
 
 defer:

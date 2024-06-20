@@ -191,6 +191,7 @@ bool vk_begin_drawing();
 bool vk_end_drawing();
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+bool vk_draw_adv_point_cloud(size_t tex_id, Vk_Buffer vtx_buff, Matrix mvp);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
 /* Utilities */
@@ -916,6 +917,55 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
         vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
     else
         vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+
+    return result;
+}
+
+bool vk_draw_adv_point_cloud(size_t tex_id, Vk_Buffer vtx_buff, Matrix mvp)
+{
+    bool result = true;
+
+    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]);
+    VkViewport viewport = {0};
+    viewport.width = (float)ctx.extent.width;
+    viewport.height =(float)ctx.extent.height;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {0};
+    scissor.extent = ctx.extent;
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+
+    vkCmdBindDescriptorSets(
+        cmd_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
+    );
+
+    for (size_t i = 0; i < ctx.pc_textures.count; i++) {
+        if (!ctx.pc_textures.items[i].active || tex_id != ctx.pc_textures.items[i].id) continue;
+        vkCmdBindDescriptorSets(
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
+            &ctx.pc_textures.items[i].descriptor_set, 0, NULL
+        );
+    }
+
+    float16 mat = MatrixToFloatV(mvp);
+    vkCmdPushConstants(
+        cmd_buffer,
+        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV],
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        sizeof(float16),
+        &mat
+    );
+
+    vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
 
     return result;
 }
