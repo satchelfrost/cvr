@@ -83,9 +83,7 @@ typedef struct {
 
 /* Uniform buffer object for advanced point cloud example */
 typedef struct {
-    float16 camera_mvp_1;
-    float16 camera_mvp_2;
-    float16 camera_mvp_3;
+    float16 camera_mvps[4];
     int camera_idx;
 } Point_Cloud_UBO;
 
@@ -954,22 +952,21 @@ bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
         nob_return_defer(false);
     }
 
-    Matrix mvps[3] = {0};
-    for (size_t i = 0; i < 3; i++) {
+    Matrix mvps[4] = {0};
+    for (size_t i = 0; i < 4; i++) {
         Matrix view = MatrixLookAt(
-            four_cameras[(cam_idx + i + 1) % 4].position,
-            four_cameras[(cam_idx + i + 1) % 4].target,
-            four_cameras[(cam_idx + i + 1) % 4].up
+            four_cameras[i].position,
+            four_cameras[i].target,
+            four_cameras[i].up
         );
-        Matrix proj = get_proj(four_cameras[(cam_idx + i + 1) % 4]);
+        Matrix proj = get_proj(four_cameras[i]);
         Matrix viewProj = MatrixMultiply(view, proj);
         mvps[i] = MatrixMultiply(model, viewProj);
     }
 
     if (adv_point_cloud.buff.handle) {
-        adv_point_cloud.ubo.camera_mvp_1 = MatrixToFloatV(mvps[0]);
-        adv_point_cloud.ubo.camera_mvp_2 = MatrixToFloatV(mvps[1]);
-        adv_point_cloud.ubo.camera_mvp_3 = MatrixToFloatV(mvps[2]);
+        for (size_t i = 0; i < 4; i++)
+            adv_point_cloud.ubo.camera_mvps[i] = MatrixToFloatV(mvps[i]);
         adv_point_cloud.ubo.camera_idx   = cam_idx;
         memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
     } else {

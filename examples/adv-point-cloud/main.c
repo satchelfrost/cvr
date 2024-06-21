@@ -95,13 +95,13 @@ defer:
     return result;
 }
 
-void log_cameras(Camera *four_cameras)
+void log_cameras(Camera *cameras, size_t count)
 {
-    for (size_t i = 0; i < 4; i++) {
-        Vector3 pos = four_cameras[i].position;
-        Vector3 up  = four_cameras[i].up;
-        Vector3 tg  = four_cameras[i].target;
-        float fov   = four_cameras[i].fovy;
+    for (size_t i = 0; i < count; i++) {
+        Vector3 pos = cameras[i].position;
+        Vector3 up  = cameras[i].up;
+        Vector3 tg  = cameras[i].target;
+        float fov   = cameras[i].fovy;
         nob_log(NOB_INFO, "Camera %d", i);
         nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
         nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
@@ -130,17 +130,10 @@ void log_controls()
 }
 
 Camera cameras[] = {
-    { // Camera for image view_4_ffmpeg.png
-        .position   = {-38.50, 15.30, -14.38},
+    { // Camera to rule all cameras
+        .position   = {38.54, 23.47, 42.09},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-18.10, 8.71, -7.94},
-        .fovy       = 45.0f,
-        .projection = PERSPECTIVE,
-    },
-    { // Camera for image view_3_ffmpeg.png
-        .position   = {12.24, 15.17, 69.39},
-        .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-6.66, 8.88, 64.07},
+        .target     = {25.18, 16.37, 38.97},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
@@ -155,6 +148,20 @@ Camera cameras[] = {
         .position   = {-54.02, 12.14, 22.01},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {-44.42, 9.74, 23.87},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    { // Camera for image view_3_ffmpeg.png
+        .position   = {12.24, 15.17, 69.39},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {-6.66, 8.88, 64.07},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    { // Camera for image view_4_ffmpeg.png
+        .position   = {-38.50, 15.30, -14.38},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {-18.10, 8.71, -7.94},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
@@ -193,9 +200,6 @@ int main()
     nob_da_free(lres.verts);
 
     /* settings & logging*/
-    Vector3 cube_pos = {0.0f, 0.0f, 0.0f}; // TODO: maybe get rid of this
-    float cube_speed = 7.0f;
-    float cube_rot = 0.0f;
     bool use_hres = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
@@ -208,10 +212,11 @@ int main()
     /* game loop */
     while (!window_should_close()) {
         log_fps();
+        float dt = get_frame_time();
 
         /* input */
         if (is_key_pressed(KEY_C)) {
-            cam_move_idx = (cam_move_idx + 1) % 4;
+            cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
             nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
         }
         if (is_key_pressed(KEY_V)) {
@@ -222,33 +227,20 @@ int main()
             nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
         }
         if (is_key_pressed(KEY_R)) use_hres = !use_hres;
-        if (is_key_pressed(KEY_P)) log_cameras(cameras);
+        if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
+        if (is_key_down(KEY_E)) camera_move_up(&cameras[cam_move_idx],  dt);
+        if (is_key_down(KEY_Q)) camera_move_up(&cameras[cam_move_idx], -dt);
+        if (is_key_down(KEY_LEFT_SHIFT) && is_key_pressed(KEY_B)) curr_tex = (curr_tex - 1 + NUM_IMGS) % NUM_IMGS;
+        else if (is_key_pressed(KEY_B)) curr_tex = (curr_tex + 1) % NUM_IMGS;
+        if (is_key_pressed(KEY_ONE))   curr_tex = 0;
+        if (is_key_pressed(KEY_TWO))   curr_tex = 3;
+        if (is_key_pressed(KEY_THREE)) curr_tex = 1;
+        if (is_key_pressed(KEY_FOUR))  curr_tex = 2;
         update_camera_free(&cameras[cam_move_idx]);
-
-        float dt = get_frame_time();
-        if (is_key_down(KEY_RIGHT) && is_key_down(KEY_LEFT_SHIFT))
-            cube_rot += dt;
-        else if (is_key_down(KEY_RIGHT))
-            cube_pos.x += cube_speed * dt;
-        if (is_key_down(KEY_LEFT)  && is_key_down(KEY_LEFT_SHIFT))
-            cube_rot -= dt;
-        else if (is_key_down(KEY_LEFT))
-            cube_pos.x -= cube_speed * dt;
-        if (is_key_down(KEY_DOWN)) cube_pos.z += cube_speed * dt;
-        if (is_key_down(KEY_UP))   cube_pos.z -= cube_speed * dt;
-        if (is_key_down(KEY_E))    camera_move_up(&cameras[cam_move_idx],  dt);
-        if (is_key_down(KEY_Q))    camera_move_up(&cameras[cam_move_idx], -dt);
-        if (is_key_pressed(KEY_B)) curr_tex = (curr_tex + 1) % NUM_IMGS;
 
         /* draw */
         begin_drawing(BLUE);
             begin_mode_3d(*camera);
-            push_matrix();
-                translate(cube_pos.x, cube_pos.y, cube_pos.z);;
-                rotate_y(cube_rot);
-                if (!draw_shape(SHAPE_CUBE)) return 1;
-            pop_matrix();
-
             /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
@@ -266,7 +258,7 @@ int main()
 
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
             if (!draw_point_cloud_adv(vtx_id, texs[curr_tex].id)) return 1;
-            update_cameras_ubo(cameras, cam_view_idx);
+            update_cameras_ubo(&cameras[1], curr_tex);
 
         end_mode_3d();
         end_drawing();
