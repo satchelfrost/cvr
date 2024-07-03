@@ -278,6 +278,6 @@ bool upload_point_cloud(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 bool draw_point_cloud(size_t id);
 bool draw_point_cloud_adv(size_t vtx_id, size_t tex_id);
-bool update_cameras_ubo(Camera *four_cameras, int cam_idx);
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx, int shader_mode);
 
 #endif // CVR_H_

@@ -1,6 +1,7 @@
 #include "cvr.h"
 #include "ext/nob.h"
 #include "geometry.h"
+#include <float.h>
 
 /* point cloud sizes */
 #define S  "5060224"
@@ -8,6 +9,14 @@
 #define L  "101204464"
 #define XL "506022320"
 #define NUM_IMGS 4
+#define SHADER_MODES 3
+/*
+* Shader Modes
+* -----
+* 0 - Progressive color based on number of cameras that can see a point
+* 1 - Single texture mode, i.e. texture from single cctv
+* 2 - Multi-texture mode
+*/
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -110,6 +119,24 @@ void log_cameras(Camera *cameras, size_t count)
     }
 }
 
+int get_closest_camera(Camera *cameras, size_t count)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    float shortest = FLT_MAX;
+    int shortest_idx = -1;
+    for (size_t i = 1; i < count; i++) {
+        Vector3 cctv_pos = cameras[i].position;
+        float distSqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        if (distSqr < shortest) {
+            shortest_idx = i - 1;
+            shortest = distSqr;
+        }
+    }
+    if (shortest_idx < 0) nob_log(NOB_ERROR, "Unknown camera index");
+
+    return shortest_idx;
+}
+
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
@@ -137,28 +164,28 @@ Camera cameras[] = {
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // Camera for image view_1_ffmpeg.png
+    { // cctv 1
         .position   = {25.20, 9.68, 38.50},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {20.30, 8.86, 37.39},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // Camera for image view_2_ffmpeg.png
+    { // cctv 2
         .position   = {-54.02, 12.14, 22.01},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {-44.42, 9.74, 23.87},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // Camera for image view_3_ffmpeg.png
+    { // cctv 3
         .position   = {12.24, 15.17, 69.39},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {-6.66, 8.88, 64.07},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // Camera for image view_4_ffmpeg.png
+    { // cctv 4
         .position   = {-38.50, 15.30, -14.38},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {-18.10, 8.71, -7.94},
@@ -208,12 +235,11 @@ int main()
     log_controls();
     nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
     nob_log(NOB_INFO, "viewing camera %d",  cam_view_idx);
+    int shader_mode = 0;
 
     /* game loop */
     while (!window_should_close()) {
         log_fps();
-        float dt = get_frame_time();
-
         /* input */
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
@@ -228,14 +254,7 @@ int main()
         }
         if (is_key_pressed(KEY_R)) use_hres = !use_hres;
         if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
-        if (is_key_down(KEY_E)) camera_move_up(&cameras[cam_move_idx],  dt);
-        if (is_key_down(KEY_Q)) camera_move_up(&cameras[cam_move_idx], -dt);
-        if (is_key_down(KEY_LEFT_SHIFT) && is_key_pressed(KEY_B)) curr_tex = (curr_tex - 1 + NUM_IMGS) % NUM_IMGS;
-        else if (is_key_pressed(KEY_B)) curr_tex = (curr_tex + 1) % NUM_IMGS;
-        if (is_key_pressed(KEY_ONE))   curr_tex = 0;
-        if (is_key_pressed(KEY_TWO))   curr_tex = 3;
-        if (is_key_pressed(KEY_THREE)) curr_tex = 1;
-        if (is_key_pressed(KEY_FOUR))  curr_tex = 2;
+        if (is_key_pressed(KEY_M)) shader_mode = (shader_mode + 1) % SHADER_MODES;
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
@@ -257,8 +276,10 @@ int main()
             rotate_x(-PI / 2);
 
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
+            curr_tex = get_closest_camera(cameras, NOB_ARRAY_LEN(cameras));
+            if (curr_tex < 0) return 1;
             if (!draw_point_cloud_adv(vtx_id, texs[curr_tex].id)) return 1;
-            update_cameras_ubo(&cameras[1], curr_tex);
+            update_cameras_ubo(&cameras[1], curr_tex, shader_mode);
 
         end_mode_3d();
         end_drawing();

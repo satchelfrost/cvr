@@ -85,6 +85,7 @@ typedef struct {
 typedef struct {
     float16 camera_mvps[4];
     int camera_idx;
+    int shader_mode;
 } Point_Cloud_UBO;
 
 typedef struct {
@@ -727,6 +728,8 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_A)) camera_move_right(camera,   -move_speed);
     if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);
     if (is_key_down(KEY_D)) camera_move_right(camera,    move_speed);
+    if (is_key_down(KEY_E)) camera_move_up(camera,  move_speed);
+    if (is_key_down(KEY_Q)) camera_move_up(camera, -move_speed);
 
     camera_move_to_target(camera, -get_mouse_wheel_move());
 }
@@ -940,7 +943,7 @@ void look_at(Camera camera)
         nob_log(NOB_ERROR, "no matrix available to translate");
 }
 
-bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx, int shader_mode)
 {
     bool result = true;
 
@@ -967,7 +970,8 @@ bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
     if (adv_point_cloud.buff.handle) {
         for (size_t i = 0; i < 4; i++)
             adv_point_cloud.ubo.camera_mvps[i] = MatrixToFloatV(mvps[i]);
-        adv_point_cloud.ubo.camera_idx   = cam_idx;
+        adv_point_cloud.ubo.camera_idx = cam_idx;
+        adv_point_cloud.ubo.shader_mode = shader_mode;
         memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
     } else {
         nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");
