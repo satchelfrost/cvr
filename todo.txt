@@ -1,3 +1,0 @@
-* Move shape stuff out of vk_ctx
-* Restructure so that only necessary items are in main include section (non-implementation) of header
-* Rename things so that they aren't prefixed with cvr_ in vk_ctx
