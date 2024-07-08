@@ -83,10 +83,9 @@ typedef struct {
 
 /* Uniform buffer object for advanced point cloud example */
 typedef struct {
-    float16 camera_mvp_1;
-    float16 camera_mvp_2;
-    float16 camera_mvp_3;
+    float16 camera_mvps[4];
     int camera_idx;
+    int shader_mode;
 } Point_Cloud_UBO;
 
 typedef struct {
@@ -564,7 +563,22 @@ Texture load_texture_from_image(Image img)
         .format   = img.format,
     };
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id))
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, false))
+        nob_log(NOB_ERROR, "unable to load texture");
+
+    return texture;
+}
+
+Texture load_pc_texture_from_image(Image img)
+{
+    Texture texture = {
+        .width    = img.width,
+        .height   = img.height,
+        .mipmaps  = img.mipmaps,
+        .format   = img.format,
+    };
+
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, true))
         nob_log(NOB_ERROR, "unable to load texture");
 
     return texture;
@@ -573,6 +587,11 @@ Texture load_texture_from_image(Image img)
 void unload_texture(Texture texture)
 {
     vk_unload_texture(texture.id);
+}
+
+void unload_pc_texture(Texture texture)
+{
+    vk_unload_pc_texture(texture.id);
 }
 
 bool draw_texture(Texture texture, Shape_Type shape_type)
@@ -643,6 +662,14 @@ void camera_move_right(Camera *camera, float distance)
     camera->target = Vector3Add(camera->target, right);
 }
 
+void camera_move_up(Camera *camera, float distance)
+{
+    Vector3 up = get_camera_up(camera);
+    up = Vector3Scale(up, distance);
+    camera->position = Vector3Add(camera->position, up);
+    camera->target = Vector3Add(camera->target, up);
+}
+
 Vector2 get_mouse_delta()
 {
     Vector2 delta = {
@@ -693,14 +720,16 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_L)) camera_yaw(camera,   -rot_speed);
     if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
 
-    float move_speed = CAMERA_MOVE_SPEED * get_frame_time();
+    float move_speed = CAMERA_MOVE_SPEED * ft;
     if (is_key_down(KEY_LEFT_SHIFT))
         move_speed *= 10.0f;
 
-    if (is_key_down(KEY_W)) camera_move_forward(camera, move_speed);
-    if (is_key_down(KEY_A)) camera_move_right(camera, -move_speed);
+    if (is_key_down(KEY_W)) camera_move_forward(camera,  move_speed);
+    if (is_key_down(KEY_A)) camera_move_right(camera,   -move_speed);
     if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);
-    if (is_key_down(KEY_D)) camera_move_right(camera, move_speed);
+    if (is_key_down(KEY_D)) camera_move_right(camera,    move_speed);
+    if (is_key_down(KEY_E)) camera_move_up(camera,  move_speed);
+    if (is_key_down(KEY_Q)) camera_move_up(camera, -move_speed);
 
     camera_move_to_target(camera, -get_mouse_wheel_move());
 }
@@ -798,13 +827,14 @@ defer:
     return result;
 }
 
-bool draw_point_cloud_adv(size_t id)
+bool draw_point_cloud_adv(size_t vtx_id, size_t tex_id)
 {
     bool result = true;
 
     if (!adv_point_cloud.buff.handle) {
         adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
         if (!vk_pc_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
+        if (!vk_pc_sampler_init())                  nob_return_defer(false);
     }
 
     if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])
@@ -813,13 +843,13 @@ bool draw_point_cloud_adv(size_t id)
 
     Vk_Buffer vtx_buff = {0};
     for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle) {
+        if (i == vtx_id && point_clouds.items[i].handle) {
             vtx_buff = point_clouds.items[i];
         }
     }
 
     if (!vtx_buff.handle) {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", vtx_id);
         nob_return_defer(false);
     }
 
@@ -832,8 +862,7 @@ bool draw_point_cloud_adv(size_t id)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    Vk_Buffer dummy = {0};
-    if (!vk_draw(PIPELINE_POINT_CLOUD_ADV, vtx_buff, dummy, mvp))
+    if (!vk_draw_adv_point_cloud(tex_id, vtx_buff, mvp))
         nob_return_defer(false);
 
 defer:
@@ -914,7 +943,7 @@ void look_at(Camera camera)
         nob_log(NOB_ERROR, "no matrix available to translate");
 }
 
-bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx, int shader_mode)
 {
     bool result = true;
 
@@ -926,23 +955,23 @@ bool update_cameras_ubo(Camera *four_cameras, int cam_idx)
         nob_return_defer(false);
     }
 
-    Matrix mvps[3] = {0};
-    for (size_t i = 0; i < 3; i++) {
+    Matrix mvps[4] = {0};
+    for (size_t i = 0; i < 4; i++) {
         Matrix view = MatrixLookAt(
-            four_cameras[(cam_idx + i + 1) % 4].position,
-            four_cameras[(cam_idx + i + 1) % 4].target,
-            four_cameras[(cam_idx + i + 1) % 4].up
+            four_cameras[i].position,
+            four_cameras[i].target,
+            four_cameras[i].up
         );
-        Matrix proj = get_proj(four_cameras[(cam_idx + i + 1) % 4]);
+        Matrix proj = get_proj(four_cameras[i]);
         Matrix viewProj = MatrixMultiply(view, proj);
         mvps[i] = MatrixMultiply(model, viewProj);
     }
 
     if (adv_point_cloud.buff.handle) {
-        adv_point_cloud.ubo.camera_mvp_1 = MatrixToFloatV(mvps[0]);
-        adv_point_cloud.ubo.camera_mvp_2 = MatrixToFloatV(mvps[1]);
-        adv_point_cloud.ubo.camera_mvp_3 = MatrixToFloatV(mvps[2]);
-        adv_point_cloud.ubo.camera_idx   = cam_idx;
+        for (size_t i = 0; i < 4; i++)
+            adv_point_cloud.ubo.camera_mvps[i] = MatrixToFloatV(mvps[i]);
+        adv_point_cloud.ubo.camera_idx = cam_idx;
+        adv_point_cloud.ubo.shader_mode = shader_mode;
         memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
     } else {
         nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");

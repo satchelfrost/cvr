@@ -239,6 +239,7 @@ void rotate_xyz(Vector3 angle);
 void rotate_zyx(Vector3 angle);
 void scale(float x, float y, float z);
 void look_at(Camera camera);
+void camera_move_up(Camera *camera, float distance);
 
 typedef struct {
     void *data;
@@ -266,14 +267,17 @@ typedef struct {
 } Buffer;
 
 Texture load_texture_from_image(Image img);
+Texture load_pc_texture_from_image(Image img);
 void unload_texture(Texture texture);
+void unload_pc_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
+bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 
 bool upload_point_cloud(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 bool draw_point_cloud(size_t id);
-bool draw_point_cloud_adv(size_t id);
-bool update_cameras_ubo(Camera *four_cameras, int cam_idx);
+bool draw_point_cloud_adv(size_t vtx_id, size_t tex_id);
+bool update_cameras_ubo(Camera *four_cameras, int cam_idx, int shader_mode);
 
 #endif // CVR_H_

@@ -1,12 +1,22 @@
 #include "cvr.h"
 #include "ext/nob.h"
 #include "geometry.h"
+#include <float.h>
 
 /* point cloud sizes */
 #define S  "5060224"
 #define M  "50602232"
 #define L  "101204464"
 #define XL "506022320"
+#define NUM_IMGS 4
+#define SHADER_MODES 3
+/*
+* Shader Modes
+* -----
+* 0 - Progressive color based on number of cameras that can see a point
+* 1 - Single texture mode, i.e. texture from single cctv
+* 2 - Multi-texture mode
+*/
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -94,65 +104,94 @@ defer:
     return result;
 }
 
-void log_cameras(Camera *four_cameras)
+void log_cameras(Camera *cameras, size_t count)
 {
-    for (size_t i = 0; i < 4; i++) {
-        Vector3 pos = four_cameras[i].position;
-        Vector3 up  = four_cameras[i].up;
-        Vector3 tg  = four_cameras[i].target;
+    for (size_t i = 0; i < count; i++) {
+        Vector3 pos = cameras[i].position;
+        Vector3 up  = cameras[i].up;
+        Vector3 tg  = cameras[i].target;
+        float fov   = cameras[i].fovy;
         nob_log(NOB_INFO, "Camera %d", i);
         nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
         nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
         nob_log(NOB_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
+        nob_log(NOB_INFO, "    fovy     %.2f", fov);
     }
+}
+
+int get_closest_camera(Camera *cameras, size_t count)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    float shortest = FLT_MAX;
+    int shortest_idx = -1;
+    for (size_t i = 1; i < count; i++) {
+        Vector3 cctv_pos = cameras[i].position;
+        float distSqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        if (distSqr < shortest) {
+            shortest_idx = i - 1;
+            shortest = distSqr;
+        }
+    }
+    if (shortest_idx < 0) nob_log(NOB_ERROR, "Unknown camera index");
+
+    return shortest_idx;
 }
 
 void log_controls()
 {
-    nob_log(NOB_INFO, "Controls:");
-    nob_log(NOB_INFO, "    SPACE - switch camera");
-    nob_log(NOB_INFO, "    KEY_R - change point cloud resolution");
-    nob_log(NOB_INFO, "    KEY_M - change camera mode");
-    nob_log(NOB_INFO, "    KEY_P - log camera info");
-}
-
-void log_camera_mode(bool pilot_curr_view)
-{
-    if (pilot_curr_view)
-        nob_log(NOB_INFO, "Camera mode: pilot current view");
-    else
-        nob_log(NOB_INFO, "Camera mode: pilot other camera view");
+    nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "| Movement |");
+    nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "    [W] - Forward");
+    nob_log(NOB_INFO, "    [A] - Left");
+    nob_log(NOB_INFO, "    [S] - Back");
+    nob_log(NOB_INFO, "    [D] - Right");
+    nob_log(NOB_INFO, "    Right Click + Mouse Movement = Rotation");
+    nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "| Hot keys |");
+    nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "    [C] - Change piloted camera");
+    nob_log(NOB_INFO, "    [R] - Resolution toggle");
+    nob_log(NOB_INFO, "    [V] - View change (also pilots current view)");
+    nob_log(NOB_INFO, "    [P] - Print camera info");
 }
 
 Camera cameras[] = {
-    {
-        .position   = {-62.01, 18.47, 16.65},
+    { // Camera to rule all cameras
+        .position   = {38.54, 23.47, 42.09},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-57.22, 17.16, 17.80},
+        .target     = {25.18, 16.37, 38.97},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    {
-        .position   = {-17.75, 5.40, 48.50},
+    { // cctv 1
+        .position   = {25.20, 9.68, 38.50},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-19.83, 3.38, 58.12},
+        .target     = {20.30, 8.86, 37.39},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    {
-        .position   = {-9.41, 4.64, 10.58},
+    { // cctv 2
+        .position   = {-54.02, 12.14, 22.01},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-5.92, -0.39, -8.49},
+        .target     = {-44.42, 9.74, 23.87},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    {
-        .position   = {-12.31, 8.61, 29.38},
+    { // cctv 3
+        .position   = {12.24, 15.17, 69.39},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {8.19, 1.28, 34.59},
+        .target     = {-6.66, 8.88, 64.07},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
-    }
+    },
+    { // cctv 4
+        .position   = {-38.50, 15.30, -14.38},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {-18.10, 8.71, -7.94},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
 };
 
 int main()
@@ -162,10 +201,14 @@ int main()
     if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
     if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
-    Image img = load_image("res/out.png");
-    if (!img.data) {
-        nob_log(NOB_ERROR, "failed to load png file");
-        return 1;
+    Image imgs[NUM_IMGS] = {0};
+    for (size_t i = 0; i < NUM_IMGS; i++) {
+        const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
+        imgs[i] = load_image(img_name);
+        if (!imgs[i].data) {
+            nob_log(NOB_ERROR, "failed to load png file %s", img_name);
+            return 1;
+        }
     }
 
     /* initialize window and Vulkan */
@@ -173,51 +216,50 @@ int main()
     set_target_fps(60);
 
     /* upload resources to GPU */
-    Texture tex = load_texture_from_image(img);
-    free(img.data);
+    Texture texs[NUM_IMGS] = {0};
+    for (size_t i = 0; i < NUM_IMGS; i++) {
+        texs[i] = load_pc_texture_from_image(imgs[i]);
+        free(imgs[i].data);
+    }
     if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
     if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
+    /* settings & logging*/
     bool use_hres = false;
-    int cam_idx = 0;
-    bool pilot_curr_view = true;
-    int cam_move_idx = 1;
-    Camera *camera = &cameras[cam_idx];
+    int cam_view_idx = 0;
+    int cam_move_idx = 0;
+    int curr_tex = 0;
+    Camera *camera = &cameras[cam_view_idx];
     log_controls();
-    log_camera_mode(pilot_curr_view);
-    while (!window_should_close()) {
-        log_fps();
+    nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
+    nob_log(NOB_INFO, "viewing camera %d",  cam_view_idx);
+    int shader_mode = 0;
 
+    /* game loop */
+    while (!window_should_close()) {
+        // log_fps();
         /* input */
-        if (is_key_pressed(KEY_SPACE)) {
-            if (pilot_curr_view) {
-                cam_idx = (cam_idx + 1) % NOB_ARRAY_LEN(cameras);
-                camera = &cameras[cam_idx];
-            } else {
-                cam_move_idx = (cam_move_idx + 1) % 4;
-            }
+        if (is_key_pressed(KEY_C)) {
+            cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
+            nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
+        }
+        if (is_key_pressed(KEY_V)) {
+            cam_view_idx = (cam_view_idx + 1) % NOB_ARRAY_LEN(cameras);
+            cam_move_idx = cam_view_idx;
+            camera = &cameras[cam_view_idx];
+            nob_log(NOB_INFO, "viewing camera %d", cam_view_idx);
+            nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
         }
         if (is_key_pressed(KEY_R)) use_hres = !use_hres;
-        if (is_key_pressed(KEY_P)) log_cameras(cameras);
-        if (is_key_pressed(KEY_M)) {
-            pilot_curr_view = !pilot_curr_view;
-            log_camera_mode(pilot_curr_view);
-        }
-
-        if (pilot_curr_view)
-            update_camera_free(camera);
-        else
-            update_camera_free(&cameras[cam_move_idx]);
+        if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
+        if (is_key_pressed(KEY_M)) shader_mode = (shader_mode + 1) % SHADER_MODES;
+        update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
         begin_drawing(BLUE);
-            if (pilot_curr_view)
-                begin_mode_3d(*camera);
-            else
-                begin_mode_3d(cameras[0]);
-
+            begin_mode_3d(*camera);
             /* draw the other cameras */
             for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
@@ -228,20 +270,23 @@ int main()
                     rotate_z(PI);
                     translate(0.0f, 0.0f, 0.5f);
                     scale(1.0f * 1.333f * 0.75, 1.0f * 0.75, 1.0f * 0.75);
-                    if (!draw_texture(tex, SHAPE_QUAD)) return 1;
                 pop_matrix();
             }
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-            size_t id = (use_hres) ? hres.id : lres.id;
-            if (!draw_point_cloud_adv(id)) return 1;
-            update_cameras_ubo(cameras, cam_idx);
+
+            size_t vtx_id = (use_hres) ? hres.id : lres.id;
+            curr_tex = get_closest_camera(cameras, NOB_ARRAY_LEN(cameras));
+            if (curr_tex < 0) return 1;
+            if (!draw_point_cloud_adv(vtx_id, texs[curr_tex].id)) return 1;
+            update_cameras_ubo(&cameras[1], curr_tex, shader_mode);
 
         end_mode_3d();
         end_drawing();
     }
 
-    unload_texture(tex);
+    /* cleanup */
+    for (size_t i = 0; i < NUM_IMGS; i++) unload_pc_texture(texs[i]);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
     close_window();
