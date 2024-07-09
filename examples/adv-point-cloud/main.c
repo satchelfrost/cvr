@@ -9,14 +9,6 @@
 #define L  "101204464"
 #define XL "506022320"
 #define NUM_IMGS 4
-#define SHADER_MODES 3
-/*
-* Shader Modes
-* -----
-* 0 - Progressive color based on number of cameras that can see a point
-* 1 - Single texture mode, i.e. texture from single cctv
-* 2 - Multi-texture mode
-*/
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -156,6 +148,35 @@ void log_controls()
     nob_log(NOB_INFO, "    [P] - Print camera info");
 }
 
+typedef enum {
+    SHADER_MODE_BASE_MODEL,
+    SHADER_MODE_PROGRESSIVE_COLOR,
+    SHADER_MODE_SINGLE_TEX,
+    SHADER_MODE_MULTI_TEX,
+    SHADER_MODE_COUNT,
+} Shader_Mode;
+
+void log_shader_mode(Shader_Mode mode)
+{
+    switch (mode) {
+    case SHADER_MODE_BASE_MODEL:
+        nob_log(NOB_INFO, "Shader mode: base model");
+        break;
+    case SHADER_MODE_PROGRESSIVE_COLOR:
+        nob_log(NOB_INFO, "Shader mode: progressive color");
+        break;
+    case SHADER_MODE_SINGLE_TEX:
+        nob_log(NOB_INFO, "Shader mode: single texture");
+        break;
+    case SHADER_MODE_MULTI_TEX:
+        nob_log(NOB_INFO, "Shader mode: multi-texture");
+        break;
+    default:
+        nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
+        break;
+    }
+}
+
 Camera cameras[] = {
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
@@ -254,7 +275,10 @@ int main()
         }
         if (is_key_pressed(KEY_R)) use_hres = !use_hres;
         if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
-        if (is_key_pressed(KEY_M)) shader_mode = (shader_mode + 1) % SHADER_MODES;
+        if (is_key_pressed(KEY_M)) {
+            shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
+            log_shader_mode(shader_mode);
+        }
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
