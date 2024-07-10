@@ -10,7 +10,10 @@ layout(location = 9) in vec3 ndcs[4];
 
 
 layout(location = 0) out vec4 out_color;
-layout(set = 1, binding = 0) uniform sampler2D tex_sampler;
+layout(set = 1, binding = 0) uniform sampler2D tex_sampler_0;
+layout(set = 1, binding = 1) uniform sampler2D tex_sampler_1;
+layout(set = 1, binding = 2) uniform sampler2D tex_sampler_2;
+layout(set = 1, binding = 3) uniform sampler2D tex_sampler_3;
 
 void main()
 {
@@ -18,38 +21,53 @@ void main()
     if (dist > 1.0)
         discard;
 
-    /* Make the texture get the color of camera that can see it */
-    //vec2 uv_0 = (ndcs[0].xy * 0.5) + 0.5;
-    //if (0.0 < uv_0.x && uv_0.x < 1.0 && 0.0 < uv_0.y && uv_0.y < 1.0 && cam_sees[0] > 0)
-    //    out_color = vec4(1.0, 0.0, 0.0, 1.0);
-    //vec2 uv_1 = (ndcs[1].xy * 0.5) + 0.5;
-    //if (0.0 < uv_1.x && uv_1.x < 1.0 && 0.0 < uv_1.y && uv_1.y < 1.0 && cam_sees[1] > 0)
-    //    out_color = vec4(1.0, 1.0, 0.0, 1.0);
-    //vec2 uv_2 = (ndcs[2].xy * 0.5) + 0.5;
-    //if (0.0 < uv_2.x && uv_2.x < 1.0 && 0.0 < uv_2.y && uv_2.y < 1.0 && cam_sees[2] > 0)
-    //    out_color = vec4(0.0, 1.0, 0.0, 1.0);
-    //vec2 uv_3 = (ndcs[3].xy * 0.5) + 0.5;
-    //if (0.0 < uv_3.x && uv_3.x < 1.0 && 0.0 < uv_3.y && uv_3.y < 1.0 && cam_sees[3] > 0)
-    //    out_color = vec4(1.0, 0.0, 1.0, 1.0);
-
-    if (cam_sees[0] > 0)
-        out_color = vec4(1.0, 0.0, 0.0, 1.0);
-    if (cam_sees[1] > 0)
-        out_color = vec4(1.0, 1.0, 0.0, 1.0);
-    if (cam_sees[2] > 0)
-        out_color = vec4(0.0, 1.0, 0.0, 1.0);
-    if (cam_sees[3] > 0)
-        out_color = vec4(1.0, 0.0, 1.0, 1.0);
+    vec2 uv_0 = (ndcs[0].xy * 0.5) + 0.5;
+    vec2 uv_1 = (ndcs[1].xy * 0.5) + 0.5;
+    vec2 uv_2 = (ndcs[2].xy * 0.5) + 0.5;
+    vec2 uv_3 = (ndcs[3].xy * 0.5) + 0.5;
+    vec4 tex_color_0 = textureLod(tex_sampler_0, uv_0, 0.0);
+    vec4 tex_color_1 = textureLod(tex_sampler_1, uv_1, 0.0);
+    vec4 tex_color_2 = textureLod(tex_sampler_2, uv_2, 0.0);
+    vec4 tex_color_3 = textureLod(tex_sampler_3, uv_3, 0.0);
+    if (cam_sees[0] > 0) out_color = tex_color_0;
+    if (cam_sees[1] > 0) out_color = tex_color_1;
+    if (cam_sees[2] > 0) out_color = tex_color_1;
+    if (cam_sees[3] > 0) out_color = tex_color_2;
 
     int cam_count = cam_sees[0] + cam_sees[1] + cam_sees[2] + cam_sees[3];
-    if (cam_count > 0) {
-        vec2 uv = (ndcs[closest_cam_idx].xy * 0.5) + 0.5;
-        vec4 tex_color = textureLod(tex_sampler, uv, 0.0);
-        if (0.0 < uv.x && uv.x < 1.0 && 0.0 < uv.y && uv.y < 1.0 && cam_sees[closest_cam_idx] > 0)
-            out_color = tex_color;
-
+    if (cam_count > 1) {
+        if (cam_sees[closest_cam_idx] > 0) {
+            if (closest_cam_idx == 0)
+                out_color = tex_color_0;
+            else if (closest_cam_idx == 1)
+                out_color = tex_color_1;
+            else if (closest_cam_idx == 2)
+                out_color = tex_color_2;
+            else
+                out_color = tex_color_3;
+        } else {
+            if (cam_sees[0] > 0)
+                out_color = tex_color_0;
+            else if (cam_sees[1] > 0)
+                out_color = tex_color_1;
+            else if (cam_sees[2] > 0)
+                out_color = tex_color_2;
+            else if (cam_sees[3] > 0)
+                out_color = tex_color_3;
+        }
     } else {
-        out_color = vec4(model_color, 1.0);
+        if (cam_count == 1) {
+            if (cam_sees[0] > 0)
+                out_color = tex_color_0;
+            else if (cam_sees[1] > 0)
+                out_color = tex_color_1;
+            else if (cam_sees[2] > 0)
+                out_color = tex_color_2;
+            else if (cam_sees[3] > 0)
+                out_color = tex_color_3;
+        } else {
+            out_color = vec4(model_color, 1.0);
+        }
     }
 
 

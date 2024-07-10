@@ -129,6 +129,35 @@ int get_closest_camera(Camera *cameras, size_t count)
     return shortest_idx;
 }
 
+typedef struct {
+    int idx;
+    float dist_sqr;
+} Distance_Sqr_Idx;
+
+int dist_sqr_compare(const void *d1, const void *d2)
+{
+    if (((Distance_Sqr_Idx*)d1)->dist_sqr < ((Distance_Sqr_Idx*)d2)->dist_sqr)
+        return -1;
+    else if (((Distance_Sqr_Idx*)d2)->dist_sqr < ((Distance_Sqr_Idx*)d1)->dist_sqr)
+        return 1;
+    else
+        return 0;
+}
+
+void log_sorted_closest_cameras(Camera *cameras, size_t count)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    Distance_Sqr_Idx sqr_distances[4] = {0};
+    for (size_t i = 1; i < count; i++) {
+        Vector3 cctv_pos = cameras[i].position;
+        sqr_distances[i - 1].dist_sqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        sqr_distances[i - 1].idx = i - 1;
+    }
+
+    qsort(sqr_distances, NOB_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
+    nob_log(NOB_INFO, "cam idx order: %d %d %d %d", sqr_distances[0], sqr_distances[1], sqr_distances[2], sqr_distances[3]);
+}
+
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
@@ -279,6 +308,7 @@ int main()
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
         }
+        if (is_key_pressed(KEY_S)) log_sorted_closest_cameras(cameras, NOB_ARRAY_LEN(cameras));
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */

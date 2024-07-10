@@ -945,15 +945,24 @@ bool vk_draw_adv_point_cloud(size_t tex_id, Vk_Buffer vtx_buff, Matrix mvp)
         ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
     );
 
-    for (size_t i = 0; i < ctx.pc_textures.count; i++) {
-        if (!ctx.pc_textures.items[i].active || tex_id != ctx.pc_textures.items[i].id) continue;
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
-            &ctx.pc_textures.items[i].descriptor_set, 0, NULL
-        );
-    }
+    // for (size_t i = 0; i < ctx.pc_textures.count; i++) {
+    //     if (!ctx.pc_textures.items[i].active || tex_id != ctx.pc_textures.items[i].id) continue;
+    //     vkCmdBindDescriptorSets(
+    //         cmd_buffer,
+    //         VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //         ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
+    //         &ctx.pc_textures.items[i].descriptor_set, 0, NULL
+    //     );
+    // }
+
+    (void) tex_id;
+    vkCmdBindDescriptorSets(
+        cmd_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
+        /* TODO: for now just use the first texture to store the descriptor set for all textures */
+        &ctx.pc_textures.items[0].descriptor_set, 0, NULL
+    );
 
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
@@ -1176,10 +1185,10 @@ bool vk_tex_ubo_init(Vk_Buffer *buff)
 
 bool vk_pc_ubo_init(Vk_Buffer *buff)
 {
-    if (!vk_ubo_init(buff))                              return false;
-    if (!vk_pc_ubo_descriptor_set_layout_init())         return false;
-    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_UBO))  return false;
-    if (!vk_pc_ubo_descriptor_set_init(buff))            return false;
+    if (!vk_ubo_init(buff))                             return false;
+    if (!vk_pc_ubo_descriptor_set_layout_init())        return false;
+    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_UBO)) return false;
+    if (!vk_pc_ubo_descriptor_set_init(buff))           return false;
 
     return true;
 }
@@ -1307,6 +1316,19 @@ bool vk_sampler_descriptor_set_layout_init(Set_Layout_Type layout_type)
         .pBindings = &set_layout_binding,
     };
 
+    /* handle the advanced point cloud */
+    VkDescriptorSetLayoutBinding bindings[4] = {};
+    if (layout_type == SET_LAYOUT_POINT_CLOUD_SAMPLER) {
+        for (size_t i = 0; i < NOB_ARRAY_LEN(bindings); i++) {
+            bindings[i].binding = i;
+            bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            bindings[i].descriptorCount = 1;
+            bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
+        layout_ci.pBindings = bindings;
+        layout_ci.bindingCount = NOB_ARRAY_LEN(bindings);
+    }
+
     VkDescriptorSetLayout *layout = &ctx.set_layouts[layout_type];
     if (!vk_ok(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
         nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
@@ -1425,12 +1447,24 @@ bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool
     alloc.descriptorPool = ctx.descriptor_pools[pool_type];
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &ctx.set_layouts[layout_type];
-    for (size_t i = 0; i < textures.count; i++) {
-        VkDescriptorSet *set = &textures.items[i].descriptor_set;
+
+
+    if (layout_type == SET_LAYOUT_POINT_CLOUD_SAMPLER) {
+        /* TODO: for now just use the first texture to store the descriptor set for all textures */
+        VkDescriptorSet *set = &textures.items[0].descriptor_set;
         result = vk_ok(vkAllocateDescriptorSets(ctx.device, &alloc, set));
         if (!result) {
             nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
             goto defer;
+        }
+    } else {
+        for (size_t i = 0; i < textures.count; i++) {
+            VkDescriptorSet *set = &textures.items[i].descriptor_set;
+            result = vk_ok(vkAllocateDescriptorSets(ctx.device, &alloc, set));
+            if (!result) {
+                nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
+                goto defer;
+            }
         }
     }
 
@@ -1442,15 +1476,31 @@ bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
     };
-    for (size_t tex = 0; tex < textures.count; tex++) {
-        VkDescriptorImageInfo img_info = {
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView   = textures.items[tex].view,
-            .sampler     = textures.items[tex].sampler,
-        };
-        write.pImageInfo = &img_info;
-        write.dstSet = textures.items[tex].descriptor_set;
-        vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
+    if (layout_type == SET_LAYOUT_POINT_CLOUD_SAMPLER) {
+        for (size_t tex = 0; tex < textures.count; tex++) {
+            VkDescriptorImageInfo img_info = {
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .imageView   = textures.items[tex].view,
+                .sampler     = textures.items[tex].sampler,
+            };
+            write.pImageInfo = &img_info;
+            write.dstBinding = tex;
+
+            /* TODO: for now just use the first texture to store the descriptor set for all textures */
+            write.dstSet = textures.items[0].descriptor_set;
+            vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
+        }
+    } else {
+        for (size_t tex = 0; tex < textures.count; tex++) {
+            VkDescriptorImageInfo img_info = {
+                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .imageView   = textures.items[tex].view,
+                .sampler     = textures.items[tex].sampler,
+            };
+            write.pImageInfo = &img_info;
+            write.dstSet = textures.items[tex].descriptor_set;
+            vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
+        }
     }
 
 defer:
