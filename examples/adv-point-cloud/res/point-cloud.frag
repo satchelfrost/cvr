@@ -31,19 +31,22 @@ void main()
     tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
     tex_colors[3] = textureLod(tex_sampler_3, uv_3, 0.0);
 
-    if (shader_mode == 0) {
+    switch (shader_mode) {
+    case 0:
         out_color = vec4(model_color, 1.0);
-    } else if (shader_mode == 1) {
+        break;
+    case 1:
         out_color = vec4(debug_color, 1.0);
-    } else if (shader_mode == 2) {
+        break;
+    case 2:
         out_color = (cam_sees[cam_order[0]] > 0) ? tex_colors[cam_order[0]] : vec4(model_color, 1.0);
-    } else {
+        break;
+    case 3:
         if (cam_sees[cam_order[3]] > 0) out_color = tex_colors[cam_order[3]];
         if (cam_sees[cam_order[2]] > 0) out_color = tex_colors[cam_order[2]];
         if (cam_sees[cam_order[1]] > 0) out_color = tex_colors[cam_order[1]];
         if (cam_sees[cam_order[0]] > 0) out_color = tex_colors[cam_order[0]];
         int cam_count = cam_sees[0] + cam_sees[1] + cam_sees[2] + cam_sees[3];
-        if (cam_count == 0)
-            out_color = vec4(model_color, 1.0);
+        if (cam_count == 0) out_color = vec4(model_color, 1.0);
     }
 }
