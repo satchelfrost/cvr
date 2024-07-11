@@ -84,8 +84,12 @@ typedef struct {
 /* Uniform buffer object for advanced point cloud example */
 typedef struct {
     float16 camera_mvps[4];
-    int camera_idx;
+    int idx;
     int shader_mode;
+    int cam_0;
+    int cam_1;
+    int cam_2;
+    int cam_3;
 } Point_Cloud_UBO;
 
 typedef struct {
@@ -827,7 +831,7 @@ defer:
     return result;
 }
 
-bool draw_point_cloud_adv(size_t vtx_id, size_t tex_id)
+bool draw_point_cloud_adv(size_t vtx_id)
 {
     bool result = true;
 
@@ -862,7 +866,7 @@ bool draw_point_cloud_adv(size_t vtx_id, size_t tex_id)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    if (!vk_draw_adv_point_cloud(tex_id, vtx_buff, mvp))
+    if (!vk_draw_adv_point_cloud(vtx_buff, mvp))
         nob_return_defer(false);
 
 defer:
@@ -943,7 +947,7 @@ void look_at(Camera camera)
         nob_log(NOB_ERROR, "no matrix available to translate");
 }
 
-bool update_cameras_ubo(Camera *four_cameras, int cam_idx, int shader_mode)
+bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order)
 {
     bool result = true;
 
@@ -968,10 +972,15 @@ bool update_cameras_ubo(Camera *four_cameras, int cam_idx, int shader_mode)
     }
 
     if (adv_point_cloud.buff.handle) {
-        for (size_t i = 0; i < 4; i++)
+        for (size_t i = 0; i < 4; i++) {
             adv_point_cloud.ubo.camera_mvps[i] = MatrixToFloatV(mvps[i]);
-        adv_point_cloud.ubo.camera_idx = cam_idx;
+        }
+        adv_point_cloud.ubo.cam_0 = cam_order[0];
+        adv_point_cloud.ubo.cam_1 = cam_order[1];
+        adv_point_cloud.ubo.cam_2 = cam_order[2];
+        adv_point_cloud.ubo.cam_3 = cam_order[3];
         adv_point_cloud.ubo.shader_mode = shader_mode;
+        adv_point_cloud.ubo.idx = cam_order[3];
         memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
     } else {
         nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");

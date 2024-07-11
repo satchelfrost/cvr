@@ -191,7 +191,7 @@ bool vk_begin_drawing();
 bool vk_end_drawing();
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-bool vk_draw_adv_point_cloud(size_t tex_id, Vk_Buffer vtx_buff, Matrix mvp);
+bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
 /* Utilities */
@@ -921,7 +921,7 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     return result;
 }
 
-bool vk_draw_adv_point_cloud(size_t tex_id, Vk_Buffer vtx_buff, Matrix mvp)
+bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp)
 {
     bool result = true;
 
@@ -945,17 +945,6 @@ bool vk_draw_adv_point_cloud(size_t tex_id, Vk_Buffer vtx_buff, Matrix mvp)
         ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
     );
 
-    // for (size_t i = 0; i < ctx.pc_textures.count; i++) {
-    //     if (!ctx.pc_textures.items[i].active || tex_id != ctx.pc_textures.items[i].id) continue;
-    //     vkCmdBindDescriptorSets(
-    //         cmd_buffer,
-    //         VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //         ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
-    //         &ctx.pc_textures.items[i].descriptor_set, 0, NULL
-    //     );
-    // }
-
-    (void) tex_id;
     vkCmdBindDescriptorSets(
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
