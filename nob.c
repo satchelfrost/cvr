@@ -299,7 +299,6 @@ void log_usage(const char *program)
     nob_log(NOB_INFO, "    -e <example_name> optional example");
     nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
     nob_log(NOB_INFO, "    -l list available examples");
-    nob_log(NOB_INFO, "    -k disable copying res folder for speed");
 }
 
 void print_examples()
@@ -314,21 +313,35 @@ bool create_comp_db()
 {
     bool result = true;
     Nob_File_Paths paths = {0};
-    nob_read_entire_dir("build/compilation_database", &paths);
+    nob_read_entire_dir("./build/compilation_database", &paths);
     Nob_String_Builder sb = {0};
     nob_sb_append_cstr(&sb, "[\n");
     for (size_t i = 0; i < paths.count; i++) {
         if (strstr(paths.items[i], ".json") != 0) {
-            const char *path = nob_temp_sprintf("build/compilation_database/%s", paths.items[i]);
+            const char *path = nob_temp_sprintf("./build/compilation_database/%s", paths.items[i]);
             if (!nob_read_entire_file(path, &sb)) nob_return_defer(false);
         }
     }
     sb.count -= 2; // erase last two chars from file to be json compliant for newly concatenated file
     nob_sb_append_cstr(&sb, "\n]");
     nob_sb_append_null(&sb);
-    if (!nob_write_entire_file("build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
+    if (!nob_write_entire_file("./build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
 
     nob_log(NOB_INFO, "created compilation database, you may need to restart your LSP");
+
+defer:
+    return result;
+}
+
+bool cd(const char *dir)
+{
+    bool result = true;
+
+    nob_log(NOB_INFO, "changing directory to %s", dir);
+    if (chdir(dir) != 0) {
+        nob_log(NOB_ERROR, "Cannod cd to %s", dir);
+        nob_return_defer(false);
+    }
 
 defer:
     return result;
@@ -340,7 +353,6 @@ int main(int argc, char **argv)
 
     Nob_Cmd cmd = {0};
     const char *program = nob_shift_args(&argc, &argv);
-    bool copy = true; // default is to copy res directory, -k to disable
     char *example = NULL;
     while (argc > 0) {
         char flag;
@@ -370,9 +382,6 @@ int main(int argc, char **argv)
             case 'l':
                 print_examples();
                 return 0;
-                break;
-            case 'k':
-                copy = false;
                 break;
             default:
                 nob_log(NOB_ERROR, "unrecognized flag %c", flag);
@@ -413,47 +422,45 @@ int main(int argc, char **argv)
             return 1;
         }
         const char *example_path = nob_temp_sprintf("examples/%s", examples[i].name);
-        const char *example_res  = nob_temp_sprintf("%s/res", example_path);
-        const char *build_res    = nob_temp_sprintf("./build/%s/res", example_path);
         if (!build_example(&examples[i])) return 1;
         if (!compile_shaders(example_path, examples[i].shaders)) return 1;
 
-        /* copy res folder to root so example can be run from root */
-        nob_mkdir_if_not_exists("res");
-        if (copy) {
-            Nob_File_Paths paths = {0};
-            nob_read_entire_dir(example_res, &paths);
-            for (size_t i = 0; i < paths.count; i++) {
-                const char *file_name = paths.items[i];
-                if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0||
-                        strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
-                    continue;
+        /* copy resources over if the files do not exist */
+        const char *example_res = nob_temp_sprintf("%s/res", example_path);
+        const char *build_res   = nob_temp_sprintf("./build/%s/res", example_path);
+        nob_mkdir_if_not_exists(build_res);
+        Nob_File_Paths paths = {0};
+        nob_read_entire_dir(example_res, &paths);
+        for (size_t i = 0; i < paths.count; i++) {
+            const char *file_name = paths.items[i];
+            if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0 ||
+                strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
+                continue;
 
-                const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
-                const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+            const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
+            const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+
+            //  0 - file does not exist
+            //  1 - file exists
+            // -1 - error while checking if file exists. The error is logged
+            int ret = nob_file_exists(dst_path);
+            if (ret == 0) {
                 if (!nob_copy_file(src_path, dst_path)) return 1;
-            }
-            if (!nob_copy_directory_recursively(build_res, "res")) return 1;
-        } else {
-            /* always make sure that shaders get copied */
-            Nob_File_Paths paths = {0};
-            nob_read_entire_dir(build_res, &paths);
-            for (size_t i = 0; i < paths.count; i++) {
-                const char *file_name = paths.items[i];
-                if (strstr(file_name, ".spv")) {
-                    const char *src_path = nob_temp_sprintf("%s/%s", build_res, file_name);
-                    const char *dst_path = nob_temp_sprintf("res/%s", file_name);
-                    if (!nob_copy_file(src_path, dst_path)) return 1;
-                }
+            } else if (ret == -1) {
+                nob_log(NOB_ERROR, "error while checking %s", src_path);
+                return 1;
             }
         }
 
         /* run example after building */
         cmd.count = 0;
         nob_log(NOB_INFO, "running example %s", example);
-        const char *build_path = nob_temp_sprintf("build/%s/%s", example_path, examples[i].name);
-        nob_cmd_append(&cmd, build_path);
+        const char *example_bin_path = nob_temp_sprintf("./build/%s", example_path);
+        if (!cd(example_bin_path)) return 1;
+        const char *bin = nob_temp_sprintf("./%s", examples[i].name);
+        nob_cmd_append(&cmd, bin);
         if (!nob_cmd_run_sync(cmd)) return 1;
+        if (!cd("../../../")) return 1;
     } else {
         nob_log(NOB_INFO, "building all examples");
         for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {

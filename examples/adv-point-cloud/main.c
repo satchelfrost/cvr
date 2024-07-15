@@ -9,14 +9,6 @@
 #define L  "101204464"
 #define XL "506022320"
 #define NUM_IMGS 4
-#define SHADER_MODES 3
-/*
-* Shader Modes
-* -----
-* 0 - Progressive color based on number of cameras that can see a point
-* 1 - Single texture mode, i.e. texture from single cctv
-* 2 - Multi-texture mode
-*/
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -137,6 +129,37 @@ int get_closest_camera(Camera *cameras, size_t count)
     return shortest_idx;
 }
 
+typedef struct {
+    int idx;
+    float dist_sqr;
+} Distance_Sqr_Idx;
+
+int dist_sqr_compare(const void *d1, const void *d2)
+{
+    if (((Distance_Sqr_Idx*)d1)->dist_sqr < ((Distance_Sqr_Idx*)d2)->dist_sqr)
+        return -1;
+    else if (((Distance_Sqr_Idx*)d2)->dist_sqr < ((Distance_Sqr_Idx*)d1)->dist_sqr)
+        return 1;
+    else
+        return 0;
+}
+
+/* returns the camera indices in distance sorted order */
+void get_cam_order(Camera *cameras, size_t count, int *cam_order, size_t cam_order_count)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    Distance_Sqr_Idx sqr_distances[4] = {0};
+    for (size_t i = 1; i < count; i++) {
+        Vector3 cctv_pos = cameras[i].position;
+        sqr_distances[i - 1].dist_sqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        sqr_distances[i - 1].idx = i - 1;
+    }
+
+    qsort(sqr_distances, NOB_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
+    for (size_t i = 0; i < cam_order_count; i++)
+        cam_order[i] = sqr_distances[i].idx;
+}
+
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
@@ -154,6 +177,35 @@ void log_controls()
     nob_log(NOB_INFO, "    [R] - Resolution toggle");
     nob_log(NOB_INFO, "    [V] - View change (also pilots current view)");
     nob_log(NOB_INFO, "    [P] - Print camera info");
+}
+
+typedef enum {
+    SHADER_MODE_BASE_MODEL,
+    SHADER_MODE_PROGRESSIVE_COLOR,
+    SHADER_MODE_SINGLE_TEX,
+    SHADER_MODE_MULTI_TEX,
+    SHADER_MODE_COUNT,
+} Shader_Mode;
+
+void log_shader_mode(Shader_Mode mode)
+{
+    switch (mode) {
+    case SHADER_MODE_BASE_MODEL:
+        nob_log(NOB_INFO, "Shader mode: base model");
+        break;
+    case SHADER_MODE_PROGRESSIVE_COLOR:
+        nob_log(NOB_INFO, "Shader mode: progressive color");
+        break;
+    case SHADER_MODE_SINGLE_TEX:
+        nob_log(NOB_INFO, "Shader mode: single texture");
+        break;
+    case SHADER_MODE_MULTI_TEX:
+        nob_log(NOB_INFO, "Shader mode: multi-texture");
+        break;
+    default:
+        nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
+        break;
+    }
 }
 
 Camera cameras[] = {
@@ -230,16 +282,15 @@ int main()
     bool use_hres = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
-    int curr_tex = 0;
     Camera *camera = &cameras[cam_view_idx];
     log_controls();
     nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
     nob_log(NOB_INFO, "viewing camera %d",  cam_view_idx);
-    int shader_mode = 0;
+    Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
+    int cam_order[4] = {0};
 
     /* game loop */
     while (!window_should_close()) {
-        // log_fps();
         /* input */
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
@@ -254,7 +305,10 @@ int main()
         }
         if (is_key_pressed(KEY_R)) use_hres = !use_hres;
         if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
-        if (is_key_pressed(KEY_M)) shader_mode = (shader_mode + 1) % SHADER_MODES;
+        if (is_key_pressed(KEY_M)) {
+            shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
+            log_shader_mode(shader_mode);
+        }
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
@@ -276,10 +330,9 @@ int main()
             rotate_x(-PI / 2);
 
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
-            curr_tex = get_closest_camera(cameras, NOB_ARRAY_LEN(cameras));
-            if (curr_tex < 0) return 1;
-            if (!draw_point_cloud_adv(vtx_id, texs[curr_tex].id)) return 1;
-            update_cameras_ubo(&cameras[1], curr_tex, shader_mode);
+            if (!draw_point_cloud_adv(vtx_id)) return 1;
+            get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
+            update_cameras_ubo(&cameras[1], shader_mode, cam_order);
 
         end_mode_3d();
         end_drawing();
