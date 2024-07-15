@@ -291,7 +291,6 @@ int main()
 
     /* game loop */
     while (!window_should_close()) {
-        // log_fps();
         /* input */
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);

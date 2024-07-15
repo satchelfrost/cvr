@@ -313,19 +313,19 @@ bool create_comp_db()
 {
     bool result = true;
     Nob_File_Paths paths = {0};
-    nob_read_entire_dir("build/compilation_database", &paths);
+    nob_read_entire_dir("./build/compilation_database", &paths);
     Nob_String_Builder sb = {0};
     nob_sb_append_cstr(&sb, "[\n");
     for (size_t i = 0; i < paths.count; i++) {
         if (strstr(paths.items[i], ".json") != 0) {
-            const char *path = nob_temp_sprintf("build/compilation_database/%s", paths.items[i]);
+            const char *path = nob_temp_sprintf("./build/compilation_database/%s", paths.items[i]);
             if (!nob_read_entire_file(path, &sb)) nob_return_defer(false);
         }
     }
     sb.count -= 2; // erase last two chars from file to be json compliant for newly concatenated file
     nob_sb_append_cstr(&sb, "\n]");
     nob_sb_append_null(&sb);
-    if (!nob_write_entire_file("build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
+    if (!nob_write_entire_file("./build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
 
     nob_log(NOB_INFO, "created compilation database, you may need to restart your LSP");
 
@@ -460,6 +460,7 @@ int main(int argc, char **argv)
         const char *bin = nob_temp_sprintf("./%s", examples[i].name);
         nob_cmd_append(&cmd, bin);
         if (!nob_cmd_run_sync(cmd)) return 1;
+        if (!cd("../../../")) return 1;
     } else {
         nob_log(NOB_INFO, "building all examples");
         for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
