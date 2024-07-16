@@ -141,6 +141,17 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         }
     },
+    {
+        .name = "compute",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        }
+    },
 };
 
 static const char *cvr[] = {
@@ -333,11 +344,11 @@ defer:
     return result;
 }
 
-bool cd(const char *dir)
+bool cd(const char *dir, bool silent)
 {
     bool result = true;
 
-    nob_log(NOB_INFO, "changing directory to %s", dir);
+    if (!silent) nob_log(NOB_INFO, "changing directory to %s", dir);
     if (chdir(dir) != 0) {
         nob_log(NOB_ERROR, "Cannod cd to %s", dir);
         nob_return_defer(false);
@@ -456,11 +467,11 @@ int main(int argc, char **argv)
         cmd.count = 0;
         nob_log(NOB_INFO, "running example %s", example);
         const char *example_bin_path = nob_temp_sprintf("./build/%s", example_path);
-        if (!cd(example_bin_path)) return 1;
+        if (!cd(example_bin_path, false)) return 1;
         const char *bin = nob_temp_sprintf("./%s", examples[i].name);
         nob_cmd_append(&cmd, bin);
         if (!nob_cmd_run_sync(cmd)) return 1;
-        if (!cd("../../../")) return 1;
+        if (!cd("../../../", true)) return 1;
     } else {
         nob_log(NOB_INFO, "building all examples");
         for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {

@@ -304,7 +304,10 @@ bool device_exts_supported(VkPhysicalDevice phys_device);
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
 bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data);
+bool vtx_buff_stage_init(Vk_Buffer *vtx_buff, const void *data);
+bool comp_buff_init(Vk_Buffer *vtx_buff, const void *data);
 bool idx_buff_init(Vk_Buffer *idx_buff, const void *data);
+bool idx_buff_stage_init(Vk_Buffer *idx_buff, const void *data);
 
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
 bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
@@ -1908,16 +1911,12 @@ defer:
 
 void vk_buff_destroy(Vk_Buffer buffer)
 {
-    // if (!buffer.handle) {
-    //     nob_log(NOB_WARNING, "cannot destroy null buffer");
-    //     return;
-    // }
     vkDestroyBuffer(ctx.device, buffer.handle, NULL);
     vkFreeMemory(ctx.device, buffer.mem, NULL);
     buffer.handle = NULL;
 }
 
-bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
+bool vtx_buff_stage_init(Vk_Buffer *vtx_buff, const void *data)
 {
     bool result = true;
 
@@ -1952,7 +1951,63 @@ defer:
     return result;
 }
 
-bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
+bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
+{
+    bool result = true;
+
+    result = vk_buff_init(
+        vtx_buff,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create vertex buffer");
+
+    vk_chk(vkMapMemory(ctx.device, vtx_buff->mem, 0, vtx_buff->size, 0, &(vtx_buff->mapped)), "failed to map memory");
+    memcpy(vtx_buff->mapped, data, vtx_buff->size);
+    vkUnmapMemory(ctx.device, vtx_buff->mem);
+
+defer:
+    return result;
+}
+
+bool compute_buff_init(Vk_Buffer *vtx_buff, const void *data)
+{
+    bool result = true;
+
+    /* create two buffers, a so-called "staging" buffer, and one for our actual vertex compute buffer */
+    Vk_Buffer stg_buff = {
+        .size   = vtx_buff->size,
+        .count  = vtx_buff->count,
+    };
+    result = vk_buff_init(
+        &stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create staging compute buffer");
+
+    vk_chk(vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped), "failed to map memory");
+    memcpy(stg_buff.mapped, data, stg_buff.size);
+    vkUnmapMemory(ctx.device, stg_buff.mem);
+
+    result = vk_buff_init(
+        vtx_buff,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT  |
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    cvr_chk(result, "failed to create vertex compute buffer");
+
+    /* transfer data from staging buffer to vertex buffer */
+    vk_buff_copy(*vtx_buff, stg_buff, 0);
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+}
+
+bool idx_buff_stage_init(Vk_Buffer *idx_buff, const void *data)
 {
     bool result = true;
 
@@ -1984,6 +2039,25 @@ bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
 
 defer:
     vk_buff_destroy(stg_buff);
+    return result;
+}
+
+bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
+{
+    bool result = true;
+
+    result = vk_buff_init(
+        idx_buff,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    cvr_chk(result, "failed to create index buffer");
+
+    vk_chk(vkMapMemory(ctx.device, idx_buff->mem, 0, idx_buff->size, 0, &(idx_buff->mapped)), "failed to map memory");
+    memcpy(idx_buff->mapped, data, idx_buff->size);
+    vkUnmapMemory(ctx.device, idx_buff->mem);
+
+defer:
     return result;
 }
 
