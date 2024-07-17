@@ -17,6 +17,7 @@
 #define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(ctx.instance, #pfn)
 #define MIN_SEVERITY NOB_WARNING
 #define vk_ok(x) ((x) == VK_SUCCESS)
+// TODO: get rid of cvr_chk
 #define cvr_chk(expr, msg)           \
     do {                             \
         if (!(expr)) {               \
@@ -34,6 +35,8 @@ typedef struct {
     bool has_gfx;
     uint32_t present_idx;
     bool has_present;
+    uint32_t compute_idx;
+    bool has_compute;
 } Queue_Fams;
 
 typedef struct {
@@ -99,6 +102,7 @@ typedef enum {
     PIPELINE_POINT_CLOUD,
     PIPELINE_POINT_CLOUD_ADV,
     PIPELINE_TEXTURE,
+    PIPELINE_COMPUTE,
     PIPELINE_COUNT,
 } Pipeline_Type;
 
@@ -131,6 +135,7 @@ typedef struct {
     VkPhysicalDevice phys_device;
     VkDevice device;
     VkQueue gfx_queue;
+    VkQueue compute_queue;
     VkQueue present_queue;
     VkSurfaceKHR surface;
     VkSurfaceFormatKHR surface_fmt;
@@ -157,6 +162,7 @@ bool vk_swapchain_init();
 bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
+bool vk_compute_pl_init();
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
 bool vk_frame_buffs_init();
@@ -305,7 +311,7 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
 void vk_buff_destroy(Vk_Buffer buffer);
 bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data);
 bool vtx_buff_stage_init(Vk_Buffer *vtx_buff, const void *data);
-bool comp_buff_init(Vk_Buffer *vtx_buff, const void *data);
+bool vk_compute_buff_init(Vk_Buffer *vtx_buff, const void *data);
 bool idx_buff_init(Vk_Buffer *idx_buff, const void *data);
 bool idx_buff_stage_init(Vk_Buffer *idx_buff, const void *data);
 
@@ -469,6 +475,7 @@ bool vk_device_init()
     if (vk_ok(vkCreateDevice(ctx.phys_device, &device_ci, NULL, &ctx.device))) {
         vkGetDeviceQueue(ctx.device, queue_fams.gfx_idx, 0, &ctx.gfx_queue);
         vkGetDeviceQueue(ctx.device, queue_fams.present_idx, 0, &ctx.present_queue);
+        vkGetDeviceQueue(ctx.device, queue_fams.compute_idx, 0, &ctx.compute_queue);
     } else {
         nob_return_defer(false);
     }
@@ -572,19 +579,19 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     char *frag_shader_name;
     switch (pipeline_type) {
     case PIPELINE_TEXTURE:
-        vert_shader_name = nob_temp_sprintf("./res/texture.vert.spv");
-        frag_shader_name = nob_temp_sprintf("./res/texture.frag.spv");
+        vert_shader_name = "./res/texture.vert.spv";
+        frag_shader_name = "./res/texture.frag.spv";
         break;
     case PIPELINE_POINT_CLOUD_ADV:
     case PIPELINE_POINT_CLOUD:
-        vert_shader_name = nob_temp_sprintf("./res/point-cloud.vert.spv");
-        frag_shader_name = nob_temp_sprintf("./res/point-cloud.frag.spv");
+        vert_shader_name = "./res/point-cloud.vert.spv";
+        frag_shader_name = "./res/point-cloud.frag.spv";
         break;
     case PIPELINE_DEFAULT:
     case PIPELINE_WIREFRAME:
     default:
-        vert_shader_name = nob_temp_sprintf("./res/default.vert.spv");
-        frag_shader_name = nob_temp_sprintf("./res/default.frag.spv");
+        vert_shader_name = "./res/default.vert.spv";
+        frag_shader_name = "./res/default.frag.spv";
         break;
     }
 
@@ -721,6 +728,56 @@ defer:
     nob_da_free(set_layouts);
     return result;
 }
+
+// bool vk_compute_pl_init()
+// {
+//     bool result = true;
+//
+//     VkPipelineShaderStageCreateInfo shader_ci = {0};
+//     shader_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//     shader_ci.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+//     shader_ci.pName = "main";
+//     if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
+//         nob_return_defer(false);
+//
+//     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
+//         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+//         .setLayoutCount = 1,
+//         .pSetLayouts = ctx.set_layouts[PIPELINE_COMPUTE],
+//     };
+//     VkResult res = vkCreatePipelineLayout(
+//         ctx.device,
+//         &pipeline_layout_ci,
+//         NULL,
+//         &ctx.pipeline_layouts[PIPELINE_COMPUTE]
+//     );
+//     if (!vk_ok(res)) {
+//         nob_log(NOB_ERROR, "failed to create layout for compute pipeline");
+//         nob_return_defer(false);
+//     }
+//
+//     VkComputePipelineCreateInfo pipeline_ci = {
+//         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+//         .layout = ctx.pipeline_layouts[PIPELINE_COMPUTE],
+//         .stage = shader_ci,
+//     };
+//     res = vkCreateComputePipelines(
+//         ctx.device,
+//         VK_NULL_HANDLE,
+//         1,
+//         &pipeline_ci,
+//         NULL,
+//         ctx.pipelines[PIPELINE_COMPUTE]
+//     );
+//     if (!vk_ok(res)) {
+//         nob_log(NOB_ERROR, "failed to create compute pipeline");
+//         nob_return_defer(false);
+//     }
+//
+// defer:
+//     vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
+//     return result;
+// }
 
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
@@ -1581,6 +1638,11 @@ Queue_Fams find_queue_fams(VkPhysicalDevice phys_device)
             queue_fams.has_gfx = true;
         }
 
+        if (queue_fam_props[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+            queue_fams.compute_idx = i;
+            queue_fams.has_compute = true;
+        }
+
         VkBool32 present_support = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(phys_device, i, ctx.surface, &present_support);
         if (present_support) {
@@ -1588,7 +1650,7 @@ Queue_Fams find_queue_fams(VkPhysicalDevice phys_device)
             queue_fams.has_present = true;
         }
 
-        if (queue_fams.has_gfx && queue_fams.has_present)
+        if (queue_fams.has_gfx && queue_fams.has_present && queue_fams.has_compute)
             return queue_fams;
     }
     return queue_fams;
@@ -1970,7 +2032,7 @@ defer:
     return result;
 }
 
-bool compute_buff_init(Vk_Buffer *vtx_buff, const void *data)
+bool vk_compute_buff_init(Vk_Buffer *vtx_buff, const void *data)
 {
     bool result = true;
 
@@ -1997,7 +2059,7 @@ bool compute_buff_init(Vk_Buffer *vtx_buff, const void *data)
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    cvr_chk(result, "failed to create vertex compute buffer");
+    cvr_chk(result, "failed to create compute buffer");
 
     /* transfer data from staging buffer to vertex buffer */
     vk_buff_copy(*vtx_buff, stg_buff, 0);

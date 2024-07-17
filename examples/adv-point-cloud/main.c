@@ -160,6 +160,11 @@ void get_cam_order(Camera *cameras, size_t count, int *cam_order, size_t cam_ord
         cam_order[i] = sqr_distances[i].idx;
 }
 
+void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
+{
+    for (size_t i = 0; i < count; i++) dst[i] = src[i];
+}
+
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
@@ -169,14 +174,19 @@ void log_controls()
     nob_log(NOB_INFO, "    [A] - Left");
     nob_log(NOB_INFO, "    [S] - Back");
     nob_log(NOB_INFO, "    [D] - Right");
+    nob_log(NOB_INFO, "    [E] - Up");
+    nob_log(NOB_INFO, "    [Q] - Down");
+    nob_log(NOB_INFO, "    [Shift] - Fast movement");
     nob_log(NOB_INFO, "    Right Click + Mouse Movement = Rotation");
     nob_log(NOB_INFO, "------------");
     nob_log(NOB_INFO, "| Hot keys |");
     nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "    [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
     nob_log(NOB_INFO, "    [C] - Change piloted camera");
     nob_log(NOB_INFO, "    [R] - Resolution toggle");
     nob_log(NOB_INFO, "    [V] - View change (also pilots current view)");
     nob_log(NOB_INFO, "    [P] - Print camera info");
+    nob_log(NOB_INFO, "    [Space] - Reset cameras to default position");
 }
 
 typedef enum {
@@ -246,6 +256,8 @@ Camera cameras[] = {
     },
 };
 
+Camera camera_defaults[4] = {0};
+
 int main()
 {
     /* load resources into main memory */
@@ -279,6 +291,7 @@ int main()
     nob_da_free(lres.verts);
 
     /* settings & logging*/
+    copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
     bool use_hres = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
@@ -308,6 +321,10 @@ int main()
         if (is_key_pressed(KEY_M)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
+        }
+        if (is_key_pressed(KEY_SPACE)) {
+            nob_log(NOB_INFO, "resetting camera defaults");
+            copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
         }
         update_camera_free(&cameras[cam_move_idx]);
 

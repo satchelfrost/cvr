@@ -260,10 +260,11 @@ typedef struct {
     int format;
 } Texture;
 
+/* Generic buffer */
 typedef struct {
-    void *items;
-    size_t size;
-    size_t count;
+    void *items;  // pointer to elements
+    size_t size;  // size of the entire buffer
+    size_t count; // number of items
 } Buffer;
 
 Texture load_texture_from_image(Image img);
@@ -275,6 +276,7 @@ bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 
 bool upload_point_cloud(Buffer buff, size_t *id);
+bool upload_compute_points(Buffer buff);
 void destroy_point_cloud(size_t id);
 bool draw_point_cloud(size_t id);
 bool draw_point_cloud_adv(size_t vtx_id);

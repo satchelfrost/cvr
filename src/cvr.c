@@ -115,6 +115,7 @@ size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
 Texture_Example tex_example = {0};
 Adv_Point_Cloud_Example adv_point_cloud = {0};
+Vk_Buffer compute_particles = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -774,7 +775,7 @@ bool upload_point_cloud(Buffer buff, size_t *id)
         .count = buff.count,
         .size  = buff.size,
     };
-    if (!vtx_buff_init(&vk_buff, buff.items)) {
+    if (!vtx_buff_stage_init(&vk_buff, buff.items)) {
         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
         return false;
     }
@@ -783,6 +784,18 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     nob_da_append(&point_clouds, vk_buff);
     return true;
 }
+
+// bool upload_compute_points(Buffer buff)
+// {
+//     compute_particles.count = buff.count;
+//     compute_particles.size  = buff.size;
+//     if (!vk_compute_buff_init(&compute_particles, buff.items)) {
+//         nob_log(NOB_ERROR, "failed to upload compute points");
+//         return false;
+//     }
+//
+//     return true;
+// }
 
 void destroy_point_cloud(size_t id)
 {
