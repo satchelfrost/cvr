@@ -2,10 +2,6 @@
 #define NOB_IMPLEMENTATION
 #include "src/ext/nob.h"
 
-/* Whether or not to use the compilation database available with clang */
-bool gen_comp_db = false;
-bool using_clang = false;
-
 typedef struct {
     const char **names;
     size_t count;
@@ -16,11 +12,30 @@ typedef struct {
     size_t count;
 } Shaders;
 
+typedef enum {
+    TARGET_LINUX,
+    TARGET_WINDOWS,
+    TARGET_QUEST,
+    TARGET_COUNT,
+} Target;
+
+const char *target_names[TARGET_COUNT] = {
+    "linux",
+    "windows",
+    "quest",
+};
+
+typedef enum {
+    HOST_LINUX,
+    HOST_WINDOWS,
+} Host;
+
 /* Data necessary for compiling an example */
 typedef struct {
     const char *name;
     const Shaders shaders;
     const CFiles c_files;
+    bool supported_targets[TARGET_COUNT];
 } Example;
 
 static const char *default_shader_names[] = {"default.vert", "default.frag"};
@@ -36,7 +51,9 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_QUEST] = true,
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "orthographic",
@@ -47,7 +64,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "psychedelic",
@@ -58,7 +76,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "waves",
@@ -69,7 +88,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "texture",
@@ -85,7 +105,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "depth",
@@ -96,7 +117,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "movement",
@@ -107,7 +129,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "point-cloud",
@@ -121,7 +144,8 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "adv-point-cloud",
@@ -139,15 +163,118 @@ static Example examples[] = {
         .c_files = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
-        }
+        },
+        .supported_targets[TARGET_LINUX] = true,
     },
 };
+
+typedef struct {
+    int argc;
+    char **argv;
+    char *program;
+    char *supplied_name;
+    Example *example;
+    Target target;
+    char *target_name;
+    bool using_clang;
+    bool gen_comp_db;
+    bool release;
+    Host host;
+} Config;
+
+void log_usage(const char *program)
+{
+    nob_log(NOB_INFO, "usage: %s <flags> <optional_input>", program);
+    nob_log(NOB_INFO, "    -h help (log usage)");
+    nob_log(NOB_INFO, "    -c clean build");
+    nob_log(NOB_INFO, "    -e <example_name> optional example");
+    nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
+    nob_log(NOB_INFO, "    -l list available examples");
+    nob_log(NOB_INFO, "    -t specify build target (linux, windows, quest)");
+}
+
+void print_examples();
+
+bool handle_usr_args(Config *config)
+{
+    bool result = true;
+
+    Nob_Cmd cmd = {0};
+    config->program = nob_shift_args(&config->argc, &config->argv);
+    bool target_exists = false;
+
+    while (config->argc > 0) {
+        char flag;
+        char *flags = nob_shift_args(&config->argc, &config->argv);
+        while ((flag = (++flags)[0])) { // ignores '-'
+            switch (flag) {
+            case 'c':
+                nob_log(NOB_INFO, "clean build requested, removing build folder");
+                nob_cmd_append(&cmd, "rm", "build", "res", "-rf");
+                if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+                break;
+            case 'e':
+                if (config->argc == 0) {
+                    log_usage(config->program);
+                    nob_return_defer(false);
+                }
+                config->supplied_name = nob_shift_args(&config->argc, &config->argv);
+                break;
+            case 't':
+                if (config->argc == 0) {
+                    log_usage(config->program);
+                    nob_return_defer(false);
+                }
+                config->target_name = nob_shift_args(&config->argc, &config->argv);
+                for (size_t i = 0; i < TARGET_COUNT; i++) {
+                    if (!target_exists &&
+                        strcmp(target_names[i], config->target_name) == 0) {
+                        config->target = i;
+                        target_exists = true;
+                    }
+                }
+                if (!target_exists) {
+                    nob_log(NOB_ERROR, "No such target %s exists", config->target_name);
+                    nob_return_defer(false);
+                }
+                break;
+            case 'd':
+                nob_log(NOB_INFO, "compilation database requested (requires clang)");
+                config->using_clang = config->gen_comp_db = true;
+                break;
+            case 'h':
+                log_usage(config->program);
+                nob_return_defer(false);
+                break;
+            case 'l':
+                print_examples();
+                nob_return_defer(false);
+                break;
+            default:
+                nob_log(NOB_ERROR, "unrecognized flag %c", flag);
+                log_usage(config->program);
+                nob_return_defer(false);
+            }
+        }
+    }
+
+    if (!config->supplied_name) {
+        nob_log(NOB_ERROR, "no example supplied");
+        log_usage(config->program);
+        nob_return_defer(false);
+    }
+
+defer:
+    nob_cmd_free(cmd);
+    return result;
+}
+
 
 static const char *cvr[] = {
     "cvr",
 };
 
-bool build_cvr()
+bool build_cvr(Config config)
 {
     bool result = true;
     Nob_Cmd cmd = {0};
@@ -168,8 +295,8 @@ bool build_cvr()
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
-            if (gen_comp_db && using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
+            nob_cmd_append(&cmd, (config.using_clang) ? "clang" : "cc");
+            if (config.gen_comp_db && config.using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -231,7 +358,7 @@ defer:
     return result;
 }
 
-bool build_example(Example *example)
+bool build_example(Example *example, Config config)
 {
     const char *example_path = nob_temp_sprintf("examples/%s", example->name);
     const char **c_files = example->c_files.names;
@@ -252,8 +379,9 @@ bool build_example(Example *example)
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
-            if (gen_comp_db && using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
+            nob_cmd_append(&cmd, (config.using_clang) ? "clang" : "cc");
+            if (config.gen_comp_db && config.using_clang)
+                nob_cmd_append(&cmd, "-MJ", comp_db);
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -271,7 +399,7 @@ bool build_example(Example *example)
     bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
-        nob_cmd_append(&cmd, (using_clang) ? "clang" : "cc");
+        nob_cmd_append(&cmd, (config.using_clang) ? "clang" : "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
@@ -291,22 +419,23 @@ defer:
     return result;
 }
 
-void log_usage(const char *program)
-{
-    nob_log(NOB_INFO, "usage: %s <flags> <optional_input>", program);
-    nob_log(NOB_INFO, "    -h help (log usage)");
-    nob_log(NOB_INFO, "    -c clean build");
-    nob_log(NOB_INFO, "    -e <example_name> optional example");
-    nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
-    nob_log(NOB_INFO, "    -l list available examples");
-}
-
 void print_examples()
 {
     nob_log(NOB_INFO, "run example with: ./nob -e <example name>");
     nob_log(NOB_INFO, "Listing available examples:");
-    for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++)
-        nob_log(NOB_INFO, "    %s", examples[i].name);
+    for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
+        char *target_list = "";
+        for (size_t j = 0; j < TARGET_COUNT; j++) {
+            if (examples[i].supported_targets[j]) {
+                if (j == 0)
+                    target_list = nob_temp_sprintf("%s", target_names[j]);
+                else
+                    target_list = nob_temp_sprintf("%s, %s", target_list, target_names[j]);
+            }
+
+        }
+        nob_log(NOB_INFO, "    %s (%s)", examples[i].name, target_list);
+    }
 }
 
 bool create_comp_db()
@@ -347,53 +476,45 @@ defer:
     return result;
 }
 
+bool find_supported_example(Config *config)
+{
+    bool result = true;
+
+    bool name_found = false;
+    for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
+        if (strcmp(config->supplied_name, examples[i].name) == 0) {
+            name_found = true;
+            config->example = &examples[i];
+            break;
+        }
+    }
+    if (!name_found) {
+        nob_log(NOB_ERROR, "no such example found: %s", config->supplied_name);
+        nob_return_defer(false);
+    }
+    if (!config->example->supported_targets[config->target]) {
+        nob_log(NOB_ERROR, "target %s not supported for example %s", target_names[config->target], config->example->name);
+        nob_log(NOB_INFO, "try listing examples `./nob -l`");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
 
-    Nob_Cmd cmd = {0};
-    const char *program = nob_shift_args(&argc, &argv);
-    char *example = NULL;
-    while (argc > 0) {
-        char flag;
-        char *flags = nob_shift_args(&argc, &argv);
-        while ((flag = (++flags)[0])) { // ignores '-'
-            switch (flag) {
-            case 'c':
-                nob_log(NOB_INFO, "clean build requested, removing build folder");
-                nob_cmd_append(&cmd, "rm", "build", "res", "-rf");
-                if (!nob_cmd_run_sync(cmd)) return 1;
-                break;
-            case 'e':
-                if (argc == 0) {
-                    log_usage(program);
-                    return 1;
-                }
-                example = nob_shift_args(&argc, &argv);
-                break;
-            case 'd':
-                nob_log(NOB_INFO, "compilation database requested (requires clang)");
-                using_clang = gen_comp_db = true;
-                break;
-            case 'h':
-                log_usage(program);
-                return 0;
-                break;
-            case 'l':
-                print_examples();
-                return 0;
-                break;
-            default:
-                nob_log(NOB_ERROR, "unrecognized flag %c", flag);
-                log_usage(program);
-                return 1;
-            }
-        }
-    }
+    Config config = {
+        .argc = argc,
+        .argv = argv,
+    };
+    if (!handle_usr_args(&config)) return 1;
 
-    cmd.count = 0;
+    Nob_Cmd cmd = {0};
     if (!nob_mkdir_if_not_exists("build")) return 1;
-    if (gen_comp_db) {
+    if (config.gen_comp_db) {
         if (!nob_mkdir_if_not_exists("build/compilation_database")) return 1;
     } else {
         // test if compilation database was previously used to ensure clang
@@ -401,76 +522,58 @@ int main(int argc, char **argv)
         if (!nob_read_entire_dir("build", &paths)) return 1;
         for (size_t i = 0; i < paths.count; i++) {
             if (strstr(paths.items[i], "compile_commands.json") != 0) {
-                using_clang = true;
+                config.using_clang = true;
             }
         }
     }
-    if (!build_cvr()) return 1;
-
+    if (!build_cvr(config)) return 1;
     if (!nob_mkdir_if_not_exists("build/examples")) return 1;
-    if (example) {
-        size_t i;
-        bool found = false;
-        for (i = 0; i < NOB_ARRAY_LEN(examples); i++) {
-            if (strcmp(example, examples[i].name) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            nob_log(NOB_ERROR, "no such example found: %s", example);
+    if (!find_supported_example(&config)) return 1;
+
+    const char *example_path = nob_temp_sprintf("examples/%s", config.example->name);
+    if (!build_example(config.example, config)) return 1;
+    if (!compile_shaders(example_path, config.example->shaders)) return 1;
+
+    /* copy resources over if the files do not exist */
+    const char *example_res = nob_temp_sprintf("%s/res", example_path);
+    const char *build_res   = nob_temp_sprintf("./build/%s/res", example_path);
+    nob_mkdir_if_not_exists(build_res);
+    Nob_File_Paths paths = {0};
+    nob_read_entire_dir(example_res, &paths);
+    for (size_t i = 0; i < paths.count; i++) {
+        const char *file_name = paths.items[i];
+        if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0 ||
+            strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
+            continue;
+
+        const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
+        const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+
+        //  0 - file does not exist
+        //  1 - file exists
+        // -1 - error while checking if file exists. The error is logged
+        int ret = nob_file_exists(dst_path);
+        if (ret == 0) {
+            if (!nob_copy_file(src_path, dst_path)) return 1;
+        } else if (ret == -1) {
+            nob_log(NOB_ERROR, "error while checking %s", src_path);
             return 1;
         }
-        const char *example_path = nob_temp_sprintf("examples/%s", examples[i].name);
-        if (!build_example(&examples[i])) return 1;
-        if (!compile_shaders(example_path, examples[i].shaders)) return 1;
+    }
 
-        /* copy resources over if the files do not exist */
-        const char *example_res = nob_temp_sprintf("%s/res", example_path);
-        const char *build_res   = nob_temp_sprintf("./build/%s/res", example_path);
-        nob_mkdir_if_not_exists(build_res);
-        Nob_File_Paths paths = {0};
-        nob_read_entire_dir(example_res, &paths);
-        for (size_t i = 0; i < paths.count; i++) {
-            const char *file_name = paths.items[i];
-            if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0 ||
-                strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
-                continue;
-
-            const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
-            const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
-
-            //  0 - file does not exist
-            //  1 - file exists
-            // -1 - error while checking if file exists. The error is logged
-            int ret = nob_file_exists(dst_path);
-            if (ret == 0) {
-                if (!nob_copy_file(src_path, dst_path)) return 1;
-            } else if (ret == -1) {
-                nob_log(NOB_ERROR, "error while checking %s", src_path);
-                return 1;
-            }
-        }
-
-        /* run example after building */
+    /* run example after building */
+    if (config.host == HOST_LINUX) {
         cmd.count = 0;
-        nob_log(NOB_INFO, "running example %s", example);
+        nob_log(NOB_INFO, "running example %s", config.example->name);
         const char *example_bin_path = nob_temp_sprintf("./build/%s", example_path);
         if (!cd(example_bin_path)) return 1;
-        const char *bin = nob_temp_sprintf("./%s", examples[i].name);
+        const char *bin = nob_temp_sprintf("./%s", config.example->name);
         nob_cmd_append(&cmd, bin);
         if (!nob_cmd_run_sync(cmd)) return 1;
         if (!cd("../../../")) return 1;
-    } else {
-        nob_log(NOB_INFO, "building all examples");
-        for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
-            const char *example_path = nob_temp_sprintf("examples/%s", examples[i].name);
-            if (!build_example(&examples[i])) return 1;
-            if (!compile_shaders(example_path, examples[i].shaders)) return 1;
-        }
     }
 
-    if (gen_comp_db) {
+    if (config.gen_comp_db) {
         if (!create_comp_db()) return 1;
     }
 
