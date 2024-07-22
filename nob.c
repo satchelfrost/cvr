@@ -274,7 +274,7 @@ static const char *cvr[] = {
     "cvr",
 };
 
-bool build_cvr(Config config)
+bool build_cvr(Config config, const char *platform_path)
 {
     bool result = true;
     Nob_Cmd cmd = {0};
@@ -283,7 +283,7 @@ bool build_cvr(Config config)
 
     nob_log(NOB_INFO, "checking cvr library");
 
-    const char *build_path = nob_temp_sprintf("./build/cvr");
+    const char *build_path = nob_temp_sprintf("%s/cvr", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
 
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
@@ -326,17 +326,19 @@ defer:
     return result;
 }
 
-bool compile_shaders(const char *example_path, Shaders shaders)
+bool compile_shaders(Config config)
 {
     bool result = true;
+
     Nob_Cmd cmd = {0};
     Nob_Procs procs = {0};
 
+    const Example *example = config.example;
+    Shaders shaders = example->shaders;
+    const char *example_path = nob_temp_sprintf("examples/%s", example->name);
     nob_log(NOB_INFO, "checking shaders for %s", example_path);
-
-    const char *output_folder = nob_temp_sprintf("./build/%s/res", example_path);
+    const char *output_folder = nob_temp_sprintf("./build/%s/%s/res", target_names[config.target], example_path);
     if (!nob_mkdir_if_not_exists(output_folder)) nob_return_defer(false);
-
     const char *input_folder = nob_temp_sprintf("%s/res", example_path);
 
     for (size_t i = 0; i < shaders.count; i++) {
@@ -358,10 +360,11 @@ defer:
     return result;
 }
 
-bool build_example(Example *example, Config config)
+bool build_example(const char *build_path, Config config)
 {
+    const char **c_files = config.example->c_files.names;
+    const Example *example = config.example;
     const char *example_path = nob_temp_sprintf("examples/%s", example->name);
-    const char **c_files = example->c_files.names;
     bool result = true;
     Nob_Cmd cmd = {0};
     Nob_Procs procs = {0};
@@ -369,11 +372,8 @@ bool build_example(Example *example, Config config)
 
     nob_log(NOB_INFO, "checking %s", example_path);
 
-    const char *build_path = nob_temp_sprintf("build/%s", example_path);
-    if (!nob_mkdir_if_not_exists(build_path)) return 1;
-
     for (size_t i = 0; i < example->c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("build/%s/%s.o", example_path, c_files[i]);
+        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
         const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
         const char *comp_db = nob_temp_sprintf("build/compilation_database/%s.o.json", example->name);
         nob_da_append(&obj_files, output_path);
@@ -393,7 +393,7 @@ bool build_example(Example *example, Config config)
 
     if (!nob_procs_wait(procs)) nob_return_defer(false);
 
-    const char *libcvr_path = nob_temp_sprintf("./build/cvr/libcvr.a");
+    const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.a", target_names[config.target]);
     const char *exec_path = nob_temp_sprintf("%s/%s", build_path, example->name);
     bool obj_updated = nob_needs_rebuild(exec_path, obj_files.items, obj_files.count);
     bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
@@ -407,7 +407,8 @@ bool build_example(Example *example, Config config)
             const char *input_path = nob_temp_sprintf("%s", obj_files.items[i]);
             nob_cmd_append(&cmd, input_path);
         }
-        nob_cmd_append(&cmd, "-L./build/cvr", "-l:libcvr.a");
+        const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
+        nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
         nob_cmd_append(&cmd, "-lglfw", "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi", "-lm");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
@@ -512,6 +513,7 @@ int main(int argc, char **argv)
     };
     if (!handle_usr_args(&config)) return 1;
 
+    /* compilation database */
     Nob_Cmd cmd = {0};
     if (!nob_mkdir_if_not_exists("build")) return 1;
     if (config.gen_comp_db) {
@@ -526,17 +528,21 @@ int main(int argc, char **argv)
             }
         }
     }
-    if (!build_cvr(config)) return 1;
-    if (!nob_mkdir_if_not_exists("build/examples")) return 1;
-    if (!find_supported_example(&config)) return 1;
 
-    const char *example_path = nob_temp_sprintf("examples/%s", config.example->name);
-    if (!build_example(config.example, config)) return 1;
-    if (!compile_shaders(example_path, config.example->shaders)) return 1;
+    const char *platform_path = nob_temp_sprintf("./build/%s", target_names[config.target]);
+    if (!nob_mkdir_if_not_exists(platform_path)) return 1;
+    if (!build_cvr(config, platform_path)) return 1;
+    if (!find_supported_example(&config)) return 1;
+    const char *examples_build_path = nob_temp_sprintf("./build/%s/examples", target_names[config.target]);
+    if (!nob_mkdir_if_not_exists(examples_build_path)) return 1;
+    const char *example_build_path = nob_temp_sprintf("%s/%s", examples_build_path, config.example->name);
+    if (!nob_mkdir_if_not_exists(example_build_path)) return 1;
+    if (!build_example(example_build_path, config)) return 1;
+    if (!compile_shaders(config)) return 1;
 
     /* copy resources over if the files do not exist */
-    const char *example_res = nob_temp_sprintf("%s/res", example_path);
-    const char *build_res   = nob_temp_sprintf("./build/%s/res", example_path);
+    const char *example_res = nob_temp_sprintf("examples/%s/res", config.example->name);
+    const char *build_res   = nob_temp_sprintf("%s/res", example_build_path);
     nob_mkdir_if_not_exists(build_res);
     Nob_File_Paths paths = {0};
     nob_read_entire_dir(example_res, &paths);
@@ -562,15 +568,14 @@ int main(int argc, char **argv)
     }
 
     /* run example after building */
-    if (config.host == HOST_LINUX) {
+    if (config.host == HOST_LINUX && config.target == TARGET_LINUX) {
         cmd.count = 0;
         nob_log(NOB_INFO, "running example %s", config.example->name);
-        const char *example_bin_path = nob_temp_sprintf("./build/%s", example_path);
-        if (!cd(example_bin_path)) return 1;
+        if (!cd(example_build_path)) return 1;
         const char *bin = nob_temp_sprintf("./%s", config.example->name);
         nob_cmd_append(&cmd, bin);
         if (!nob_cmd_run_sync(cmd)) return 1;
-        if (!cd("../../../")) return 1;
+        if (!cd("../../../../")) return 1;
     }
 
     if (config.gen_comp_db) {
