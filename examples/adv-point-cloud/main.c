@@ -29,6 +29,18 @@ typedef struct {
     size_t id;
 } Point_Cloud;
 
+typedef struct {
+    float16 camera_mvps[4];
+    int idx;
+    int shader_mode;
+    int cam_0;
+    int cam_1;
+    int cam_2;
+    int cam_3;
+} Point_Cloud_Uniform_Data;
+
+Point_Cloud_Uniform_Data uniform = {0};
+
 bool read_vtx(const char *file, Vertices *verts)
 {
     bool result = true;
@@ -218,6 +230,39 @@ void log_shader_mode(Shader_Mode mode)
     }
 }
 
+/* might be able to clean this up */
+bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_Uniform_Data *uniform)
+{
+    bool result = true;
+
+    Matrix model = {0};
+    if (!get_matrix_tos(&model)) nob_return_defer(false);
+
+    Matrix mvps[4] = {0};
+    for (size_t i = 0; i < 4; i++) {
+        Matrix view = MatrixLookAt(
+            four_cameras[i].position,
+            four_cameras[i].target,
+            four_cameras[i].up
+        );
+        Matrix proj = get_proj(four_cameras[i]);
+        Matrix viewProj = MatrixMultiply(view, proj);
+        mvps[i] = MatrixMultiply(model, viewProj);
+    }
+
+    for (size_t i = 0; i < 4; i++)
+        uniform->camera_mvps[i] = MatrixToFloatV(mvps[i]);
+    uniform->cam_0 = cam_order[0];
+    uniform->cam_1 = cam_order[1];
+    uniform->cam_2 = cam_order[2];
+    uniform->cam_3 = cam_order[3];
+    uniform->shader_mode = shader_mode;
+    uniform->idx = cam_order[3]; // farthest away camera
+
+defer:
+    return result;
+}
+
 Camera cameras[] = {
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
@@ -287,6 +332,15 @@ int main()
     }
     if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
     if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
+    size_t ubo_id;
+    Buffer buff = {
+        .size  = sizeof(uniform),
+        .count = 1,
+        .items = &uniform,
+    };
+    if (!ubo_init(buff, &ubo_id)) return 1;
+    if (!ubo_configure(ubo_id))   return 1;
+    if (!pc_sampler_init())       return 1;
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
@@ -349,7 +403,14 @@ int main()
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
             if (!draw_point_cloud_adv(vtx_id)) return 1;
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
-            update_cameras_ubo(&cameras[1], shader_mode, cam_order);
+            bool uniform_updated = update_pc_uniform(
+                &cameras[1],
+                shader_mode,
+                cam_order,
+                &uniform
+            );
+            if (!uniform_updated)    return 1;
+            if (!update_ubo(ubo_id)) return 1;
 
         end_mode_3d();
         end_drawing();
@@ -359,6 +420,7 @@ int main()
     for (size_t i = 0; i < NUM_IMGS; i++) unload_pc_texture(texs[i]);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
+    destroy_ubo(ubo_id);
     close_window();
     return 0;
 }

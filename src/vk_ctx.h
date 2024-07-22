@@ -169,10 +169,9 @@ bool vk_frame_buffs_init();
 bool vk_recreate_swapchain();
 bool vk_depth_init();
 
-bool vk_pc_ubo_init(Vk_Buffer *buff);
-
 /* general ubo initializer */
 bool vk_ubo_init(Vk_Buffer *buff);
+bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, uint32_t binding, VkDescriptorSetLayout *layout);
 
 /* stuff for texture example, probably TODO: put in cvr */
 bool vk_tex_ubo_init(Vk_Buffer *buff);
@@ -183,10 +182,7 @@ bool vk_sampler_descriptor_set_layout_init(Set_Layout_Type layout_type);
 bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool_Type pool_type);
 
 /*stuff for advanced point cloud example */
-bool vk_pc_ubo_init(Vk_Buffer *buff);
-bool vk_pc_ubo_descriptor_set_layout_init();
 bool vk_pc_ubo_descriptor_set_init(Vk_Buffer *buff);
-bool vk_pc_sampler_init();
 
 bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type);
 
@@ -309,11 +305,15 @@ bool device_exts_supported(VkPhysicalDevice phys_device);
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
-bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data);
-bool vtx_buff_stage_init(Vk_Buffer *vtx_buff, const void *data);
-bool vk_compute_buff_init(Vk_Buffer *vtx_buff, const void *data);
-bool idx_buff_init(Vk_Buffer *idx_buff, const void *data);
-bool idx_buff_stage_init(Vk_Buffer *idx_buff, const void *data);
+
+/* A staged upload to the GPU requires a copy from a host (CPU) visible buffer
+ * to a device (GPU) visible buffer. It's slower to upload, because of the copy
+ * but should be faster at runtime (with the exception of integrated graphics)*/
+bool vk_vtx_buff_upload(Vk_Buffer *vtx_buff, const void *data);
+bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data);
+bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data);
+bool vk_idx_buff_upload(Vk_Buffer *idx_buff, const void *data);
+bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data);
 
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
 bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
@@ -729,55 +729,55 @@ defer:
     return result;
 }
 
-// bool vk_compute_pl_init()
-// {
-//     bool result = true;
-//
-//     VkPipelineShaderStageCreateInfo shader_ci = {0};
-//     shader_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-//     shader_ci.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-//     shader_ci.pName = "main";
-//     if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
-//         nob_return_defer(false);
-//
-//     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
-//         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-//         .setLayoutCount = 1,
-//         .pSetLayouts = ctx.set_layouts[PIPELINE_COMPUTE],
-//     };
-//     VkResult res = vkCreatePipelineLayout(
-//         ctx.device,
-//         &pipeline_layout_ci,
-//         NULL,
-//         &ctx.pipeline_layouts[PIPELINE_COMPUTE]
-//     );
-//     if (!vk_ok(res)) {
-//         nob_log(NOB_ERROR, "failed to create layout for compute pipeline");
-//         nob_return_defer(false);
-//     }
-//
-//     VkComputePipelineCreateInfo pipeline_ci = {
-//         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-//         .layout = ctx.pipeline_layouts[PIPELINE_COMPUTE],
-//         .stage = shader_ci,
-//     };
-//     res = vkCreateComputePipelines(
-//         ctx.device,
-//         VK_NULL_HANDLE,
-//         1,
-//         &pipeline_ci,
-//         NULL,
-//         ctx.pipelines[PIPELINE_COMPUTE]
-//     );
-//     if (!vk_ok(res)) {
-//         nob_log(NOB_ERROR, "failed to create compute pipeline");
-//         nob_return_defer(false);
-//     }
-//
-// defer:
-//     vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
-//     return result;
-// }
+bool vk_compute_pl_init()
+{
+    bool result = true;
+
+    VkPipelineShaderStageCreateInfo shader_ci = {0};
+    shader_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_ci.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    shader_ci.pName = "main";
+    if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
+        nob_return_defer(false);
+
+    VkPipelineLayoutCreateInfo pipeline_layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &ctx.set_layouts[PIPELINE_COMPUTE],
+    };
+    VkResult res = vkCreatePipelineLayout(
+        ctx.device,
+        &pipeline_layout_ci,
+        NULL,
+        &ctx.pipeline_layouts[PIPELINE_COMPUTE]
+    );
+    if (!vk_ok(res)) {
+        nob_log(NOB_ERROR, "failed to create layout for compute pipeline");
+        nob_return_defer(false);
+    }
+
+    VkComputePipelineCreateInfo pipeline_ci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .layout = ctx.pipeline_layouts[PIPELINE_COMPUTE],
+        .stage = shader_ci,
+    };
+    res = vkCreateComputePipelines(
+        ctx.device,
+        VK_NULL_HANDLE,
+        1,
+        &pipeline_ci,
+        NULL,
+        &ctx.pipelines[PIPELINE_COMPUTE]
+    );
+    if (!vk_ok(res)) {
+        nob_log(NOB_ERROR, "failed to create compute pipeline");
+        nob_return_defer(false);
+    }
+
+defer:
+    vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
+    return result;
+}
 
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
@@ -1232,16 +1232,6 @@ bool vk_tex_ubo_init(Vk_Buffer *buff)
     return true;
 }
 
-bool vk_pc_ubo_init(Vk_Buffer *buff)
-{
-    if (!vk_ubo_init(buff))                             return false;
-    if (!vk_pc_ubo_descriptor_set_layout_init())        return false;
-    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_UBO)) return false;
-    if (!vk_pc_ubo_descriptor_set_init(buff))           return false;
-
-    return true;
-}
-
 bool vk_tex_ubo_descriptor_set_layout_init()
 {
     bool result = true;
@@ -1269,15 +1259,15 @@ defer:
     return result;
 }
 
-bool vk_pc_ubo_descriptor_set_layout_init()
+bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, uint32_t binding, VkDescriptorSetLayout *layout)
 {
     bool result = true;
 
     VkDescriptorSetLayoutBinding set_layout_binding = {
-        .binding = 0,
+        .binding = binding,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .stageFlags = flags,
     };
 
     VkDescriptorSetLayoutCreateInfo layout_ci = {
@@ -1286,7 +1276,7 @@ bool vk_pc_ubo_descriptor_set_layout_init()
         .pBindings = &set_layout_binding,
     };
 
-    VkDescriptorSetLayout *layout = &ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO];
+    // VkDescriptorSetLayout *layout = &ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO];
     if (!vk_ok(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
         nob_log(NOB_ERROR, "failed to create descriptor set layout for uniform buffer");
         nob_return_defer(false);
@@ -1335,15 +1325,6 @@ bool vk_tex_sampler_init()
     if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_TEX_SAMPLER))            return false;
     if (!vk_descriptor_pool_init(POOL_TEX_SAMPLER))                                return false;
     if (!vk_sampler_descriptor_set_init(SET_LAYOUT_TEX_SAMPLER, POOL_TEX_SAMPLER)) return false;
-
-    return true;
-}
-
-bool vk_pc_sampler_init()
-{
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_POINT_CLOUD_SAMPLER))                    return false;
-    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_SAMPLER))                                        return false;
-    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_POINT_CLOUD_SAMPLER, POOL_POINT_CLOUD_SAMPLER)) return false;
 
     return true;
 }
@@ -1460,11 +1441,12 @@ bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type)
         nob_return_defer(false);
     }
 
-    VkDescriptorPoolCreateInfo pool_ci = {0};
-    pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_ci.poolSizeCount = 1;
-    pool_ci.pPoolSizes = &pool_size;
-    pool_ci.maxSets = max_sets;
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = max_sets,
+    };
 
     VkDescriptorPool *pool = &ctx.descriptor_pools[pool_type];
     if(!vk_ok(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool))) {
@@ -1946,6 +1928,7 @@ void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type)
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
 {
     bool result = true;
+
     VkBufferCreateInfo buffer_ci = {0};
     buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     cvr_chk(buffer->size, "Vk_Buffer must be set with size before calling vk_buff_init");
@@ -1964,7 +1947,6 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
     cvr_chk(result, "Memory not suitable based on memory requirements");
     VkResult vk_result = vkAllocateMemory(ctx.device, &alloc_ci, NULL, &buffer->mem);
     vk_chk(vk_result, "failed to allocate buffer memory!");
-
     vk_chk(vkBindBufferMemory(ctx.device, buffer->handle, buffer->mem, 0), "failed to bind buffer memory");
 
 defer:
@@ -1978,7 +1960,7 @@ void vk_buff_destroy(Vk_Buffer buffer)
     buffer.handle = NULL;
 }
 
-bool vtx_buff_stage_init(Vk_Buffer *vtx_buff, const void *data)
+bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
 {
     bool result = true;
 
@@ -2013,7 +1995,7 @@ defer:
     return result;
 }
 
-bool vtx_buff_init(Vk_Buffer *vtx_buff, const void *data)
+bool vk_vtx_buff_upload(Vk_Buffer *vtx_buff, const void *data)
 {
     bool result = true;
 
@@ -2032,7 +2014,7 @@ defer:
     return result;
 }
 
-bool vk_compute_buff_init(Vk_Buffer *vtx_buff, const void *data)
+bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
 {
     bool result = true;
 
@@ -2069,7 +2051,7 @@ defer:
     return result;
 }
 
-bool idx_buff_stage_init(Vk_Buffer *idx_buff, const void *data)
+bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data)
 {
     bool result = true;
 
@@ -2104,7 +2086,7 @@ defer:
     return result;
 }
 
-bool idx_buff_init(Vk_Buffer *idx_buff, const void *data)
+bool vk_idx_buff_upload(Vk_Buffer *idx_buff, const void *data)
 {
     bool result = true;
 

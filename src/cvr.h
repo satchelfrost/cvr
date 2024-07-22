@@ -206,6 +206,14 @@ typedef enum {
     SHAPE_COUNT,
 } Shape_Type;
 
+#define RL_MATRIX_TYPE
+typedef struct {
+    float m0, m4, m8, m12;
+    float m1, m5, m9, m13;
+    float m2, m6, m10, m14;
+    float m3, m7, m11, m15;
+} Matrix;
+
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
@@ -276,10 +284,18 @@ bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 
 bool upload_point_cloud(Buffer buff, size_t *id);
-bool upload_compute_points(Buffer buff);
+bool upload_compute_points(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
+void destroy_compute_buff(size_t id);
 bool draw_point_cloud(size_t id);
 bool draw_point_cloud_adv(size_t vtx_id);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
+bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
+bool update_ubo(size_t id);
+bool pc_sampler_init();
+Matrix get_proj(Camera camera);
+bool ubo_init(Buffer buff, size_t *id);
+bool ubo_configure(size_t id);
+void destroy_ubo(size_t id); 
 
 #endif // CVR_H_

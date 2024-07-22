@@ -1,4 +1,7 @@
 #include "cvr.h"
+#include "ext/raylib-5.0/raymath.h"
+#include <stdlib.h>
+#include "ext/nob.h"
 
 #define PARTICLE_COUNT 400
 
@@ -8,17 +11,23 @@ typedef struct {
     Vector4 color;
 } Particle;
 
-Particle paricles[PARTICLE_COUNT] = {0};
-Color colors = {
+Particle particles[PARTICLE_COUNT];
+
+typedef struct {
+    size_t id;
+    Buffer buff;
+} Compute_Buffer;
+
+Color colors[] = {
     LIGHTGRAY, GRAY, DARKGRAY, YELLOW, GOLD, ORANGE, PINK, RED,
     MAROON, GREEN, LIME, DARKGREEN, SKYBLUE, BLUE, DARKBLUE,
     PURPLE, VIOLET, DARKPURPLE, BEIGE, BROWN, DARKBROWN, WHITE,
     BLACK, BLANK, MAGENTA, RAYWHITE
 };
 
-Vector4 color_to_vec4(Color *c)
+Vector4 color_to_vec4(Color c)
 {
-    return (Vector4){c->r / 255.0f, c->g / 255.0f, c->b / 255.0f, 1.0};
+    return (Vector4){c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0};
 }
 
 int main()
@@ -34,6 +43,7 @@ int main()
     float width  = 800.0f;
     float height = 600.0f;
     init_window(width, height, "Compute Shader");
+    set_target_fps(60);
 
     /* initialize the particles */
     for (size_t i = 0; i < PARTICLE_COUNT; i++) {
@@ -45,13 +55,15 @@ int main()
         particle->color = color_to_vec4(colors[i % NOB_ARRAY_LEN(colors)]);
     }
 
-    Buffer buff = {
-        .items = particles,
-        .size  = PARTICLE_COUNT * sizeof(Particle),
-        .count = PARTICLE_COUNT,
+    Compute_Buffer compute = {
+        .buff = {
+            .items = particles,
+            .size  = PARTICLE_COUNT * sizeof(Particle),
+            .count = PARTICLE_COUNT,
+        },
     };
 
-    if (!upload_compute_points(buff)) return 1;
+    if (!upload_compute_points(compute.buff, &compute.id)) return 1;
 
     while (!window_should_close()) {
         begin_drawing(RED);
@@ -60,6 +72,8 @@ int main()
         end_drawing();
     }
 
+
+    destroy_compute_buff(compute.id);
     close_window();
     return 0;
 }

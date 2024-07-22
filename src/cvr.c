@@ -68,6 +68,12 @@ typedef struct {
     size_t capacity;
 } Point_Clouds;
 
+typedef struct {
+    Vk_Buffer *items;
+    size_t count;
+    size_t capacity;
+} Compute_Buffers;
+
 /* Uniform buffer object for texture example */
 typedef struct {
     float16 model;
@@ -81,21 +87,16 @@ typedef struct {
     Texture_UBO ubo;
 } Texture_Example;
 
-/* Uniform buffer object for advanced point cloud example */
-typedef struct {
-    float16 camera_mvps[4];
-    int idx;
-    int shader_mode;
-    int cam_0;
-    int cam_1;
-    int cam_2;
-    int cam_3;
-} Point_Cloud_UBO;
-
 typedef struct {
     Vk_Buffer buff;
-    Point_Cloud_UBO ubo;
-} Adv_Point_Cloud_Example;
+    void *data;
+} UBO;
+
+typedef struct {
+    UBO *items;
+    size_t count;
+    size_t capacity;
+} UBOS;
 
 typedef struct {
     Matrix view;
@@ -114,8 +115,8 @@ Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
 Texture_Example tex_example = {0};
-Adv_Point_Cloud_Example adv_point_cloud = {0};
-Vk_Buffer compute_particles = {0};
+Compute_Buffers compute_buffs = {0};
+UBOS ubos = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -507,8 +508,7 @@ bool alloc_shape_res(Shape_Type shape_type)
         nob_return_defer(false);
     }
 
-
-    if ((!vtx_buff_init(&shape->vtx_buff, shape->verts)) || (!idx_buff_init(&shape->idx_buff, shape->idxs))) {
+    if ((!vk_vtx_buff_upload(&shape->vtx_buff, shape->verts)) || (!vk_idx_buff_upload(&shape->idx_buff, shape->idxs))) {
         nob_log(NOB_ERROR, "failed to allocate resources for shape %d", shape_type);
         nob_return_defer(false);
     }
@@ -537,7 +537,6 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
-    vk_buff_destroy(adv_point_cloud.buff);
     vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
     vk_destroy();
@@ -775,7 +774,7 @@ bool upload_point_cloud(Buffer buff, size_t *id)
         .count = buff.count,
         .size  = buff.size,
     };
-    if (!vtx_buff_stage_init(&vk_buff, buff.items)) {
+    if (!vk_vtx_buff_staged_upload(&vk_buff, buff.items)) {
         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
         return false;
     }
@@ -785,26 +784,121 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-// bool upload_compute_points(Buffer buff)
-// {
-//     compute_particles.count = buff.count;
-//     compute_particles.size  = buff.size;
-//     if (!vk_compute_buff_init(&compute_particles, buff.items)) {
-//         nob_log(NOB_ERROR, "failed to upload compute points");
-//         return false;
-//     }
-//
-//     return true;
-// }
+bool upload_compute_points(Buffer buff, size_t *id)
+{
+    Vk_Buffer vk_buff = {
+        .count = buff.count,
+        .size  = buff.size,
+    };
+    if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) {
+        nob_log(NOB_ERROR, "failed to upload compute points");
+        return false;
+    }
+    
+    *id = compute_buffs.count;
+    nob_da_append(&compute_buffs, vk_buff);
+
+    return true;
+}
+
+bool ubo_init(Buffer buff, size_t *id)
+{
+    if (!buff.items || !buff.size) {
+        nob_log(NOB_ERROR, "uniform must be initialized with data");
+        return false;
+    }
+
+    UBO ubo = {
+        .buff = {
+            .count = buff.count,
+            .size  = buff.size,
+        },
+        .data = buff.items,
+    };
+
+    if (!vk_ubo_init(&ubo.buff)) return false;
+
+    *id = ubos.count;
+    nob_da_append(&ubos, ubo);
+
+    return true;
+}
+
+bool ubo_configure(size_t id)
+{
+    Vk_Buffer *buff = NULL;
+    bool found = false;
+    for (size_t i = 0; i < ubos.count; i++) {
+        if (id == i && ubos.items[i].buff.handle) {
+            buff = &ubos.items[i].buff;
+            found = true;
+        }
+    }
+
+    if (!found) {
+        nob_log(NOB_ERROR, "uniform buffer %zu does not exist, cannot configure", id);
+        return false;
+    }
+
+    /* TODO: for now this is specific to point clouds 
+     * but this needs to change */
+    bool layout_initialized = vk_ubo_descriptor_set_layout_init(
+        VK_SHADER_STAGE_VERTEX_BIT, 0,
+        &ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO]
+    );
+    if (!layout_initialized)                            return false;
+    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_UBO)) return false;
+    if (!vk_pc_ubo_descriptor_set_init(buff))           return false;
+
+    return true;
+}
 
 void destroy_point_cloud(size_t id)
 {
-    vkDeviceWaitIdle(ctx.device); // TODO: alternatives?
+    vkDeviceWaitIdle(ctx.device);
 
+    bool found = false;
     for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle)
+        if (i == id && point_clouds.items[i].handle) {
             vk_buff_destroy(point_clouds.items[i]);
+            found = true;
+        }
     }
+
+    if (!found)
+        nob_log(NOB_WARNING, "point cloud &zu does not exist cannot destroy", id);
+}
+
+void destroy_ubo(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device);
+
+    bool found = false;
+    for (size_t i = 0; i < ubos.count; i++) {
+        if (i == id && ubos.items[i].buff.handle) {
+            vk_buff_destroy(ubos.items[i].buff);
+            found = true;
+        }
+    }
+
+    if (!found)
+        nob_log(NOB_WARNING, "uniform buffer &zu does not exist cannot destroy", id);
+}
+
+void destroy_compute_buff(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device);
+
+    bool found = false;
+    for (size_t i = 0; i < compute_buffs.count; i++) {
+        if (i == id && compute_buffs.items[i].handle) {
+            vk_buff_destroy(compute_buffs.items[i]);
+            found = true;
+        }
+    }
+
+    if (!found)
+        nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
 }
 
 bool draw_point_cloud(size_t id)
@@ -844,15 +938,18 @@ defer:
     return result;
 }
 
+bool pc_sampler_init()
+{
+    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_POINT_CLOUD_SAMPLER))                    return false;
+    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_SAMPLER))                                        return false;
+    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_POINT_CLOUD_SAMPLER, POOL_POINT_CLOUD_SAMPLER)) return false;
+
+    return true;
+}
+
 bool draw_point_cloud_adv(size_t vtx_id)
 {
     bool result = true;
-
-    if (!adv_point_cloud.buff.handle) {
-        adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
-        if (!vk_pc_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
-        if (!vk_pc_sampler_init())                  nob_return_defer(false);
-    }
 
     if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])
         if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
@@ -960,45 +1057,40 @@ void look_at(Camera camera)
         nob_log(NOB_ERROR, "no matrix available to translate");
 }
 
-bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order)
+bool get_matrix_tos(Matrix *model)
 {
     bool result = true;
 
-    Matrix model = {0};
     if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
+        *model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        nob_log(NOB_ERROR, "No matrix on stack");
         nob_return_defer(false);
     }
 
-    Matrix mvps[4] = {0};
-    for (size_t i = 0; i < 4; i++) {
-        Matrix view = MatrixLookAt(
-            four_cameras[i].position,
-            four_cameras[i].target,
-            four_cameras[i].up
-        );
-        Matrix proj = get_proj(four_cameras[i]);
-        Matrix viewProj = MatrixMultiply(view, proj);
-        mvps[i] = MatrixMultiply(model, viewProj);
-    }
+defer:
+    return result;
+}
 
-    if (adv_point_cloud.buff.handle) {
-        for (size_t i = 0; i < 4; i++) {
-            adv_point_cloud.ubo.camera_mvps[i] = MatrixToFloatV(mvps[i]);
+bool update_ubo(size_t id)
+{
+    bool result = true;
+
+    bool found = false;
+    UBO ubo = {0};
+    for (size_t i = 0; i < ubos.count; i++) {
+        if (id == i && ubos.items[i].buff.handle) {
+            ubo = ubos.items[i];
+            found = true;
         }
-        adv_point_cloud.ubo.cam_0 = cam_order[0];
-        adv_point_cloud.ubo.cam_1 = cam_order[1];
-        adv_point_cloud.ubo.cam_2 = cam_order[2];
-        adv_point_cloud.ubo.cam_3 = cam_order[3];
-        adv_point_cloud.ubo.shader_mode = shader_mode;
-        adv_point_cloud.ubo.idx = cam_order[3];
-        memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
-    } else {
-        nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");
+    }
+
+    if (!found) {
+        nob_log(NOB_ERROR, "uniform buffer %zu does not exist, cannot update", id);
         nob_return_defer(false);
     }
+
+    memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
 
 defer:
     return result;

@@ -144,8 +144,14 @@ static Example examples[] = {
     {
         .name = "compute",
         .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "default.comp",
+                "particle.vert",
+                "particle.frag",
+            },
+            .count = 5,
         },
         .c_files = {
             .names = default_c_file_names,
@@ -445,7 +451,8 @@ int main(int argc, char **argv)
         for (size_t i = 0; i < paths.count; i++) {
             const char *file_name = paths.items[i];
             if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0 ||
-                strstr(file_name, ".frag")  || strstr(file_name, ".vert"))
+                strstr(file_name, ".frag")  || strstr(file_name, ".vert") ||
+                strstr(file_name, ".comp"))
                 continue;
 
             const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
