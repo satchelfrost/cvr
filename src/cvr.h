@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -214,6 +215,28 @@ typedef struct {
     float m3, m7, m11, m15;
 } Matrix;
 
+typedef enum {
+    SHADER_STAGE_VERT,
+    SHADER_STAGE_FRAG,
+    SHADER_STAGE_BOTH,
+    SHADER_STAGE_COUNT,
+} ShaderStage;
+
+/* correspond to pre-defined descriptor set layouts */
+typedef enum {
+    EXAMPLE_LAYOUT_TEX,
+    EXAMPLE_LAYOUT_ADV_POINT_CLOUD,
+    EXAMPLE_LAYOUT_CUSTOM, // TODO: to be supported in the future
+    EXAMPLE_LAYOUT_COUNT,
+} ExampleLayout;
+
+/* Structure for configuring uniform buffers */
+typedef struct {
+    ShaderStage stage;
+    ExampleLayout layout;
+    uint32_t binding;
+} Uniform_Config;
+
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
@@ -288,14 +311,14 @@ bool upload_compute_points(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 void destroy_compute_buff(size_t id);
 bool draw_point_cloud(size_t id);
-bool draw_point_cloud_adv(size_t vtx_id);
+bool draw_point_cloud_adv(size_t vtx_id, size_t ubo_id);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
 bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
 bool update_ubo(size_t id);
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
 bool ubo_init(Buffer buff, size_t *id);
-bool ubo_configure(size_t id);
+bool ubo_configure(size_t id, Uniform_Config config);
 void destroy_ubo(size_t id); 
 
 #endif // CVR_H_

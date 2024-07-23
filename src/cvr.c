@@ -88,11 +88,6 @@ typedef struct {
 } Texture_Example;
 
 typedef struct {
-    Vk_Buffer buff;
-    void *data;
-} UBO;
-
-typedef struct {
     UBO *items;
     size_t count;
     size_t capacity;
@@ -126,6 +121,7 @@ void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
+bool find_ubo(size_t id, UBO **ubo);
 
 bool init_window(int width, int height, const char *title)
 {
@@ -539,6 +535,8 @@ void close_window()
 
     vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
+    for (size_t i = 0; i < ubos.count; i++)
+        vkDestroyDescriptorSetLayout(ctx.device, ubos.items[i].set_layout, NULL);
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -824,31 +822,52 @@ bool ubo_init(Buffer buff, size_t *id)
     return true;
 }
 
-bool ubo_configure(size_t id)
+bool ubo_configure(size_t id, Uniform_Config config)
 {
-    Vk_Buffer *buff = NULL;
-    bool found = false;
-    for (size_t i = 0; i < ubos.count; i++) {
-        if (id == i && ubos.items[i].buff.handle) {
-            buff = &ubos.items[i].buff;
-            found = true;
-        }
-    }
+    UBO *ubo = NULL;
+    if (!find_ubo(id, &ubo)) return false;
 
-    if (!found) {
-        nob_log(NOB_ERROR, "uniform buffer %zu does not exist, cannot configure", id);
+    Descriptor_Pool_Type pool_type;
+    VkShaderStageFlags flags;
+
+    /* determine the pool type and set layout type */
+    switch (config.layout) {
+    case EXAMPLE_LAYOUT_TEX:
+        pool_type = POOL_TEX_UBO ;
+        //layout = &ctx.set_layouts[SET_LAYOUT_TEX_UBO];
+        break;
+    case EXAMPLE_LAYOUT_ADV_POINT_CLOUD:
+        pool_type = POOL_POINT_CLOUD_UBO;
+        //layout = &ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO];
+        break;
+    case EXAMPLE_LAYOUT_CUSTOM:
+    default:
+        nob_log(NOB_ERROR, "Custom layout not yet supported");
         return false;
     }
 
-    /* TODO: for now this is specific to point clouds 
-     * but this needs to change */
-    bool layout_initialized = vk_ubo_descriptor_set_layout_init(
-        VK_SHADER_STAGE_VERTEX_BIT, 0,
-        &ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO]
-    );
-    if (!layout_initialized)                            return false;
-    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_UBO)) return false;
-    if (!vk_pc_ubo_descriptor_set_init(buff))           return false;
+    /* determine the shader stage */
+    switch (config.stage) {
+    case SHADER_STAGE_VERT:
+        flags = VK_SHADER_STAGE_VERTEX_BIT;
+        break;
+    case SHADER_STAGE_FRAG:
+        flags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        break;
+    case SHADER_STAGE_BOTH:
+        flags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+        break;
+    default:
+        nob_log(NOB_ERROR, "Shader stage %d not recognized", config.stage);
+        return false;
+    }
+
+    // if (!vk_ubo_descriptor_set_layout_init(flags, config.binding, &ubos.items[0].set_layout)) return false;
+    // if (!vk_descriptor_pool_init(pool_type))                                        return false;
+    // if (!vk_ubo_descriptor_set_init(&ubos.items[0], ctx.descriptor_pools[pool_type]))         return false;
+    if (!vk_ubo_descriptor_set_layout_init(flags, config.binding, &ubo->set_layout)) return false;
+    if (!vk_descriptor_pool_init(pool_type))                                        return false;
+    if (!vk_ubo_descriptor_set_init(ubo, ctx.descriptor_pools[pool_type]))         return false;
 
     return true;
 }
@@ -947,13 +966,21 @@ bool pc_sampler_init()
     return true;
 }
 
-bool draw_point_cloud_adv(size_t vtx_id)
+bool draw_point_cloud_adv(size_t vtx_id, size_t ubo_id)
 {
     bool result = true;
 
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])
-        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
+    UBO *ubo = NULL;
+    if (!find_ubo(ubo_id, &ubo)) nob_return_defer(false);
+
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
+        Descriptor_Set_Layouts set_layouts = {0};
+        nob_da_append(&set_layouts, ubo->set_layout);
+        nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]); // TODO: might want to store this somewhere else
+
+        if (!vk_adv_pl_init(PIPELINE_POINT_CLOUD_ADV, set_layouts))
             nob_return_defer(false);
+    }
 
     Vk_Buffer vtx_buff = {0};
     for (size_t i = 0; i < point_clouds.count; i++) {
@@ -976,7 +1003,7 @@ bool draw_point_cloud_adv(size_t vtx_id)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    if (!vk_draw_adv_point_cloud(vtx_buff, mvp))
+    if (!vk_draw_adv_point_cloud(vtx_buff, mvp, *ubo))
         nob_return_defer(false);
 
 defer:
@@ -1074,13 +1101,21 @@ defer:
 
 bool update_ubo(size_t id)
 {
+    UBO *ubo = NULL;
+    if (!find_ubo(id, &ubo)) return false;
+    memcpy(ubo->buff.mapped, ubo->data, ubo->buff.size);
+
+    return true;
+}
+
+bool find_ubo(size_t id, UBO **ubo)
+{
     bool result = true;
 
     bool found = false;
-    UBO ubo = {0};
     for (size_t i = 0; i < ubos.count; i++) {
         if (id == i && ubos.items[i].buff.handle) {
-            ubo = ubos.items[i];
+            *ubo = &ubos.items[i];
             found = true;
         }
     }
@@ -1089,8 +1124,6 @@ bool update_ubo(size_t id)
         nob_log(NOB_ERROR, "uniform buffer %zu does not exist, cannot update", id);
         nob_return_defer(false);
     }
-
-    memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
 
 defer:
     return result;

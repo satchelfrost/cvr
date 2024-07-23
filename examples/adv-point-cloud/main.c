@@ -339,8 +339,13 @@ int main()
         .items = &uniform,
     };
     if (!ubo_init(buff, &ubo_id)) return 1;
-    if (!ubo_configure(ubo_id))   return 1;
-    if (!pc_sampler_init())       return 1;
+    Uniform_Config config = {
+        .stage = SHADER_STAGE_VERT,
+        .layout = EXAMPLE_LAYOUT_ADV_POINT_CLOUD,
+        .binding = 0,
+    };
+    if (!ubo_configure(ubo_id, config)) return 1;
+    if (!pc_sampler_init())             return 1;
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
@@ -401,7 +406,7 @@ int main()
             rotate_x(-PI / 2);
 
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
-            if (!draw_point_cloud_adv(vtx_id)) return 1;
+            if (!draw_point_cloud_adv(vtx_id, ubo_id)) return 1;
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
             bool uniform_updated = update_pc_uniform(
                 &cameras[1],
