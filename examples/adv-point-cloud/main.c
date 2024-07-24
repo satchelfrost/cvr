@@ -332,22 +332,16 @@ int main()
     }
     if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
     if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
-    size_t ubo_id;
+    nob_da_free(hres.verts);
+    nob_da_free(lres.verts);
+
+    /* configure pipeline with descriptor sets*/
     Buffer buff = {
         .size  = sizeof(uniform),
         .count = 1,
         .items = &uniform,
     };
-    if (!ubo_init(buff, &ubo_id)) return 1;
-    Uniform_Config config = {
-        .stage = SHADER_STAGE_VERT,
-        .layout = EXAMPLE_LAYOUT_ADV_POINT_CLOUD,
-        .binding = 0,
-    };
-    if (!ubo_configure(ubo_id, config)) return 1;
-    if (!pc_sampler_init())             return 1;
-    nob_da_free(hres.verts);
-    nob_da_free(lres.verts);
+    if (!ubo_init(buff, EXAMPLE_ADV_POINT_CLOUD)) return 1;
 
     /* settings & logging*/
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
@@ -387,6 +381,7 @@ int main()
         }
         update_camera_free(&cameras[cam_move_idx]);
 
+
         /* draw */
         begin_drawing(BLUE);
             begin_mode_3d(*camera);
@@ -404,18 +399,13 @@ int main()
             }
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
-            if (!draw_point_cloud_adv(vtx_id, ubo_id)) return 1;
+            if (!draw_points(vtx_id, EXAMPLE_ADV_POINT_CLOUD)) return 1;
+
+            /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
-            bool uniform_updated = update_pc_uniform(
-                &cameras[1],
-                shader_mode,
-                cam_order,
-                &uniform
-            );
-            if (!uniform_updated)    return 1;
-            if (!update_ubo(ubo_id)) return 1;
+            if (!update_pc_uniform(&cameras[1], shader_mode, cam_order, &uniform)) return 1;
+            if (!update_ubo(EXAMPLE_ADV_POINT_CLOUD)) return 1;
 
         end_mode_3d();
         end_drawing();
@@ -425,7 +415,6 @@ int main()
     for (size_t i = 0; i < NUM_IMGS; i++) unload_pc_texture(texs[i]);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
-    destroy_ubo(ubo_id);
     close_window();
     return 0;
 }

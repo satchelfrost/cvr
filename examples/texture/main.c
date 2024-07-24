@@ -33,6 +33,7 @@ int main()
     };
 
     init_window(500, 500, "Load texture");
+    set_target_fps(60);
 
     Texture matrix_tex = {0};
     if (!load_texture("res/matrix.png", &matrix_tex)) return 1;

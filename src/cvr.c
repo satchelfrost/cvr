@@ -111,7 +111,6 @@ size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
 Texture_Example tex_example = {0};
 Compute_Buffers compute_buffs = {0};
-UBOS ubos = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -121,7 +120,7 @@ void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
-bool find_ubo(size_t id, UBO **ubo);
+void destroy_ubos();
 
 bool init_window(int width, int height, const char *title)
 {
@@ -535,8 +534,7 @@ void close_window()
 
     vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
-    for (size_t i = 0; i < ubos.count; i++)
-        vkDestroyDescriptorSetLayout(ctx.device, ubos.items[i].set_layout, NULL);
+    destroy_ubos();
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -799,75 +797,35 @@ bool upload_compute_points(Buffer buff, size_t *id)
     return true;
 }
 
-bool ubo_init(Buffer buff, size_t *id)
+bool ubo_init(Buffer buff, Example example)
 {
     if (!buff.items || !buff.size) {
         nob_log(NOB_ERROR, "uniform must be initialized with data");
         return false;
     }
 
+    /* initialize buffer and map memory */
     UBO ubo = {
-        .buff = {
-            .count = buff.count,
-            .size  = buff.size,
-        },
+        .buff = {.count = buff.count, .size  = buff.size},
         .data = buff.items,
     };
+    UBO_Type type = (example == EXAMPLE_TEX) ? UBO_TYPE_TEX : UBO_TYPE_ADV_POINT_CLOUD;
+    ctx.ubos[type] = ubo;
+    if (!vk_ubo_init(&ctx.ubos[type].buff)) return false;
 
-    if (!vk_ubo_init(&ubo.buff)) return false;
-
-    *id = ubos.count;
-    nob_da_append(&ubos, ubo);
+    VkShaderStageFlags flags = VK_SHADER_STAGE_VERTEX_BIT;
+    if (!vk_ubo_descriptor_set_layout_init(flags, 0, &ctx.ubos[type].set_layout)) return false;
+    if (!vk_create_ubo_descriptor_pool(&ctx.ubos[type].descriptor_pool))          return false;
+    if (!vk_ubo_descriptor_set_init(&ctx.ubos[type]))                             return false;
 
     return true;
 }
 
-bool ubo_configure(size_t id, Uniform_Config config)
+bool pc_sampler_init()
 {
-    UBO *ubo = NULL;
-    if (!find_ubo(id, &ubo)) return false;
-
-    Descriptor_Pool_Type pool_type;
-    VkShaderStageFlags flags;
-
-    /* determine the pool type and set layout type */
-    switch (config.layout) {
-    case EXAMPLE_LAYOUT_TEX:
-        pool_type = POOL_TEX_UBO ;
-        //layout = &ctx.set_layouts[SET_LAYOUT_TEX_UBO];
-        break;
-    case EXAMPLE_LAYOUT_ADV_POINT_CLOUD:
-        pool_type = POOL_POINT_CLOUD_UBO;
-        //layout = &ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO];
-        break;
-    case EXAMPLE_LAYOUT_CUSTOM:
-    default:
-        nob_log(NOB_ERROR, "Custom layout not yet supported");
-        return false;
-    }
-
-    /* determine the shader stage */
-    switch (config.stage) {
-    case SHADER_STAGE_VERT:
-        flags = VK_SHADER_STAGE_VERTEX_BIT;
-        break;
-    case SHADER_STAGE_FRAG:
-        flags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        break;
-    case SHADER_STAGE_BOTH:
-        flags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-        break;
-    default:
-        nob_log(NOB_ERROR, "Shader stage %d not recognized", config.stage);
-        return false;
-    }
-
-    // if (!vk_ubo_descriptor_set_layout_init(flags, config.binding, &ubos.items[0].set_layout)) return false;
-    // if (!vk_descriptor_pool_init(pool_type))                                        return false;
-    // if (!vk_ubo_descriptor_set_init(&ubos.items[0], ctx.descriptor_pools[pool_type]))         return false;
-    if (!vk_ubo_descriptor_set_layout_init(flags, config.binding, &ubo->set_layout)) return false;
-    if (!vk_descriptor_pool_init(pool_type))                                        return false;
-    if (!vk_ubo_descriptor_set_init(ubo, ctx.descriptor_pools[pool_type]))         return false;
+    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_POINT_CLOUD_SAMPLER))                    return false;
+    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_SAMPLER))                                        return false;
+    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_POINT_CLOUD_SAMPLER, POOL_POINT_CLOUD_SAMPLER)) return false;
 
     return true;
 }
@@ -888,20 +846,18 @@ void destroy_point_cloud(size_t id)
         nob_log(NOB_WARNING, "point cloud &zu does not exist cannot destroy", id);
 }
 
-void destroy_ubo(size_t id)
+void destroy_ubos()
 {
     vkDeviceWaitIdle(ctx.device);
 
-    bool found = false;
-    for (size_t i = 0; i < ubos.count; i++) {
-        if (i == id && ubos.items[i].buff.handle) {
-            vk_buff_destroy(ubos.items[i].buff);
-            found = true;
-        }
-    }
+    for (size_t i = 0; i < UBO_TYPE_COUNT; i++)
+        if (ctx.ubos[i].buff.handle)
+            vk_buff_destroy(ctx.ubos[i].buff);
 
-    if (!found)
-        nob_log(NOB_WARNING, "uniform buffer &zu does not exist cannot destroy", id);
+    for (size_t i = 0; i < UBO_TYPE_COUNT; i++) {
+        vkDestroyDescriptorPool(ctx.device, ctx.ubos[i].descriptor_pool, NULL);
+        vkDestroyDescriptorSetLayout(ctx.device, ctx.ubos[i].set_layout, NULL);
+    }
 }
 
 void destroy_compute_buff(size_t id)
@@ -957,40 +913,29 @@ defer:
     return result;
 }
 
-bool pc_sampler_init()
-{
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_POINT_CLOUD_SAMPLER))                    return false;
-    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_SAMPLER))                                        return false;
-    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_POINT_CLOUD_SAMPLER, POOL_POINT_CLOUD_SAMPLER)) return false;
-
-    return true;
-}
-
-bool draw_point_cloud_adv(size_t vtx_id, size_t ubo_id)
+bool draw_points(size_t vtx_id, Example example)
 {
     bool result = true;
 
-    UBO *ubo = NULL;
-    if (!find_ubo(ubo_id, &ubo)) nob_return_defer(false);
-
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
-        Descriptor_Set_Layouts set_layouts = {0};
-        nob_da_append(&set_layouts, ubo->set_layout);
-        nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]); // TODO: might want to store this somewhere else
-
-        if (!vk_adv_pl_init(PIPELINE_POINT_CLOUD_ADV, set_layouts))
-            nob_return_defer(false);
+    if (example == EXAMPLE_ADV_POINT_CLOUD) {
+        if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
+            pc_sampler_init();
+            Descriptor_Set_Layouts set_layouts = {0};
+            nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].set_layout);
+            nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]);
+            if (!vk_adv_pl_init(PIPELINE_POINT_CLOUD_ADV, set_layouts))
+                nob_return_defer(false);
+        }
+    } else {
+        nob_log(NOB_ERROR, "no other example supported yet for draw points");
+        nob_return_defer(false);
     }
 
     Vk_Buffer vtx_buff = {0};
-    for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == vtx_id && point_clouds.items[i].handle) {
-            vtx_buff = point_clouds.items[i];
-        }
-    }
-
-    if (!vtx_buff.handle) {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", vtx_id);
+    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
+        vtx_buff = point_clouds.items[vtx_id];
+    } else {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
         nob_return_defer(false);
     }
 
@@ -1003,7 +948,7 @@ bool draw_point_cloud_adv(size_t vtx_id, size_t ubo_id)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    if (!vk_draw_adv_point_cloud(vtx_buff, mvp, *ubo))
+    if (!vk_draw_adv_point_cloud(vtx_buff, mvp))
         nob_return_defer(false);
 
 defer:
@@ -1099,32 +1044,15 @@ defer:
     return result;
 }
 
-bool update_ubo(size_t id)
+bool update_ubo(Example example)
 {
-    UBO *ubo = NULL;
-    if (!find_ubo(id, &ubo)) return false;
-    memcpy(ubo->buff.mapped, ubo->data, ubo->buff.size);
+    if (example == EXAMPLE_ADV_POINT_CLOUD) {
+        UBO ubo = ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD];
+        memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
+    } else {
+        nob_log(NOB_ERROR, "Other examples not supported yet");
+        return false;
+    }
 
     return true;
-}
-
-bool find_ubo(size_t id, UBO **ubo)
-{
-    bool result = true;
-
-    bool found = false;
-    for (size_t i = 0; i < ubos.count; i++) {
-        if (id == i && ubos.items[i].buff.handle) {
-            *ubo = &ubos.items[i];
-            found = true;
-        }
-    }
-
-    if (!found) {
-        nob_log(NOB_ERROR, "uniform buffer %zu does not exist, cannot update", id);
-        nob_return_defer(false);
-    }
-
-defer:
-    return result;
 }

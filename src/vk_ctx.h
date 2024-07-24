@@ -17,6 +17,7 @@
 #define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(ctx.instance, #pfn)
 #define MIN_SEVERITY NOB_WARNING
 #define vk_ok(x) ((x) == VK_SUCCESS)
+#define VK_SUCCEEDED(x) ((x) == VK_SUCCESS)
 // TODO: get rid of cvr_chk
 #define cvr_chk(expr, msg)           \
     do {                             \
@@ -88,7 +89,17 @@ typedef struct {
     size_t id;
     bool active;
     VkDescriptorSet descriptor_set;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSetLayout set_layout;
 } Vk_Texture;
+
+typedef struct {
+    Vk_Buffer buff;
+    void *data;
+    VkDescriptorSet descriptor_set;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSetLayout set_layout;
+} UBO;
 
 typedef struct {
     Vk_Texture *items;
@@ -122,19 +133,17 @@ typedef enum {
     POOL_COUNT,
 } Descriptor_Pool_Type;
 
+typedef enum {
+    UBO_TYPE_TEX,
+    UBO_TYPE_ADV_POINT_CLOUD,
+    UBO_TYPE_COUNT,
+} UBO_Type;
+
 typedef struct {
     VkDescriptorSetLayout *items;
     size_t count;
     size_t capacity;
 } Descriptor_Set_Layouts;
-
-typedef struct {
-    Vk_Buffer buff;
-    void *data;
-    uint32_t binding;
-    VkDescriptorSet descriptor_set;
-    VkDescriptorSetLayout set_layout;
-} UBO;
 
 typedef struct {
     GLFWwindow *window;
@@ -149,16 +158,20 @@ typedef struct {
     VkSurfaceFormatKHR surface_fmt;
     VkExtent2D extent;
     VkRenderPass render_pass;
-    VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
     Vk_Swapchain swapchain;
     Vk_Textures textures;
     Vk_Textures pc_textures;
     Vk_Image depth_img;
     VkImageView depth_img_view;
-    VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT]; // TODO: this might need to into cvr.c
-    VkDescriptorPool descriptor_pools[POOL_COUNT];       // TODO: this might need to go into cvr.c
-    VkDescriptorSet ubo_descriptor_set;                  // TODO: probably get rid of this
+    VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
     VkPipeline pipelines[PIPELINE_COUNT];
+
+    /* TODO: I'm trying to move these, but for now they are here so the code doesn't break */
+    VkDescriptorSetLayout set_layouts[SET_LAYOUT_COUNT];
+    VkDescriptorPool descriptor_pools[POOL_COUNT];
+    VkDescriptorSet ubo_descriptor_set;
+
+    UBO ubos[UBO_TYPE_COUNT];
 } Vk_Context;
 
 bool vk_init();
@@ -180,14 +193,16 @@ bool vk_depth_init();
 /* general ubo initializer */
 bool vk_ubo_init(Vk_Buffer *buff);
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, uint32_t binding, VkDescriptorSetLayout *layout);
-bool vk_ubo_descriptor_set_init(UBO *ubo, VkDescriptorPool descriptor_pool);
+bool vk_ubo_descriptor_set_init(UBO *ubo);
 bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type);
+bool vk_create_ubo_descriptor_pool(VkDescriptorPool *pool);
 
 /* stuff for texture example, probably TODO: put in cvr */
 bool vk_tex_ubo_init(Vk_Buffer *buff);
 bool vk_tex_ubo_descriptor_set_layout_init();
 bool vk_tex_ubo_descriptor_set_init(Vk_Buffer *buff);
 bool vk_tex_sampler_init();
+
 bool vk_sampler_descriptor_set_layout_init(Set_Layout_Type layout_type);
 bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool_Type pool_type);
 
@@ -198,7 +213,7 @@ bool vk_begin_drawing();
 bool vk_end_drawing();
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp, UBO ubo);
+bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
 /* Utilities */
@@ -841,9 +856,6 @@ bool vk_adv_pl_init(Pipeline_Type pipeline_type, Descriptor_Set_Layouts set_layo
     //     nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO]);
     //     nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]);
     // }
-    // nob_log(NOB_INFO, "Set layouts items %p", set_layouts.items[0]);
-    // nob_log(NOB_INFO, "Set layouts count %zu", set_layouts.count);
-    // nob_return_defer(false);
 
     pipeline_layout_ci.pSetLayouts = set_layouts.items;
     pipeline_layout_ci.setLayoutCount = set_layouts.count;
@@ -1148,7 +1160,7 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     return result;
 }
 
-bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp, UBO ubo)
+bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp)
 {
     bool result = true;
 
@@ -1166,10 +1178,12 @@ bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp, UBO ubo)
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
 
+    /* UBO descriptor set */
+    VkDescriptorSet *descriptor_set = &ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].descriptor_set;
     vkCmdBindDescriptorSets(
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, &ubo.descriptor_set, 0, NULL
+        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, descriptor_set, 0, NULL
     );
 
     vkCmdBindDescriptorSets(
@@ -1539,14 +1553,14 @@ defer:
     return result;
 }
 
-bool vk_ubo_descriptor_set_init(UBO *ubo, VkDescriptorPool descriptor_pool)
+bool vk_ubo_descriptor_set_init(UBO *ubo)
 {
     bool result = true;
 
     /* allocate uniform buffer descriptor sets */
     VkDescriptorSetAllocateInfo alloc = {0};
     alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc.descriptorPool = descriptor_pool;
+    alloc.descriptorPool = ubo->descriptor_pool;
     alloc.descriptorSetCount = 1;
     alloc.pSetLayouts = &ubo->set_layout;
     VkResult vk_result = vkAllocateDescriptorSets(ctx.device, &alloc, &ubo->descriptor_set);
@@ -1620,6 +1634,33 @@ bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type)
 
     VkDescriptorPool *pool = &ctx.descriptor_pools[pool_type];
     if(!vk_ok(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool))) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
+/* TODO: for now this only works for UBO adv point cloud 
+ * and UBO texture */
+bool vk_create_ubo_descriptor_pool(VkDescriptorPool *pool)
+{
+    bool result = true;
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+    };
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = 1,
+    };
+
+    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
+    if(!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor pool");
         nob_return_defer(false);
     }

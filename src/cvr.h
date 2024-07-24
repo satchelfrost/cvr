@@ -224,16 +224,16 @@ typedef enum {
 
 /* correspond to pre-defined descriptor set layouts */
 typedef enum {
-    EXAMPLE_LAYOUT_TEX,
-    EXAMPLE_LAYOUT_ADV_POINT_CLOUD,
-    EXAMPLE_LAYOUT_CUSTOM, // TODO: to be supported in the future
+    EXAMPLE_TEX,
+    EXAMPLE_ADV_POINT_CLOUD,
+    EXAMPLE_CUSTOM,
     EXAMPLE_LAYOUT_COUNT,
-} ExampleLayout;
+} Example;
 
 /* Structure for configuring uniform buffers */
 typedef struct {
     ShaderStage stage;
-    ExampleLayout layout;
+    Example example;
     uint32_t binding;
 } Uniform_Config;
 
@@ -311,14 +311,12 @@ bool upload_compute_points(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 void destroy_compute_buff(size_t id);
 bool draw_point_cloud(size_t id);
-bool draw_point_cloud_adv(size_t vtx_id, size_t ubo_id);
+bool draw_points(size_t vtx_id, Example example);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
 bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
-bool update_ubo(size_t id);
+bool update_ubo(Example example);
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
-bool ubo_init(Buffer buff, size_t *id);
-bool ubo_configure(size_t id, Uniform_Config config);
-void destroy_ubo(size_t id); 
+bool ubo_init(Buffer buff, Example example);
 
 #endif // CVR_H_
