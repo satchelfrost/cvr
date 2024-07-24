@@ -213,7 +213,7 @@ bool vk_begin_drawing();
 bool vk_end_drawing();
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp);
+bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
 /* Utilities */
@@ -1088,12 +1088,17 @@ void vk_begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_man.buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
+/* TODO: might want to call this draw triangles */
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
     bool result = true;
 
-    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    if (pipeline_type == PIPELINE_POINT_CLOUD || pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
+        nob_log(NOB_ERROR, "point cloud pipelines should use vk_draw_points");
+        nob_return_defer(false);
+    }
 
+    VkCommandBuffer cmd_buffer = cmd_man.buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pipeline_type]);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
@@ -1106,40 +1111,7 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
 
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-
-    if (pipeline_type != PIPELINE_POINT_CLOUD && pipeline_type != PIPELINE_POINT_CLOUD_ADV)
-        vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-
-    if (pipeline_type == PIPELINE_TEXTURE) { // TODO: I don't think this is getting used since we use vk_draw_texture instead
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
-        );
-
-        for (size_t i = 0; i < ctx.textures.count; i++) {
-            vkCmdBindDescriptorSets(
-                cmd_buffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                ctx.pipeline_layouts[pipeline_type], 1, 1,
-                &ctx.textures.items[i].descriptor_set, 0, NULL
-            );
-        }
-    } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[pipeline_type], 0, 1, &ctx.ubo_descriptor_set, 0, NULL
-        );
-        if (ctx.pc_textures.count) {
-            vkCmdBindDescriptorSets(
-                cmd_buffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                ctx.pipeline_layouts[pipeline_type], 1, 1,
-                &ctx.pc_textures.items[0].descriptor_set, 0, NULL
-            );
-        }
-    }
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
 
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
@@ -1151,21 +1123,28 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
         &mat
     );
 
-    if (pipeline_type == PIPELINE_POINT_CLOUD ||
-        pipeline_type == PIPELINE_POINT_CLOUD_ADV)
-        vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
-    else
-        vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 
+defer:
     return result;
 }
 
-bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp)
+bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
 {
     bool result = true;
 
+    VkPipeline pipeline;
+    VkPipelineLayout pipeline_layout;
+    if (example == EXAMPLE_ADV_POINT_CLOUD) {
+        pipeline = ctx.pipelines[PIPELINE_POINT_CLOUD_ADV];
+        pipeline_layout = ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV];
+    } else {
+        pipeline = ctx.pipelines[PIPELINE_POINT_CLOUD];
+        pipeline_layout = ctx.pipeline_layouts[PIPELINE_POINT_CLOUD];
+    }
+
     VkCommandBuffer cmd_buffer = cmd_man.buff;
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]);
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
     viewport.height =(float)ctx.extent.height;
@@ -1178,26 +1157,26 @@ bool vk_draw_adv_point_cloud(Vk_Buffer vtx_buff, Matrix mvp)
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
 
-    /* UBO descriptor set */
-    VkDescriptorSet *descriptor_set = &ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].descriptor_set;
-    vkCmdBindDescriptorSets(
-        cmd_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, descriptor_set, 0, NULL
-    );
+    if (example == EXAMPLE_ADV_POINT_CLOUD) {
+        VkDescriptorSet *descriptor_set = &ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].descriptor_set;
+        vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, descriptor_set, 0, NULL
+                );
 
-    vkCmdBindDescriptorSets(
-        cmd_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
-        /* TODO: for now just use the first texture to store the descriptor set for all textures */
-        &ctx.pc_textures.items[0].descriptor_set, 0, NULL
-    );
+        vkCmdBindDescriptorSets(
+                cmd_buffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
+                /* TODO: for now just use the first texture to store the descriptor set for all textures */
+                &ctx.pc_textures.items[0].descriptor_set, 0, NULL);
+    }
 
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
         cmd_buffer,
-        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV],
+        pipeline_layout,
         VK_SHADER_STAGE_VERTEX_BIT,
         0,
         sizeof(float16),

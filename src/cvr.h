@@ -225,9 +225,10 @@ typedef enum {
 /* correspond to pre-defined descriptor set layouts */
 typedef enum {
     EXAMPLE_TEX,
+    EXAMPLE_POINT_CLOUD,
     EXAMPLE_ADV_POINT_CLOUD,
     EXAMPLE_CUSTOM,
-    EXAMPLE_LAYOUT_COUNT,
+    EXAMPLE_COUNT,
 } Example;
 
 /* Structure for configuring uniform buffers */

@@ -926,6 +926,10 @@ bool draw_points(size_t vtx_id, Example example)
             if (!vk_adv_pl_init(PIPELINE_POINT_CLOUD_ADV, set_layouts))
                 nob_return_defer(false);
         }
+    } else if (example == EXAMPLE_POINT_CLOUD) {
+        if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
+            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
+                nob_return_defer(false);
     } else {
         nob_log(NOB_ERROR, "no other example supported yet for draw points");
         nob_return_defer(false);
@@ -948,7 +952,7 @@ bool draw_points(size_t vtx_id, Example example)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    if (!vk_draw_adv_point_cloud(vtx_buff, mvp))
+    if (!vk_draw_points(vtx_buff, mvp, example))
         nob_return_defer(false);
 
 defer:

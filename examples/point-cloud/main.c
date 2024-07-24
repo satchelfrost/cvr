@@ -111,7 +111,7 @@ int main()
         begin_mode_3d(camera);
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-            if (!draw_point_cloud(flowers.id)) return 1;
+            if (!draw_points(flowers.id, EXAMPLE_POINT_CLOUD)) return 1;
         end_mode_3d();
         end_drawing();
     }
