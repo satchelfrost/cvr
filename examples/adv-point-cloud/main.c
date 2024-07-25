@@ -381,7 +381,6 @@ int main()
         }
         update_camera_free(&cameras[cam_move_idx]);
 
-
         /* draw */
         begin_drawing(BLUE);
             begin_mode_3d(*camera);

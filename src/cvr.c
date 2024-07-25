@@ -88,12 +88,6 @@ typedef struct {
 } Texture_Example;
 
 typedef struct {
-    UBO *items;
-    size_t count;
-    size_t capacity;
-} UBOS;
-
-typedef struct {
     Matrix view;
     Matrix proj;
     Matrix viewProj;
@@ -823,9 +817,9 @@ bool ubo_init(Buffer buff, Example example)
 
 bool pc_sampler_init()
 {
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_POINT_CLOUD_SAMPLER))                    return false;
-    if (!vk_descriptor_pool_init(POOL_POINT_CLOUD_SAMPLER))                                        return false;
-    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_POINT_CLOUD_SAMPLER, POOL_POINT_CLOUD_SAMPLER)) return false;
+    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER))                        return false;
+    if (!vk_descriptor_pool_init(POOL_ADV_POINT_CLOUD_SAMPLER))                                            return false;
+    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER, POOL_ADV_POINT_CLOUD_SAMPLER)) return false;
 
     return true;
 }
@@ -922,7 +916,7 @@ bool draw_points(size_t vtx_id, Example example)
             pc_sampler_init();
             Descriptor_Set_Layouts set_layouts = {0};
             nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].set_layout);
-            nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]);
+            nob_da_append(&set_layouts, ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER].set_layout);
             if (!vk_adv_pl_init(PIPELINE_POINT_CLOUD_ADV, set_layouts))
                 nob_return_defer(false);
         }
