@@ -80,12 +80,7 @@ typedef struct {
     float16 view;
     float16 proj;
     float time;
-} Texture_UBO;
-
-typedef struct {
-    Vk_Buffer buff;
-    Texture_UBO ubo;
-} Texture_Example;
+} Texture_Uniform_Data;
 
 typedef struct {
     Matrix view;
@@ -103,7 +98,7 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-Texture_Example tex_example = {0};
+Texture_Uniform_Data tex_uniform = {0};
 Compute_Buffers compute_buffs = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
@@ -264,13 +259,13 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    if (tex_example.buff.handle) {
+    if (ctx.ubos[UBO_TYPE_TEX].buff.handle) {
         /* update uniform buffer for texture exaxmple */
-        tex_example.ubo.model = MatrixToFloatV(MatrixIdentity());
-        tex_example.ubo.view  = MatrixToFloatV(matrices.view);
-        tex_example.ubo.proj  = MatrixToFloatV(matrices.proj);
-        tex_example.ubo.time = get_time();
-        memcpy(tex_example.buff.mapped, &tex_example.ubo, sizeof(Texture_UBO));
+        tex_uniform.model = MatrixToFloatV(MatrixIdentity());
+        tex_uniform.view  = MatrixToFloatV(matrices.view);
+        tex_uniform.proj  = MatrixToFloatV(matrices.proj);
+        tex_uniform.time = get_time();
+        memcpy(ctx.ubos[UBO_TYPE_TEX].buff.mapped, &tex_uniform, sizeof(Texture_Uniform_Data));
     }
     vk_end_drawing();
 
@@ -526,7 +521,6 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
-    vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
     destroy_ubos();
     vk_destroy();
@@ -588,14 +582,26 @@ void unload_pc_texture(Texture texture)
     vk_unload_pc_texture(texture.id);
 }
 
+bool tex_sampler_init()
+{
+    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_TEX_SAMPLER))            return false;
+    if (!vk_descriptor_pool_init(POOL_TEX_SAMPLER))                                return false;
+    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_TEX_SAMPLER, POOL_TEX_SAMPLER)) return false;
+    return true;
+}
+
 bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!tex_example.buff.handle) {
-        tex_example.buff.size = sizeof(Texture_UBO);
-        if (!vk_tex_ubo_init(&tex_example.buff)) nob_return_defer(false);
-        if (!vk_tex_sampler_init())              nob_return_defer(false);
+    if (!ctx.ubos[UBO_TYPE_TEX].buff.handle) {
+        Buffer buff = {
+            .items = &tex_uniform,
+            .size = sizeof(Texture_Uniform_Data),
+            .count = 1,
+        };
+        if (!ubo_init(buff, EXAMPLE_TEX)) nob_return_defer(false);
+        if (!tex_sampler_init())          nob_return_defer(false);
     }
 
     if (!ctx.pipelines[PIPELINE_TEXTURE])
@@ -804,6 +810,7 @@ bool ubo_init(Buffer buff, Example example)
         .data = buff.items,
     };
     UBO_Type type = (example == EXAMPLE_TEX) ? UBO_TYPE_TEX : UBO_TYPE_ADV_POINT_CLOUD;
+    assert(!(ctx.ubos[type].buff.handle) && "memory leak");
     ctx.ubos[type] = ubo;
     if (!vk_ubo_init(&ctx.ubos[type].buff)) return false;
 

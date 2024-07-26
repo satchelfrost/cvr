@@ -316,6 +316,7 @@ void log_usage(const char *program)
     nob_log(NOB_INFO, "    -e <example_name> optional example");
     nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
     nob_log(NOB_INFO, "    -l list available examples");
+    nob_log(NOB_INFO, "    -g debug launch gf2");
 }
 
 void print_examples()
@@ -371,6 +372,7 @@ int main(int argc, char **argv)
     Nob_Cmd cmd = {0};
     const char *program = nob_shift_args(&argc, &argv);
     char *example = NULL;
+    bool debug = false;
     while (argc > 0) {
         char flag;
         char *flags = nob_shift_args(&argc, &argv);
@@ -399,6 +401,9 @@ int main(int argc, char **argv)
             case 'l':
                 print_examples();
                 return 0;
+                break;
+            case 'g':
+                debug = true;
                 break;
             default:
                 nob_log(NOB_ERROR, "unrecognized flag %c", flag);
@@ -476,7 +481,10 @@ int main(int argc, char **argv)
         const char *example_bin_path = nob_temp_sprintf("./build/%s", example_path);
         if (!cd(example_bin_path, false)) return 1;
         const char *bin = nob_temp_sprintf("./%s", examples[i].name);
-        nob_cmd_append(&cmd, bin);
+        if (debug)
+            nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
+        else
+            nob_cmd_append(&cmd, bin);
         if (!nob_cmd_run_sync(cmd)) return 1;
         if (!cd("../../../", true)) return 1;
     } else {
