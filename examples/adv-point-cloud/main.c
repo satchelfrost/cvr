@@ -37,9 +37,9 @@ typedef struct {
     int cam_1;
     int cam_2;
     int cam_3;
-} Point_Cloud_Uniform_Data;
+} Point_Cloud_Uniform;
 
-Point_Cloud_Uniform_Data uniform = {0};
+Point_Cloud_Uniform uniform = {0};
 
 bool read_vtx(const char *file, Vertices *verts)
 {
@@ -231,7 +231,7 @@ void log_shader_mode(Shader_Mode mode)
 }
 
 /* might be able to clean this up */
-bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_Uniform_Data *uniform)
+bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_Uniform *uniform)
 {
     bool result = true;
 
