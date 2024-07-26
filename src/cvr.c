@@ -74,13 +74,6 @@ typedef struct {
     size_t capacity;
 } Compute_Buffers;
 
-/* Uniform buffer object for texture example */
-typedef struct {
-    float16 model;
-    float16 view;
-    float16 proj;
-    float time;
-} Texture_Uniform_Data;
 
 typedef struct {
     Matrix view;
@@ -98,7 +91,6 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-Texture_Uniform_Data tex_uniform = {0};
 Compute_Buffers compute_buffs = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
@@ -259,14 +251,12 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    if (ctx.ubos[UBO_TYPE_TEX].buff.handle) {
-        /* update uniform buffer for texture exaxmple */
-        tex_uniform.model = MatrixToFloatV(MatrixIdentity());
-        tex_uniform.view  = MatrixToFloatV(matrices.view);
-        tex_uniform.proj  = MatrixToFloatV(matrices.proj);
-        tex_uniform.time = get_time();
-        memcpy(ctx.ubos[UBO_TYPE_TEX].buff.mapped, &tex_uniform, sizeof(Texture_Uniform_Data));
+    for (size_t i = 0; i < UBO_TYPE_COUNT; i++) {
+        UBO ubo = ctx.ubos[i];
+        if (ubo.buff.handle)
+            memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
     }
+
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -594,19 +584,11 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!ctx.ubos[UBO_TYPE_TEX].buff.handle) {
-        Buffer buff = {
-            .items = &tex_uniform,
-            .size = sizeof(Texture_Uniform_Data),
-            .count = 1,
-        };
-        if (!ubo_init(buff, EXAMPLE_TEX)) nob_return_defer(false);
-        if (!tex_sampler_init())          nob_return_defer(false);
-    }
-
-    if (!ctx.pipelines[PIPELINE_TEXTURE])
+    if (!ctx.pipelines[PIPELINE_TEXTURE]) {
+        if (!tex_sampler_init()) nob_return_defer(false);
         if (!vk_basic_pl_init(PIPELINE_TEXTURE))
             nob_return_defer(false);
+    }
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
@@ -877,43 +859,6 @@ void destroy_compute_buff(size_t id)
         nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
 }
 
-bool draw_point_cloud(size_t id)
-{
-    bool result = true;
-
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
-            nob_return_defer(false);
-
-    Vk_Buffer vtx_buff = {0};
-    for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle) {
-            vtx_buff = point_clouds.items[i];
-        }
-    }
-
-    if (!vtx_buff.handle) {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
-        nob_return_defer(false);
-    }
-
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
-    }
-
-    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    Vk_Buffer dummy = {0};
-    if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mvp))
-        nob_return_defer(false);
-
-defer:
-    return result;
-}
-
 bool draw_points(size_t vtx_id, Example example)
 {
     bool result = true;
@@ -924,7 +869,7 @@ bool draw_points(size_t vtx_id, Example example)
             Descriptor_Set_Layouts set_layouts = {0};
             nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].set_layout);
             nob_da_append(&set_layouts, ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER].set_layout);
-            if (!vk_adv_pl_init(PIPELINE_POINT_CLOUD_ADV, set_layouts))
+            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
                 nob_return_defer(false);
         }
     } else if (example == EXAMPLE_POINT_CLOUD) {
@@ -1047,17 +992,4 @@ bool get_matrix_tos(Matrix *model)
 
 defer:
     return result;
-}
-
-bool update_ubo(Example example)
-{
-    if (example == EXAMPLE_ADV_POINT_CLOUD) {
-        UBO ubo = ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD];
-        memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
-    } else {
-        nob_log(NOB_ERROR, "Other examples not supported yet");
-        return false;
-    }
-
-    return true;
 }

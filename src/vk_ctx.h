@@ -688,171 +688,12 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
     if (pipeline_type == PIPELINE_TEXTURE) {
-        nob_da_append(&set_layouts, ctx.ubos[SET_LAYOUT_TEX_UBO].set_layout);
+        nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_TEX].set_layout);
         nob_da_append(&set_layouts, ctx.texture_sets[SET_LAYOUT_TEX_SAMPLER].set_layout);
     } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
-        nob_da_append(&set_layouts, ctx.ubos[SET_LAYOUT_ADV_POINT_CLOUD_UBO].set_layout);
+        nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].set_layout);
         nob_da_append(&set_layouts, ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER].set_layout);
     }
-    pipeline_layout_ci.pSetLayouts = set_layouts.items;
-    pipeline_layout_ci.setLayoutCount = set_layouts.count;
-    VkPushConstantRange pk_range = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = sizeof(float16),
-    };
-    pipeline_layout_ci.pPushConstantRanges = &pk_range;
-    pipeline_layout_ci.pushConstantRangeCount = 1;
-    VkResult vk_result = vkCreatePipelineLayout(
-        ctx.device,
-        &pipeline_layout_ci,
-        NULL,
-        &ctx.pipeline_layouts[pipeline_type]
-    );
-    vk_chk(vk_result, "failed to create pipeline layout");
-    VkPipelineDepthStencilStateCreateInfo depth_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = VK_TRUE,
-        .depthWriteEnable = VK_TRUE,
-        .depthCompareOp = VK_COMPARE_OP_LESS,
-        .maxDepthBounds = 1.0f,
-    };
-
-    VkGraphicsPipelineCreateInfo pipeline_ci = {0};
-    pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipeline_ci.stageCount = NOB_ARRAY_LEN(stages);
-    pipeline_ci.pStages = stages;
-    pipeline_ci.pVertexInputState = &vertex_input_ci;
-    pipeline_ci.pInputAssemblyState = &input_assembly_ci;
-    pipeline_ci.pViewportState = &viewport_state_ci;
-    pipeline_ci.pRasterizationState = &rasterizer_ci;
-    pipeline_ci.pMultisampleState = &multisampling_ci;
-    pipeline_ci.pColorBlendState = &color_blend_ci;
-    pipeline_ci.pDynamicState = &dynamic_state_ci;
-    pipeline_ci.pDepthStencilState = &depth_ci;
-    pipeline_ci.layout = ctx.pipeline_layouts[pipeline_type];
-    pipeline_ci.renderPass = ctx.render_pass;
-    pipeline_ci.subpass = 0;
-
-    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines[pipeline_type]);
-    vk_chk(vk_result, "failed to create pipeline");
-
-defer:
-    vkDestroyShaderModule(ctx.device, frag_ci.module, NULL);
-    vkDestroyShaderModule(ctx.device, vert_ci.module, NULL);
-    nob_da_free(vert_attrs);
-    nob_da_free(set_layouts);
-    return result;
-}
-
-bool vk_adv_pl_init(Pipeline_Type pipeline_type, Descriptor_Set_Layouts set_layouts)
-{
-    bool result = true;
-
-    char *vert_shader_name;
-    char *frag_shader_name;
-    switch (pipeline_type) {
-    case PIPELINE_TEXTURE:
-        vert_shader_name = "./res/texture.vert.spv";
-        frag_shader_name = "./res/texture.frag.spv";
-        break;
-    case PIPELINE_POINT_CLOUD_ADV:
-    case PIPELINE_POINT_CLOUD:
-        vert_shader_name = "./res/point-cloud.vert.spv";
-        frag_shader_name = "./res/point-cloud.frag.spv";
-        break;
-    case PIPELINE_DEFAULT:
-    case PIPELINE_WIREFRAME:
-    default:
-        vert_shader_name = "./res/default.vert.spv";
-        frag_shader_name = "./res/default.frag.spv";
-        break;
-    }
-
-    VkPipelineShaderStageCreateInfo vert_ci = {0};
-    vert_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vert_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vert_ci.pName = "main";
-    if (!vk_shader_mod_init(vert_shader_name, &vert_ci.module))
-        nob_return_defer(false);
-
-    VkPipelineShaderStageCreateInfo frag_ci = {0};
-    frag_ci .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    frag_ci .stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    frag_ci.pName = "main";
-    if (!vk_shader_mod_init(frag_shader_name, &frag_ci.module))
-        nob_return_defer(false);
-
-    VkPipelineShaderStageCreateInfo stages[] = {vert_ci, frag_ci};
-
-    VkPipelineDynamicStateCreateInfo dynamic_state_ci = {0};
-    dynamic_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    dynamic_state_ci.dynamicStateCount = NOB_ARRAY_LEN(dynamic_states);
-    dynamic_state_ci.pDynamicStates = dynamic_states;
-
-    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {0};
-    vertex_input_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VtxAttrDescs vert_attrs = {0};
-    get_attr_descs(&vert_attrs, pipeline_type);
-    VkVertexInputBindingDescription binding_desc = get_binding_desc(pipeline_type);
-    vertex_input_ci.vertexBindingDescriptionCount = 1;
-    vertex_input_ci.pVertexBindingDescriptions = &binding_desc;
-    vertex_input_ci.vertexAttributeDescriptionCount = vert_attrs.count;
-    vertex_input_ci.pVertexAttributeDescriptions = vert_attrs.items;
-
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {0};
-    input_assembly_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    if (pipeline_type == PIPELINE_POINT_CLOUD || pipeline_type == PIPELINE_POINT_CLOUD_ADV)
-        input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-    else
-        input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkViewport viewport = {0};
-    viewport.width = (float) ctx.extent.width;
-    viewport.height = (float) ctx.extent.height;
-    viewport.maxDepth = 1.0f;
-    VkRect2D scissor = {0};
-    scissor.extent = ctx.extent;
-    VkPipelineViewportStateCreateInfo viewport_state_ci = {0};
-    viewport_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport_state_ci.viewportCount = 1;
-    viewport_state_ci.pViewports = &viewport;
-    viewport_state_ci.scissorCount = 1;
-    viewport_state_ci.pScissors = &scissor;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
-    rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer_ci.polygonMode = (pipeline_type == PIPELINE_WIREFRAME) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-    rasterizer_ci.lineWidth = 1.0f;
-    rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
-    rasterizer_ci.lineWidth = VK_FRONT_FACE_CLOCKWISE;
-
-    VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
-    multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling_ci.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState color_blend = {0};
-    color_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
-                                 VK_COLOR_COMPONENT_G_BIT |
-                                 VK_COLOR_COMPONENT_B_BIT |
-                                 VK_COLOR_COMPONENT_A_BIT;
-    VkPipelineColorBlendStateCreateInfo color_blend_ci = {0};
-    color_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    color_blend_ci.attachmentCount = 1;
-    color_blend_ci.pAttachments = &color_blend;
-
-    VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
-    pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    // Descriptor_Set_Layouts set_layouts = {0};
-    // if (pipeline_type == PIPELINE_TEXTURE) {
-    //     nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_TEX_UBO]);
-    //     nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_TEX_SAMPLER]);
-    // } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
-    //     nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_UBO]);
-    //     nob_da_append(&set_layouts, ctx.set_layouts[SET_LAYOUT_POINT_CLOUD_SAMPLER]);
-    // }
-
     pipeline_layout_ci.pSetLayouts = set_layouts.items;
     pipeline_layout_ci.setLayoutCount = set_layouts.count;
     VkPushConstantRange pk_range = {
@@ -1432,10 +1273,13 @@ bool vk_sampler_descriptor_set_layout_init(Set_Layout_Type layout_type)
     Vk_Texture_Set texture_set = ctx.texture_sets[layout_type];
     if (layout_type == SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER) {
         for (size_t i = 0; i < texture_set.count; i++) {
-            bindings.items[i].binding = i;
-            bindings.items[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings.items[i].descriptorCount = 1;
-            bindings.items[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            VkDescriptorSetLayoutBinding binding = {
+                .binding = i,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            };
+            nob_da_append(&bindings, binding);
         }
         layout_ci.pBindings = bindings.items;
         layout_ci.bindingCount = bindings.count;

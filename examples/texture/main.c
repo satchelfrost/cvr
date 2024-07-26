@@ -1,5 +1,6 @@
 #include "cvr.h"
 #include "ext/nob.h"
+#include "ext/raylib-5.0/raymath.h"
 #include <math.h>
 
 bool load_texture(const char *name, Texture *texture)
@@ -35,6 +36,15 @@ int main()
     init_window(500, 500, "Load texture");
     set_target_fps(60);
 
+    /* initialize and map the uniform data */
+    float time = 0.0f;
+    Buffer buff = {
+        .size  = sizeof(float),
+        .count = 1,
+        .items = &time,
+    };
+    if (!ubo_init(buff, EXAMPLE_TEX)) return 1;
+
     Texture matrix_tex = {0};
     if (!load_texture("res/matrix.png", &matrix_tex)) return 1;
     float matrix_aspect = (float)matrix_tex.width / matrix_tex.height;
@@ -43,9 +53,9 @@ int main()
     float statue_aspect = (float)statue_tex.width / statue_tex.height;
 
     while(!window_should_close()) {
+        time = get_time();
         begin_drawing(BLACK);
         begin_mode_3d(camera);
-            double time = get_time();
             rotate_z(3.14259f);
             rotate_y(time);
             push_matrix();

@@ -311,11 +311,9 @@ bool upload_point_cloud(Buffer buff, size_t *id);
 bool upload_compute_points(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
 void destroy_compute_buff(size_t id);
-bool draw_point_cloud(size_t id);
 bool draw_points(size_t vtx_id, Example example);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
 bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
-bool update_ubo(Example example);
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
 bool ubo_init(Buffer buff, Example example);

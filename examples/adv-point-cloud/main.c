@@ -335,7 +335,7 @@ int main()
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
-    /* configure pipeline with descriptor sets*/
+    /* initialize and map the uniform data */
     Buffer buff = {
         .size  = sizeof(uniform),
         .count = 1,
@@ -357,6 +357,7 @@ int main()
 
     /* game loop */
     while (!window_should_close()) {
+        log_fps();
         /* input */
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
@@ -404,7 +405,6 @@ int main()
             /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
             if (!update_pc_uniform(&cameras[1], shader_mode, cam_order, &uniform)) return 1;
-            if (!update_ubo(EXAMPLE_ADV_POINT_CLOUD)) return 1;
 
         end_mode_3d();
         end_drawing();
