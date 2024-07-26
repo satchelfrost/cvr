@@ -574,9 +574,13 @@ void unload_pc_texture(Texture texture)
 
 bool tex_sampler_init()
 {
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_TEX_SAMPLER))            return false;
-    if (!vk_descriptor_pool_init(POOL_TEX_SAMPLER))                                return false;
-    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_TEX_SAMPLER, POOL_TEX_SAMPLER)) return false;
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[SET_LAYOUT_TEX_SAMPLER];
+    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_TEX_SAMPLER))
+        return false;
+    if (!vk_sampler_descriptor_pool_init(texture_set))
+        return false;
+    if (!vk_sampler_descriptor_set_init(texture_set, false))
+        return false;
     return true;
 }
 
@@ -787,28 +791,33 @@ bool ubo_init(Buffer buff, Example example)
     }
 
     /* initialize buffer and map memory */
-    UBO ubo = {
+    UBO tmp_ubo = {
         .buff = {.count = buff.count, .size  = buff.size},
         .data = buff.items,
     };
     UBO_Type type = (example == EXAMPLE_TEX) ? UBO_TYPE_TEX : UBO_TYPE_ADV_POINT_CLOUD;
     assert(!(ctx.ubos[type].buff.handle) && "memory leak");
-    ctx.ubos[type] = ubo;
+    ctx.ubos[type] = tmp_ubo;
     if (!vk_ubo_init(&ctx.ubos[type].buff)) return false;
 
     VkShaderStageFlags flags = VK_SHADER_STAGE_VERTEX_BIT;
-    if (!vk_ubo_descriptor_set_layout_init(flags, 0, &ctx.ubos[type].set_layout)) return false;
-    if (!vk_create_ubo_descriptor_pool(&ctx.ubos[type].descriptor_pool))          return false;
-    if (!vk_ubo_descriptor_set_init(&ctx.ubos[type]))                             return false;
+    UBO *ubo = &ctx.ubos[type];
+    if (!vk_ubo_descriptor_set_layout_init(flags, 0, &ubo->set_layout)) return false;
+    if (!vk_ubo_descriptor_pool(&ubo->descriptor_pool))                 return false;
+    if (!vk_ubo_descriptor_set_init(ubo))                               return false;
 
     return true;
 }
 
 bool pc_sampler_init()
 {
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER))                        return false;
-    if (!vk_descriptor_pool_init(POOL_ADV_POINT_CLOUD_SAMPLER))                                            return false;
-    if (!vk_sampler_descriptor_set_init(SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER, POOL_ADV_POINT_CLOUD_SAMPLER)) return false;
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER];
+    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER))
+        return false;
+    if (!vk_sampler_descriptor_pool_init(texture_set))
+        return false;
+    if (!vk_sampler_descriptor_set_init(texture_set, true))
+        return false;
 
     return true;
 }

@@ -191,10 +191,10 @@ bool vk_depth_init();
 bool vk_ubo_init(Vk_Buffer *buff);
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, uint32_t binding, VkDescriptorSetLayout *layout);
 bool vk_ubo_descriptor_set_init(UBO *ubo);
-bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type);
-bool vk_create_ubo_descriptor_pool(VkDescriptorPool *pool);
+bool vk_ubo_descriptor_pool(VkDescriptorPool *pool);
+bool vk_sampler_descriptor_pool_init(Vk_Texture_Set *texture_set);
 bool vk_sampler_descriptor_set_layout_init(Set_Layout_Type layout_type);
-bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool_Type pool_type);
+bool vk_sampler_descriptor_set_init(Vk_Texture_Set *texture_set, bool group_textures);
 
 /* Manages synchronization info and gets ready for vulkan commands. */
 bool vk_begin_drawing();
@@ -925,7 +925,6 @@ void vk_begin_render_pass(Color color)
     vkCmdBeginRenderPass(cmd_man.buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-/* TODO: might want to call this draw triangles */
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
     bool result = true;
@@ -1333,37 +1332,18 @@ defer:
     return result;
 }
 
-bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type)
+bool vk_sampler_descriptor_pool_init(Vk_Texture_Set *texture_set)
 {
     bool result = true;
 
     uint32_t max_sets = 0;
     VkDescriptorPoolSize pool_size = {0};
-    switch(pool_type) {
-    case POOL_TEX_SAMPLER: {
-       Vk_Texture_Set texture_set = ctx.texture_sets[SET_LAYOUT_TEX_SAMPLER];
-        if (texture_set.count) {
-            pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            pool_size.descriptorCount = texture_set.count;
-            max_sets += texture_set.count;
-        } else {
-            nob_log(NOB_ERROR, "no textures loaded, descriptor pool failure");
-            nob_return_defer(false);
-        }
-    } break;
-    case POOL_ADV_POINT_CLOUD_SAMPLER: {
-       Vk_Texture_Set texture_set = ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER];
-        if (texture_set.count) {
-            pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            pool_size.descriptorCount = texture_set.count;
-            max_sets += texture_set.count;
-        } else {
-            nob_log(NOB_ERROR, "no point cloud textures loaded, descriptor pool failure");
-            nob_return_defer(false);
-        }
-    } break;
-    default:
-        nob_log(NOB_ERROR, "unrecognized descriptor pool type %d", pool_type);
+    if (texture_set->count) {
+        pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pool_size.descriptorCount = texture_set->count;
+        max_sets += texture_set->count;
+    } else {
+        nob_log(NOB_ERROR, "no textures loaded, descriptor pool failure");
         nob_return_defer(false);
     }
 
@@ -1374,7 +1354,7 @@ bool vk_descriptor_pool_init(Descriptor_Pool_Type pool_type)
         .maxSets = max_sets,
     };
 
-    VkDescriptorPool *pool = &ctx.texture_sets[pool_type].descriptor_pool;
+    VkDescriptorPool *pool = &texture_set->descriptor_pool;
     VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
     if(!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor pool");
@@ -1385,7 +1365,7 @@ defer:
     return result;
 }
 
-bool vk_create_ubo_descriptor_pool(VkDescriptorPool *pool)
+bool vk_ubo_descriptor_pool(VkDescriptorPool *pool)
 {
     bool result = true;
 
@@ -1410,16 +1390,9 @@ defer:
     return result;
 }
 
-/* TODO: this should take a pointer to a Vk_Texture_Set, and a boolean that says to group textures or not */
-bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool_Type pool_type)
+bool vk_sampler_descriptor_set_init(Vk_Texture_Set *texture_set, bool group_textures)
 {
     bool result = true;
-
-    if (pool_type != POOL_TEX_SAMPLER && pool_type != POOL_ADV_POINT_CLOUD_SAMPLER) {
-        nob_log(NOB_ERROR, "failed to initialize texture descriptor set");
-        nob_return_defer(false);
-    }
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[pool_type];
 
     /* allocate texture descriptor sets */
     VkDescriptorSetAllocateInfo alloc = {
@@ -1429,7 +1402,7 @@ bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool
         .pSetLayouts = &texture_set->set_layout,
     };
 
-    if (layout_type == SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER) {
+    if (group_textures) {
         VkDescriptorSet *set = &texture_set->descriptor_set;
         VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
         if (!VK_SUCCEEDED(res)) {
@@ -1463,7 +1436,7 @@ bool vk_sampler_descriptor_set_init(Set_Layout_Type layout_type, Descriptor_Pool
             .sampler     = texture_set->items[tex].sampler,
         };
         write.pImageInfo = &img_info;
-        if (layout_type == SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER) {
+        if (group_textures) {
             write.dstBinding = tex;
             write.dstSet = texture_set->descriptor_set;
         } else {
