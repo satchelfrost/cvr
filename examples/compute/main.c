@@ -14,8 +14,8 @@ typedef struct {
 Particle particles[PARTICLE_COUNT];
 
 typedef struct {
-    size_t id;
     Buffer buff;
+    size_t id;
 } Compute_Buffer;
 
 Color colors[] = {
@@ -47,7 +47,7 @@ int main()
 
     /* initialize the particles */
     for (size_t i = 0; i < PARTICLE_COUNT; i++) {
-        float r = rand() / RAND_MAX;
+        float r = (float) rand() / RAND_MAX;
         float theta = (i % 360) * (3.14259f / 180.0f);
         Particle *particle = &particles[i];
         particle->velocity.x = particle->pos.x = r * cos(theta) * height / width;
@@ -55,25 +55,45 @@ int main()
         particle->color = color_to_vec4(colors[i % NOB_ARRAY_LEN(colors)]);
     }
 
-    Compute_Buffer compute = {
+    Compute_Buffer compute_1 = {
         .buff = {
             .items = particles,
             .size  = PARTICLE_COUNT * sizeof(Particle),
             .count = PARTICLE_COUNT,
         },
     };
+    Compute_Buffer compute_2 = compute_1;
 
-    if (!upload_compute_points(compute.buff, &compute.id)) return 1;
+    if (!upload_compute_points(compute_1.buff, &compute_1.id)) return 1;
+    if (!upload_compute_points(compute_2.buff, &compute_2.id)) return 1;
 
+    float time = 0.0f;
+    Buffer buff = {
+        .size  = sizeof(float),
+        .count = 1,
+        .items = &time,
+    };
+    if (!ubo_init(buff, EXAMPLE_COMPUTE)) return 1;
+
+    size_t id = compute_1.id;
     while (!window_should_close()) {
-        begin_drawing(RED);
+        time = get_time();
+        // begin_compute();
+        //     if (!compute_points(id)) return 1;
+        // end_compute();
+
+        begin_drawing(BLACK);
         begin_mode_3d(camera);
+            // rotate_y(get_time());
+            // draw_shape_wireframe(SHAPE_CUBE);
+            if (!draw_points(0, EXAMPLE_COMPUTE)) return 1;
         end_mode_3d();
         end_drawing();
+        id = (id == compute_1.id) ? compute_2.id : compute_1.id;
     }
 
-
-    destroy_compute_buff(compute.id);
+    destroy_compute_buff(compute_1.id);
+    destroy_compute_buff(compute_2.id);
     close_window();
     return 0;
 }

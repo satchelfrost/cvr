@@ -69,13 +69,6 @@ typedef struct {
 } Point_Clouds;
 
 typedef struct {
-    Vk_Buffer *items;
-    size_t count;
-    size_t capacity;
-} Compute_Buffers;
-
-
-typedef struct {
     Matrix view;
     Matrix proj;
     Matrix viewProj;
@@ -91,7 +84,6 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-Compute_Buffers compute_buffs = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -275,6 +267,16 @@ void end_drawing()
 
     poll_input_events();
     cvr_time.frame_count++;
+}
+
+void begin_compute()
+{
+    assert(vk_begin_compute() && "failed to begin compute");
+}
+
+void end_compute()
+{
+    assert(vk_end_compute() && "failed to end compute");
 }
 
 void push_matrix()
@@ -564,22 +566,22 @@ Texture load_pc_texture_from_image(Image img)
 
 void unload_texture(Texture texture)
 {
-    vk_unload_texture(texture.id);
+    vk_unload_texture(texture.id, SAMPLER_TYPE_ONE_TEX);
 }
 
 void unload_pc_texture(Texture texture)
 {
-    vk_unload_pc_texture(texture.id);
+    vk_unload_texture(texture.id, SAMPLER_TYPE_FOUR_TEX);
 }
 
 bool tex_sampler_init()
 {
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[SET_LAYOUT_TEX_SAMPLER];
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_TEX_SAMPLER))
+    Sampler_Type type = SAMPLER_TYPE_ONE_TEX;
+    if (!vk_sampler_descriptor_set_layout_init(type))
         return false;
-    if (!vk_sampler_descriptor_pool_init(texture_set))
+    if (!vk_sampler_descriptor_pool_init(type))
         return false;
-    if (!vk_sampler_descriptor_set_init(texture_set, false))
+    if (!vk_sampler_descriptor_set_init(type))
         return false;
     return true;
 }
@@ -777,46 +779,58 @@ bool upload_compute_points(Buffer buff, size_t *id)
         return false;
     }
     
-    *id = compute_buffs.count;
-    nob_da_append(&compute_buffs, vk_buff);
+    *id = ctx.compute_buffs.count;
+    nob_da_append(&ctx.compute_buffs, vk_buff);
 
     return true;
 }
 
 bool ubo_init(Buffer buff, Example example)
 {
-    if (!buff.items || !buff.size) {
-        nob_log(NOB_ERROR, "uniform must be initialized with data");
+    UBO_Type ubo_type; 
+    VkShaderStageFlags flags;
+    switch (example) {
+    case EXAMPLE_TEX:
+        ubo_type = UBO_TYPE_TEX;
+        flags = VK_SHADER_STAGE_VERTEX_BIT;
+        break;
+    case EXAMPLE_ADV_POINT_CLOUD:
+        ubo_type = UBO_TYPE_ADV_POINT_CLOUD;
+        flags = VK_SHADER_STAGE_VERTEX_BIT;
+        break;
+    case EXAMPLE_COMPUTE:
+        ubo_type = UBO_TYPE_COMPUTE;
+        flags = VK_SHADER_STAGE_COMPUTE_BIT;
+        break;
+    case EXAMPLE_POINT_CLOUD:
+    default:
+        nob_log(NOB_ERROR, "example %d not handled for ubo_init", example);
         return false;
     }
 
-    /* initialize buffer and map memory */
-    UBO tmp_ubo = {
-        .buff = {.count = buff.count, .size  = buff.size},
+    UBO ubo = {
+        .buff = {
+            .count = buff.count,
+            .size  = buff.size
+        },
         .data = buff.items,
     };
-    UBO_Type type = (example == EXAMPLE_TEX) ? UBO_TYPE_TEX : UBO_TYPE_ADV_POINT_CLOUD;
-    assert(!(ctx.ubos[type].buff.handle) && "memory leak");
-    ctx.ubos[type] = tmp_ubo;
-    if (!vk_ubo_init(&ctx.ubos[type].buff)) return false;
-
-    VkShaderStageFlags flags = VK_SHADER_STAGE_VERTEX_BIT;
-    UBO *ubo = &ctx.ubos[type];
-    if (!vk_ubo_descriptor_set_layout_init(flags, 0, &ubo->set_layout)) return false;
-    if (!vk_ubo_descriptor_pool(&ubo->descriptor_pool))                 return false;
-    if (!vk_ubo_descriptor_set_init(ubo))                               return false;
+    if (!vk_ubo_init(ubo, ubo_type)) return false;
+    if (!vk_ubo_descriptor_set_layout_init(flags, ubo_type)) return false;
+    if (!vk_ubo_descriptor_pool_init(ubo_type))              return false;
+    if (!vk_ubo_descriptor_set_init(ubo_type))               return false;
 
     return true;
 }
 
 bool pc_sampler_init()
 {
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER];
-    if (!vk_sampler_descriptor_set_layout_init(SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER))
+    Sampler_Type type = SAMPLER_TYPE_FOUR_TEX;
+    if (!vk_sampler_descriptor_set_layout_init(type))
         return false;
-    if (!vk_sampler_descriptor_pool_init(texture_set))
+    if (!vk_sampler_descriptor_pool_init(type))
         return false;
-    if (!vk_sampler_descriptor_set_init(texture_set, true))
+    if (!vk_sampler_descriptor_set_init(type))
         return false;
 
     return true;
@@ -857,15 +871,39 @@ void destroy_compute_buff(size_t id)
     vkDeviceWaitIdle(ctx.device);
 
     bool found = false;
-    for (size_t i = 0; i < compute_buffs.count; i++) {
-        if (i == id && compute_buffs.items[i].handle) {
-            vk_buff_destroy(compute_buffs.items[i]);
+    for (size_t i = 0; i < ctx.compute_buffs.count; i++) {
+        if (i == id && ctx.compute_buffs.items[i].handle) {
+            vk_buff_destroy(ctx.compute_buffs.items[i]);
             found = true;
         }
     }
 
     if (!found)
         nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
+}
+
+bool compute_points(size_t vtx_id)
+{
+    bool result = true;
+
+    if (!ctx.compute_pipeline) {
+        if (!vk_compute_pl_init())
+            nob_return_defer(false);
+    }
+
+    (void)vtx_id;
+    // Vk_Buffer vtx_buff = {0};
+    // if (vtx_id < ctx.compute_buffs.count && ctx.compute_buffs.items[vtx_id].handle) {
+    //     vtx_buff = ctx.compute_buffs.items[vtx_id];
+    // } else {
+    //     nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+    //     nob_return_defer(false);
+    // }
+
+    vk_compute();
+
+defer:
+    return result;
 }
 
 bool draw_points(size_t vtx_id, Example example)
@@ -875,9 +913,6 @@ bool draw_points(size_t vtx_id, Example example)
     if (example == EXAMPLE_ADV_POINT_CLOUD) {
         if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
             pc_sampler_init();
-            Descriptor_Set_Layouts set_layouts = {0};
-            nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].set_layout);
-            nob_da_append(&set_layouts, ctx.texture_sets[SET_LAYOUT_ADV_POINT_CLOUD_SAMPLER].set_layout);
             if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
                 nob_return_defer(false);
         }
@@ -885,17 +920,31 @@ bool draw_points(size_t vtx_id, Example example)
         if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
             if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
                 nob_return_defer(false);
+    } else if (example == EXAMPLE_COMPUTE) {
+        if (!ctx.pipelines[PIPELINE_COMPUTE]) {
+            if (!vk_basic_pl_init(PIPELINE_COMPUTE))
+                nob_return_defer(false);
+        }
     } else {
         nob_log(NOB_ERROR, "no other example supported yet for draw points");
         nob_return_defer(false);
     }
 
     Vk_Buffer vtx_buff = {0};
-    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
-        vtx_buff = point_clouds.items[vtx_id];
+    if (example == EXAMPLE_COMPUTE) {
+        if (vtx_id < ctx.compute_buffs.count && ctx.compute_buffs.items[vtx_id].handle) {
+            vtx_buff = ctx.compute_buffs.items[vtx_id];
+        } else {
+            nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+            nob_return_defer(false);
+        }
     } else {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-        nob_return_defer(false);
+        if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
+            vtx_buff = point_clouds.items[vtx_id];
+        } else {
+            nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+            nob_return_defer(false);
+        }
     }
 
     Matrix model = {0};

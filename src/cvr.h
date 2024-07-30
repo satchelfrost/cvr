@@ -227,6 +227,7 @@ typedef enum {
     EXAMPLE_TEX,
     EXAMPLE_POINT_CLOUD,
     EXAMPLE_ADV_POINT_CLOUD,
+    EXAMPLE_COMPUTE,
     EXAMPLE_CUSTOM,
     EXAMPLE_COUNT,
 } Example;
@@ -248,6 +249,9 @@ void begin_mode_3d(Camera camera);                          /* Set camera and pu
 void end_mode_3d();                                         /* Pops matrix, checks for errors */
 void end_drawing();                                         /* Submits commands, presents, and polls for input */
 void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
+void begin_compute();
+void end_compute();
+bool compute_points(size_t vtx_id);
 
 bool is_key_pressed(int key);
 bool is_key_down(int key);
