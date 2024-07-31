@@ -679,15 +679,23 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling_ci.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkPipelineColorBlendAttachmentState color_blend = {0};
-    color_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
-                                 VK_COLOR_COMPONENT_G_BIT |
-                                 VK_COLOR_COMPONENT_B_BIT |
-                                 VK_COLOR_COMPONENT_A_BIT;
-    VkPipelineColorBlendStateCreateInfo color_blend_ci = {0};
-    color_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    color_blend_ci.attachmentCount = 1;
-    color_blend_ci.pAttachments = &color_blend;
+    VkPipelineColorBlendAttachmentState color_blend = {
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        .blendEnable = VK_TRUE,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    };
+
+    VkPipelineColorBlendStateCreateInfo color_blend_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend,
+        .logicOp = VK_LOGIC_OP_COPY,
+    };
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -719,7 +727,7 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = VK_TRUE,
         .depthWriteEnable = VK_TRUE,
-        .depthCompareOp = VK_COMPARE_OP_LESS,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
         .maxDepthBounds = 1.0f,
     };
 
@@ -1214,17 +1222,36 @@ bool vk_end_drawing()
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
 
-    VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+    VkSemaphore wait_sems[] = {cmd_man.compute_fin_sem, cmd_man.img_avail_sem};
+    VkPipelineStageFlags wait_stages[] = {
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &cmd_man.img_avail_sem,
+        .waitSemaphoreCount = 2,
+        .pWaitSemaphores = wait_sems,
         .pWaitDstStageMask = wait_stages,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.buff,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
     };
+
+    // Non-compute submit
+    // /* regular */
+    // VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    // VkSubmitInfo submit = {
+    //     .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    //     .waitSemaphoreCount = 1,
+    //     .pWaitSemaphores = &cmd_man.img_avail_sem,
+    //     .pWaitDstStageMask = wait_stages,
+    //     .commandBufferCount = 1,
+    //     .pCommandBuffers = &cmd_man.buff,
+    //     .signalSemaphoreCount = 1,
+    //     .pSignalSemaphores = &cmd_man.render_fin_sem,
+    // };
 
     vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence), "failed to submit command");
 
