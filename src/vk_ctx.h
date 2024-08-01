@@ -1222,7 +1222,6 @@ bool vk_end_drawing()
     vkCmdEndRenderPass(cmd_buffer);
     vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
 
-
     VkSemaphore wait_sems[] = {cmd_man.compute_fin_sem, cmd_man.img_avail_sem};
     VkPipelineStageFlags wait_stages[] = {
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
@@ -1230,28 +1229,20 @@ bool vk_end_drawing()
     };
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = 2,
-        .pWaitSemaphores = wait_sems,
-        .pWaitDstStageMask = wait_stages,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.buff,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
     };
-
-    // Non-compute submit
-    // /* regular */
-    // VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-    // VkSubmitInfo submit = {
-    //     .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-    //     .waitSemaphoreCount = 1,
-    //     .pWaitSemaphores = &cmd_man.img_avail_sem,
-    //     .pWaitDstStageMask = wait_stages,
-    //     .commandBufferCount = 1,
-    //     .pCommandBuffers = &cmd_man.buff,
-    //     .signalSemaphoreCount = 1,
-    //     .pSignalSemaphores = &cmd_man.render_fin_sem,
-    // };
+    if (ctx.pipelines[PIPELINE_COMPUTE]) {
+        submit.waitSemaphoreCount = 2;
+        submit.pWaitSemaphores = wait_sems;
+        submit.pWaitDstStageMask = wait_stages;
+    } else {
+        submit.waitSemaphoreCount = 1;
+        submit.pWaitSemaphores = &wait_sems[1];
+        submit.pWaitDstStageMask = &wait_stages[1];
+    }
 
     vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence), "failed to submit command");
 
@@ -1369,7 +1360,6 @@ bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_ty
     };
     nob_da_append(&bindings, binding);
 
-    /* TODO: this shouldn't go here */
     const size_t EXTRA_COMPUTE_BINDINGS = 2;
     if (ubo_type == UBO_TYPE_COMPUTE) {
         for (size_t i = 0; i < EXTRA_COMPUTE_BINDINGS; i++) {
@@ -1556,7 +1546,6 @@ bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type)
     };
     nob_da_append(&pool_sizes, pool_size);
 
-    /* TODO: this shouldn't go here */
     if (ubo_type == UBO_TYPE_COMPUTE) {
         VkDescriptorPoolSize pool_size = {
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,

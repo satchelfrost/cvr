@@ -49,8 +49,6 @@ int main()
     /* initialize the particles */
     for (size_t i = 0; i < PARTICLE_COUNT; i++) {
         float r = (float) rand() / RAND_MAX;
-        r = (i + 1 % 360) / 360.0f;
-        r = 1.0;
         float theta = (2 * i % 360) * (3.14259f / 180.0f);
         Particle *particle = &particles[i];
         float x = r * cos(theta) * height / width;
@@ -83,21 +81,17 @@ int main()
     };
     if (!ubo_init(buff, EXAMPLE_COMPUTE)) return 1;
 
-    size_t id = compute_1.id;
     while (!window_should_close()) {
         time = get_time();
         begin_compute();
-            if (!compute_points(id)) return 1;
+            if (!compute_points(compute_2.id)) return 1;
         end_compute();
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
-            // rotate_y(get_time());
-            // draw_shape_wireframe(SHAPE_CUBE);
-            if (!draw_points(1, EXAMPLE_COMPUTE)) return 1;
+            if (!draw_points(compute_2.id, EXAMPLE_COMPUTE)) return 1;
         end_mode_3d();
         end_drawing();
-        id = (id == compute_1.id) ? compute_2.id : compute_1.id;
     }
 
     destroy_compute_buff(compute_1.id);
