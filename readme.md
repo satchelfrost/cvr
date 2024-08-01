@@ -41,7 +41,7 @@ Vulkan & GLFW
 
 ### Using apt
 ```bash
-sudo apt install vulkan-tools libvulkan-dev vulkan-validationlayers-dev spirv-tools libglfw3-dev
+sudo apt install vulkan-tools libvulkan-dev vulkan-validationlayers-dev spirv-tools libglfw3-dev libxxf86vm-dev libxi-dev
 ```
 
 Download glslc from [here](https://github.com/google/shaderc/blob/main/downloads.md) and copy (or symlink) it to your /usr/local/bin.
