@@ -1033,16 +1033,17 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
     if (example == EXAMPLE_ADV_POINT_CLOUD) {
         VkDescriptorSet *descriptor_set = &ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].descriptor_set;
         vkCmdBindDescriptorSets(
-                cmd_buffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, descriptor_set, 0, NULL
-                );
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1, descriptor_set, 0, NULL
+        );
 
         vkCmdBindDescriptorSets(
-                cmd_buffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
-                &ctx.texture_sets[SAMPLER_TYPE_FOUR_TEX].descriptor_set, 0, NULL);
+            cmd_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
+            &ctx.texture_sets[SAMPLER_TYPE_FOUR_TEX].descriptor_set, 0, NULL
+        );
     }
 
     float16 mat = MatrixToFloatV(mvp);
@@ -1360,17 +1361,14 @@ bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_ty
     };
     nob_da_append(&bindings, binding);
 
-    const size_t EXTRA_COMPUTE_BINDINGS = 2;
     if (ubo_type == UBO_TYPE_COMPUTE) {
-        for (size_t i = 0; i < EXTRA_COMPUTE_BINDINGS; i++) {
-            VkDescriptorSetLayoutBinding binding = {
-                .binding = i + 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
-                .stageFlags = flags,
-            };
-            nob_da_append(&bindings, binding);
-        }
+        VkDescriptorSetLayoutBinding binding = {
+            .binding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = flags,
+        };
+        nob_da_append(&bindings, binding);
     }
 
     VkDescriptorSetLayoutCreateInfo layout_ci = {
@@ -1387,6 +1385,7 @@ bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_ty
     }
 
 defer:
+    nob_da_free(bindings);
     return result;
 }
 
@@ -1469,23 +1468,24 @@ bool vk_ubo_descriptor_set_init(UBO_Type ubo_type)
     Descriptor_Writes writes = {0};
     nob_da_append(&writes, write);
 
-    const size_t EXTRA_COMPUTE_BINDINGS = 2;
     if (ubo_type == UBO_TYPE_COMPUTE) {
-        for (size_t i = 0; i < EXTRA_COMPUTE_BINDINGS; i++) {
-            VkDescriptorBufferInfo buff_info = {
-                .buffer = ctx.compute_buffs.items[i].handle,
-                .range = ctx.compute_buffs.items[i].size,
-            };
-            VkWriteDescriptorSet write = {
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = ubo->descriptor_set,
-                .dstBinding = i + 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
-                .pBufferInfo = &buff_info,
-            };
-            nob_da_append(&writes, write);
+        if (!ctx.compute_buffs.count) {
+            nob_log(NOB_ERROR, "failed to initialize compute descriptor set, no compute buffers");
+            nob_return_defer(false);
         }
+        VkDescriptorBufferInfo buff_info = {
+            .buffer = ctx.compute_buffs.items[0].handle,
+            .range = ctx.compute_buffs.items[0].size,
+        };
+        VkWriteDescriptorSet write = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = ubo->descriptor_set,
+            .dstBinding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .pBufferInfo = &buff_info,
+        };
+        nob_da_append(&writes, write);
     }
 
     vkUpdateDescriptorSets(ctx.device, writes.count, writes.items, 0, NULL);
@@ -1549,7 +1549,7 @@ bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type)
     if (ubo_type == UBO_TYPE_COMPUTE) {
         VkDescriptorPoolSize pool_size = {
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 2,
+            .descriptorCount = 1,
         };
         nob_da_append(&pool_sizes, pool_size);
     }

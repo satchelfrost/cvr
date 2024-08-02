@@ -882,7 +882,7 @@ void destroy_compute_buff(size_t id)
         nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
 }
 
-bool compute_points(size_t vtx_id)
+bool compute_points()
 {
     bool result = true;
 
@@ -890,15 +890,6 @@ bool compute_points(size_t vtx_id)
         if (!vk_compute_pl_init())
             nob_return_defer(false);
     }
-
-    (void)vtx_id;
-    // Vk_Buffer vtx_buff = {0};
-    // if (vtx_id < ctx.compute_buffs.count && ctx.compute_buffs.items[vtx_id].handle) {
-    //     vtx_buff = ctx.compute_buffs.items[vtx_id];
-    // } else {
-    //     nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-    //     nob_return_defer(false);
-    // }
 
     vk_compute();
 

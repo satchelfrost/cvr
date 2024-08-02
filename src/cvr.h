@@ -251,7 +251,7 @@ void end_drawing();                                         /* Submits commands,
 void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
 void begin_compute();
 void end_compute();
-bool compute_points(size_t vtx_id);
+bool compute_points();
 
 bool is_key_pressed(int key);
 bool is_key_down(int key);

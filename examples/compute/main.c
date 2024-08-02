@@ -61,17 +61,15 @@ int main()
         particle->color = color_to_vec4(colors[i % NOB_ARRAY_LEN(colors)]);
     }
 
-    Compute_Buffer compute_1 = {
+    Compute_Buffer compute = {
         .buff = {
             .items = particles,
             .size  = PARTICLE_COUNT * sizeof(Particle),
             .count = PARTICLE_COUNT,
         },
     };
-    Compute_Buffer compute_2 = compute_1;
 
-    if (!upload_compute_points(compute_1.buff, &compute_1.id)) return 1;
-    if (!upload_compute_points(compute_2.buff, &compute_2.id)) return 1;
+    if (!upload_compute_points(compute.buff, &compute.id)) return 1;
 
     float time = 0.0f;
     Buffer buff = {
@@ -84,18 +82,17 @@ int main()
     while (!window_should_close()) {
         time = get_time();
         begin_compute();
-            if (!compute_points(compute_2.id)) return 1;
+            if (!compute_points()) return 1;
         end_compute();
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
-            if (!draw_points(compute_2.id, EXAMPLE_COMPUTE)) return 1;
+            if (!draw_points(compute.id, EXAMPLE_COMPUTE)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
-    destroy_compute_buff(compute_1.id);
-    destroy_compute_buff(compute_2.id);
+    destroy_compute_buff(compute.id);
     close_window();
     return 0;
 }
