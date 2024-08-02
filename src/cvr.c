@@ -515,6 +515,10 @@ void close_window()
 
     destroy_shape_res();
     destroy_ubos();
+    for (size_t i = 0; i < SSBO_TYPE_COUNT; i++) {
+        vkDestroyDescriptorPool(ctx.device, ctx.ssbo_sets[i].descriptor_pool, NULL);
+        vkDestroyDescriptorSetLayout(ctx.device, ctx.ssbo_sets[i].set_layout, NULL);
+    }
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -779,8 +783,8 @@ bool upload_compute_points(Buffer buff, size_t *id)
         return false;
     }
     
-    *id = ctx.compute_buffs.count;
-    nob_da_append(&ctx.compute_buffs, vk_buff);
+    *id = ctx.ssbo_sets[SSBO_TYPE_ONE].count;
+    nob_da_append(&ctx.ssbo_sets[SSBO_TYPE_ONE], vk_buff);
 
     return true;
 }
@@ -819,6 +823,13 @@ bool ubo_init(Buffer buff, Example example)
     if (!vk_ubo_descriptor_set_layout_init(flags, ubo_type)) return false;
     if (!vk_ubo_descriptor_pool_init(ubo_type))              return false;
     if (!vk_ubo_descriptor_set_init(ubo_type))               return false;
+
+    if (example == EXAMPLE_COMPUTE) {
+        SSBO_Type ssbo_type = SSBO_TYPE_ONE;
+        if (!vk_ssbo_descriptor_set_layout_init(ssbo_type)) return false;
+        if (!vk_ssbo_descriptor_pool_init(ssbo_type))       return false;
+        if (!vk_ssbo_descriptor_set_init(ssbo_type))        return false;
+    }
 
     return true;
 }
@@ -871,9 +882,9 @@ void destroy_compute_buff(size_t id)
     vkDeviceWaitIdle(ctx.device);
 
     bool found = false;
-    for (size_t i = 0; i < ctx.compute_buffs.count; i++) {
-        if (i == id && ctx.compute_buffs.items[i].handle) {
-            vk_buff_destroy(ctx.compute_buffs.items[i]);
+    for (size_t i = 0; i < ctx.ssbo_sets[SSBO_TYPE_ONE].count; i++) {
+        if (i == id && ctx.ssbo_sets[SSBO_TYPE_ONE].items[i].handle) {
+            vk_buff_destroy(ctx.ssbo_sets[SSBO_TYPE_ONE].items[i]);
             found = true;
         }
     }
@@ -923,8 +934,8 @@ bool draw_points(size_t vtx_id, Example example)
 
     Vk_Buffer vtx_buff = {0};
     if (example == EXAMPLE_COMPUTE) {
-        if (vtx_id < ctx.compute_buffs.count && ctx.compute_buffs.items[vtx_id].handle) {
-            vtx_buff = ctx.compute_buffs.items[vtx_id];
+        if (vtx_id < ctx.ssbo_sets[SSBO_TYPE_ONE].count && ctx.ssbo_sets[SSBO_TYPE_ONE].items[vtx_id].handle) {
+            vtx_buff = ctx.ssbo_sets[SSBO_TYPE_ONE].items[vtx_id];
         } else {
             nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
             nob_return_defer(false);

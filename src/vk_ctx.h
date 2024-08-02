@@ -130,6 +130,11 @@ typedef enum {
     UBO_TYPE_COUNT,
 } UBO_Type;
 
+typedef enum {
+    SSBO_TYPE_ONE,
+    SSBO_TYPE_COUNT,
+} SSBO_Type;
+
 typedef struct {
     VkDescriptorSetLayout *items;
     size_t count;
@@ -140,6 +145,12 @@ typedef struct {
     Vk_Buffer *items;
     size_t count;
     size_t capacity;
+    VkDescriptorSet descriptor_set;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSetLayout set_layout;
+} SSBO_Set;
+
+typedef struct {
 } Compute_Buffers;
 
 typedef struct {
@@ -164,7 +175,7 @@ typedef struct {
     VkPipelineLayout compute_pl_layout;
     Vk_Texture_Set texture_sets[SAMPLER_TYPE_COUNT];
     UBO ubos[UBO_TYPE_COUNT];
-    Compute_Buffers compute_buffs;
+    SSBO_Set ssbo_sets[SSBO_TYPE_COUNT];
 } Vk_Context;
 
 bool vk_init();
@@ -186,11 +197,14 @@ bool vk_depth_init();
 /* general ubo initializer */
 bool vk_ubo_init(UBO ubo, UBO_Type type);
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_type);
-bool vk_ubo_descriptor_set_init(UBO_Type ubo_type);
 bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type);
-bool vk_sampler_descriptor_pool_init(Sampler_Type sampler_type);
+bool vk_ubo_descriptor_set_init(UBO_Type ubo_type);
 bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type);
+bool vk_sampler_descriptor_pool_init(Sampler_Type sampler_type);
 bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type);
+bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type);
+bool vk_ssbo_descriptor_pool_init(SSBO_Type ssbo_type);
+bool vk_ssbo_descriptor_set_init(SSBO_Type ssbo_type);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
@@ -769,10 +783,14 @@ bool vk_compute_pl_init()
     if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
         nob_return_defer(false);
 
+    VkDescriptorSetLayout set_layouts[] = {
+        ctx.ubos[UBO_TYPE_COMPUTE].set_layout,
+        ctx.ssbo_sets[SSBO_TYPE_ONE].set_layout
+    };
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 1,
-        .pSetLayouts = &ctx.ubos[UBO_TYPE_COMPUTE].set_layout,
+        .setLayoutCount = NOB_ARRAY_LEN(set_layouts),
+        .pSetLayouts = set_layouts,
     };
     VkResult res = vkCreatePipelineLayout(
         ctx.device,
@@ -992,10 +1010,20 @@ void vk_compute()
         &ctx.ubos[UBO_TYPE_COMPUTE].descriptor_set,
         0, NULL
     );
-    assert(ctx.compute_buffs.count && "no compute buffers");
+
+    assert(ctx.ssbo_sets[SSBO_TYPE_ONE].count && "no compute buffers");
+
+    vkCmdBindDescriptorSets(
+        cmd_man.compute_buff,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        ctx.compute_pl_layout, 1, 1,
+        &ctx.ssbo_sets[SSBO_TYPE_ONE].descriptor_set,
+        0, NULL
+    );
+
     vkCmdDispatch(
         cmd_man.compute_buff,
-        ctx.compute_buffs.items[0].count / 256, 1, 1 // TODO: hard-coding alert
+        ctx.ssbo_sets[SSBO_TYPE_ONE].items[0].count / 256, 1, 1 // TODO: hard-coding alert
     );
 }
 
@@ -1352,29 +1380,17 @@ bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_ty
 {
     bool result = true;
 
-    Descriptor_Set_Layout_Bindings bindings = {0};
     VkDescriptorSetLayoutBinding binding = {
         .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = 1,
         .stageFlags = flags,
     };
-    nob_da_append(&bindings, binding);
-
-    if (ubo_type == UBO_TYPE_COMPUTE) {
-        VkDescriptorSetLayoutBinding binding = {
-            .binding = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = flags,
-        };
-        nob_da_append(&bindings, binding);
-    }
 
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = bindings.count,
-        .pBindings = bindings.items,
+        .bindingCount = 1,
+        .pBindings = &binding,
     };
 
     VkDescriptorSetLayout *layout = &ctx.ubos[ubo_type].set_layout;
@@ -1385,44 +1401,39 @@ bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_ty
     }
 
 defer:
-    nob_da_free(bindings);
     return result;
 }
 
-bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type)
+typedef struct {
+    VkDescriptorPoolSize *items;
+    size_t count;
+    size_t capacity;
+} Pool_Sizes;
+
+bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type)
 {
     bool result = true;
 
-    Descriptor_Set_Layout_Bindings bindings = {0};
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[sampler_type];
-    for (size_t i = 0; i < texture_set->count; i++) {
-        /* don't use separate bindings if only one sampler per shader */
-        if (sampler_type == SAMPLER_TYPE_ONE_TEX && i > 0)
-            break;
-
-        VkDescriptorSetLayoutBinding binding = {
-            .binding = i,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        };
-        nob_da_append(&bindings, binding);
-    }
-
-    VkDescriptorSetLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .pBindings = bindings.items,
-        .bindingCount = bindings.count,
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
     };
 
-    VkDescriptorSetLayout *layout = &texture_set->set_layout;
-    if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
-        nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = 1,
+    };
+
+    VkDescriptorPool *pool = &ctx.ubos[ubo_type].descriptor_pool;
+    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
+    if(!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool");
         nob_return_defer(false);
     }
 
 defer:
-    nob_da_free(bindings);
     return result;
 }
 
@@ -1465,33 +1476,47 @@ bool vk_ubo_descriptor_set_init(UBO_Type ubo_type)
         .descriptorCount = 1,
         .pBufferInfo = &buff_info,
     };
-    Descriptor_Writes writes = {0};
-    nob_da_append(&writes, write);
 
-    if (ubo_type == UBO_TYPE_COMPUTE) {
-        if (!ctx.compute_buffs.count) {
-            nob_log(NOB_ERROR, "failed to initialize compute descriptor set, no compute buffers");
-            nob_return_defer(false);
-        }
-        VkDescriptorBufferInfo buff_info = {
-            .buffer = ctx.compute_buffs.items[0].handle,
-            .range = ctx.compute_buffs.items[0].size,
-        };
-        VkWriteDescriptorSet write = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = ubo->descriptor_set,
-            .dstBinding = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
-            .pBufferInfo = &buff_info,
-        };
-        nob_da_append(&writes, write);
-    }
-
-    vkUpdateDescriptorSets(ctx.device, writes.count, writes.items, 0, NULL);
+    vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
 
 defer:
-    nob_da_free(writes);
+    return result;
+}
+
+bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type)
+{
+    bool result = true;
+
+    Descriptor_Set_Layout_Bindings bindings = {0};
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[sampler_type];
+    for (size_t i = 0; i < texture_set->count; i++) {
+        /* don't use separate bindings if only one sampler per shader */
+        if (sampler_type == SAMPLER_TYPE_ONE_TEX && i > 0)
+            break;
+
+        VkDescriptorSetLayoutBinding binding = {
+            .binding = i,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        };
+        nob_da_append(&bindings, binding);
+    }
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pBindings = bindings.items,
+        .bindingCount = bindings.count,
+    };
+
+    VkDescriptorSetLayout *layout = &texture_set->set_layout;
+    if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
+        nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
+        nob_return_defer(false);
+    }
+
+defer:
+    nob_da_free(bindings);
     return result;
 }
 
@@ -1526,50 +1551,6 @@ bool vk_sampler_descriptor_pool_init(Sampler_Type sampler_type)
     }
 
 defer:
-    return result;
-}
-
-typedef struct {
-    VkDescriptorPoolSize *items;
-    size_t count;
-    size_t capacity;
-} Pool_Sizes;
-
-bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type)
-{
-    bool result = true;
-
-    Pool_Sizes pool_sizes = {0};
-    VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-    };
-    nob_da_append(&pool_sizes, pool_size);
-
-    if (ubo_type == UBO_TYPE_COMPUTE) {
-        VkDescriptorPoolSize pool_size = {
-            .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
-        };
-        nob_da_append(&pool_sizes, pool_size);
-    }
-
-    VkDescriptorPoolCreateInfo pool_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = pool_sizes.count,
-        .pPoolSizes = pool_sizes.items,
-        .maxSets = pool_sizes.count,
-    };
-
-    VkDescriptorPool *pool = &ctx.ubos[ubo_type].descriptor_pool;
-    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
-    if(!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor pool");
-        nob_return_defer(false);
-    }
-
-defer:
-    nob_da_free(pool_sizes);
     return result;
 }
 
@@ -1628,6 +1609,102 @@ bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type)
         }
         vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
     }
+
+defer:
+    return result;
+}
+
+bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type)
+{
+    bool result = true;
+
+    VkDescriptorSetLayoutBinding binding = {
+        .binding = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+    };
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &binding,
+    };
+
+    VkDescriptorSetLayout *layout = &ctx.ssbo_sets[ssbo_type].set_layout;
+    VkResult res = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor set layout for shader storage buffer");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
+bool vk_ssbo_descriptor_pool_init(SSBO_Type ssbo_type)
+{
+    bool result = true;
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1,
+    };
+
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = 1,
+    };
+
+    VkDescriptorPool *pool = &ctx.ssbo_sets[ssbo_type].descriptor_pool;
+    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
+    if(!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool for storage buffer");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
+bool vk_ssbo_descriptor_set_init(SSBO_Type ssbo_type)
+{
+    bool result = true;
+
+    /* allocate uniform buffer descriptor sets */
+    SSBO_Set *ssbo = &ctx.ssbo_sets[ssbo_type];
+    VkDescriptorSetAllocateInfo alloc = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = ssbo->descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &ssbo->set_layout,
+    };
+    VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, &ssbo->descriptor_set);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to allocate ssbo descriptor set");
+        nob_return_defer(false);
+    }
+
+    if (!ssbo->count) {
+        nob_log(NOB_ERROR, "failed to initialize compute descriptor set, no compute buffers");
+        nob_return_defer(false);
+    }
+    VkDescriptorBufferInfo buff_info = {
+        .buffer = ssbo->items[0].handle, // TODO: hardcoding
+        .range  = ssbo->items[0].size,   // TODO: hardcoding
+    };
+    VkWriteDescriptorSet write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ssbo->descriptor_set,
+        .dstBinding = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1,
+        .pBufferInfo = &buff_info,
+    };
+
+    vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
 
 defer:
     return result;
