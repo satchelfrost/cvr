@@ -618,6 +618,9 @@ int main(int argc, char **argv)
                     nob_log(NOB_INFO, file_name);
                     nob_cmd_append(&cmd, "renderdoc", file_name);
                     if (!nob_cmd_run_sync(cmd)) return 1;
+                    cmd.count = 0;
+                    nob_cmd_append(&cmd, "rm", file_name);
+                    if (!nob_cmd_run_sync(cmd)) return 1;
                     break;
                 }
             }
