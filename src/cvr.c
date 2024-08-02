@@ -824,11 +824,24 @@ bool ubo_init(Buffer buff, Example example)
     if (!vk_ubo_descriptor_pool_init(ubo_type))              return false;
     if (!vk_ubo_descriptor_set_init(ubo_type))               return false;
 
+    return true;
+}
+
+bool ssbo_init(Example example)
+{
     if (example == EXAMPLE_COMPUTE) {
+        if (!ctx.ssbo_sets[SSBO_TYPE_ONE].count) {
+            nob_log(NOB_ERROR, "no compute buffer was uploaded");
+            return false;
+        }
+
         SSBO_Type ssbo_type = SSBO_TYPE_ONE;
         if (!vk_ssbo_descriptor_set_layout_init(ssbo_type)) return false;
         if (!vk_ssbo_descriptor_pool_init(ssbo_type))       return false;
         if (!vk_ssbo_descriptor_set_init(ssbo_type))        return false;
+    } else {
+        nob_log(NOB_ERROR, "only EXAMPLE_COMPUTE is supported for ssbo_init for now.");
+        return false;
     }
 
     return true;

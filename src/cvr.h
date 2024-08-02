@@ -321,5 +321,6 @@ bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
 bool ubo_init(Buffer buff, Example example);
+bool ssbo_init(Example example);
 
 #endif // CVR_H_

@@ -783,6 +783,12 @@ bool vk_compute_pl_init()
     if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
         nob_return_defer(false);
 
+    if (!ctx.ubos[UBO_TYPE_COMPUTE].set_layout ||
+        !ctx.ssbo_sets[SSBO_TYPE_ONE].set_layout) {
+        nob_log(NOB_ERROR, "set layouts for compute are null");
+        nob_return_defer(false);
+    }
+
     VkDescriptorSetLayout set_layouts[] = {
         ctx.ubos[UBO_TYPE_COMPUTE].set_layout,
         ctx.ssbo_sets[SSBO_TYPE_ONE].set_layout
