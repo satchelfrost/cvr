@@ -322,5 +322,6 @@ bool pc_sampler_init();
 Matrix get_proj(Camera camera);
 bool ubo_init(Buffer buff, Example example);
 bool ssbo_init(Example example);
+Color color_from_HSV(float hue, float saturation, float value);
 
 #endif // CVR_H_

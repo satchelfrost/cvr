@@ -1,6 +1,6 @@
 #include "cvr.h"
 #include "ext/nob.h"
-#include "geometry.h"
+#include "ext/raylib-5.0/raymath.h"
 #include <float.h>
 
 /* point cloud sizes */
@@ -18,7 +18,12 @@
     } while(0)
 
 typedef struct {
-    Small_Vertex *items;
+    float x, y, z;
+    unsigned char r, g, b, a;
+} Point_Vert;
+
+typedef struct {
+    Point_Vert *items;
     size_t count;
     size_t capacity;
 } Vertices;
@@ -63,9 +68,9 @@ bool read_vtx(const char *file, Vertices *verts)
         read_attr(g, sv);
         read_attr(b, sv);
 
-        Small_Vertex vert = {
-            .pos = {x, y, z},
-            .r = r, .g = g, .b = b,
+        Point_Vert vert = {
+            .x = x, .y = y, .z = z,
+            .r = r, .g = g, .b = b, .a = 255,
         };
         nob_da_append(verts, vert);
     }
@@ -91,11 +96,9 @@ bool load_points(const char *name, Point_Cloud *point_cloud)
 
     Vertices verts = {0};
     if (!read_vtx(name, &verts)) {
-        nob_log(NOB_WARNING, "loading default instead");
-        if (!read_vtx("res/flowers.vtx", &verts)) {
-            nob_log(NOB_ERROR, "failed to load default point cloud");
-            nob_return_defer(false);
-        }
+        nob_log(NOB_ERROR, "failed to load point cloud");
+        nob_log(NOB_ERROR, "this example requires private data");
+        nob_return_defer(false);
     }
     nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
 
@@ -230,7 +233,6 @@ void log_shader_mode(Shader_Mode mode)
     }
 }
 
-/* might be able to clean this up */
 bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_Uniform *uniform)
 {
     bool result = true;
@@ -307,9 +309,9 @@ int main()
 {
     /* load resources into main memory */
     Point_Cloud hres = {0};
-    if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
+    if (!load_points("res/arena_" M "_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
-    if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
+    if (!load_points("res/arena_" S "_f32.vtx", &lres)) return 1;
     Image imgs[NUM_IMGS] = {0};
     for (size_t i = 0; i < NUM_IMGS; i++) {
         const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
@@ -322,7 +324,6 @@ int main()
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
-    set_target_fps(60);
 
     /* upload resources to GPU */
     Texture texs[NUM_IMGS] = {0};
@@ -346,6 +347,7 @@ int main()
     /* settings & logging*/
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
     bool use_hres = false;
+    bool print_fps = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
@@ -357,6 +359,8 @@ int main()
 
     /* game loop */
     while (!window_should_close()) {
+        if (print_fps) log_fps();
+
         /* input */
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
@@ -379,6 +383,7 @@ int main()
             nob_log(NOB_INFO, "resetting camera defaults");
             copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
         }
+        if (is_key_pressed(KEY_F)) print_fps = !print_fps;
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */

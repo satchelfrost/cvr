@@ -1,16 +1,17 @@
 #include "cvr.h"
 #include "ext/nob.h"
-#include "geometry.h"
+#include "ext/raylib-5.0/raymath.h"
+#include <stdlib.h>
 
-#define read_attr(attr, sv)                   \
-    do {                                      \
-        memcpy(&attr, sv.data, sizeof(attr)); \
-        sv.data  += sizeof(attr);             \
-        sv.count -= sizeof(attr);             \
-    } while(0)
+#define NUM_POINTS 1000000
 
 typedef struct {
-    Small_Vertex *items;
+    float x, y, z;
+    unsigned char r, g, b, a;
+} Point_Vert;
+
+typedef struct {
+    Point_Vert *items;
     size_t count;
     size_t capacity;
 } Vertices;
@@ -20,40 +21,6 @@ typedef struct {
     Buffer buff;
     size_t id;
 } Point_Cloud;
-
-bool read_vtx(const char *file, Vertices *verts)
-{
-    bool result = true;
-
-    nob_log(NOB_INFO, "reading vtx file %s", file);
-    Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
-
-    Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
-    size_t vtx_count = 0;
-    read_attr(vtx_count, sv);
-
-    for (size_t i = 0; i < vtx_count; i++) {
-        float x, y, z;
-        uint8_t r, g, b;
-        read_attr(x, sv);
-        read_attr(y, sv);
-        read_attr(z, sv);
-        read_attr(r, sv);
-        read_attr(g, sv);
-        read_attr(b, sv);
-
-        Small_Vertex vert = {
-            .pos = {x, y, z},
-            .r = r, .g = g, .b = b,
-        };
-        nob_da_append(verts, vert);
-    }
-
-defer:
-    nob_sb_free(sb);
-    return result;
-}
 
 void log_fps()
 {
@@ -65,34 +32,51 @@ void log_fps()
     }
 }
 
-bool load_points(const char *name, Point_Cloud *point_cloud)
+float rand_float()
 {
-    bool result = true;
+    return (float)rand() / RAND_MAX;
+}
 
+Point_Cloud gen_points()
+{
     Vertices verts = {0};
-    if (!read_vtx(name, &verts)) nob_return_defer(false);
-    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
+    for (size_t i = 0; i < NUM_POINTS; i++) {
+        float theta = PI * rand_float();
+        float phi   = 2 * PI * rand_float();
+        float r     = 10.0f * rand_float();
+        Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
+        Point_Vert vert = {
+            .x = r * sin(theta) * cos(phi),
+            .y = r * sin(theta) * sin(phi),
+            .z = r * cos(theta),
+            .r = color.r,
+            .g = color.g,
+            .b = color.b,
+            .a = 255,
+        };
 
-    point_cloud->buff.items = verts.items;
-    point_cloud->buff.count = verts.count;
-    point_cloud->buff.size  = verts.count * sizeof(*verts.items);
-    point_cloud->verts = verts;
+        nob_da_append(&verts, vert);
+    }
 
-defer:
-    return result;
+    Point_Cloud point_cloud = {
+        .buff.items = verts.items,
+        .buff.count = verts.count,
+        .buff.size  = verts.count * sizeof(*verts.items),
+        .verts = verts,
+    };
+
+    return point_cloud;
 }
 
 int main()
 {
-    /* load resources into main memory */
-    Point_Cloud flowers = {0};
-    if (!load_points("res/flowers.vtx", &flowers)) return 1;
+    Point_Cloud point_cloud = gen_points();
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
     set_target_fps(60);
     Camera camera = {
-        .position   = {0.0f, 1.0f, 5.0f},
+        .position   = {0.0f, 2.0f, 5.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -100,23 +84,22 @@ int main()
     };
 
     /* upload resources to GPU */
-    if (!upload_point_cloud(flowers.buff, &flowers.id)) return 1;
-    nob_da_free(flowers.verts);
+    if (!upload_point_cloud(point_cloud.buff, &point_cloud.id)) return 1;
+    nob_da_free(point_cloud.verts);
 
     while (!window_should_close()) {
         log_fps();
         update_camera_free(&camera);
 
-        begin_drawing(BLUE);
+        begin_drawing(BLACK);
         begin_mode_3d(camera);
-            translate(0.0f, 0.0f, -100.0f);
-            rotate_x(-PI / 2);
-            if (!draw_points(flowers.id, EXAMPLE_POINT_CLOUD)) return 1;
+            rotate_y(get_time() * 0.5);
+            if (!draw_points(point_cloud.id, EXAMPLE_POINT_CLOUD)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
-    destroy_point_cloud(flowers.id);
+    destroy_point_cloud(point_cloud.id);
     close_window();
     return 0;
 }

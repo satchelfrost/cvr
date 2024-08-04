@@ -2083,7 +2083,7 @@ void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type)
 
         desc.binding = 0;
         desc.location = 1;
-        desc.format = VK_FORMAT_R8G8B8_UINT;
+        desc.format = VK_FORMAT_R8G8B8A8_UINT;
         desc.offset = 12;
         nob_da_append(attr_descs, desc);
     } else if (pipeline_type == PIPELINE_COMPUTE) {

@@ -12,7 +12,7 @@ typedef struct {
 
 typedef struct {
     Vector3 pos;
-    uint8_t r, g, b;
+    uint8_t r, g, b, a;
 } Small_Vertex;
 
 #define Red 1, 0, 0

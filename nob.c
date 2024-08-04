@@ -40,6 +40,7 @@ typedef struct {
     const Shaders shaders;
     const CFiles c_files;
     bool supported_targets[TARGET_COUNT];
+    bool private;
 } Example;
 
 static const char *default_shader_names[] = {"default.vert", "default.frag"};
@@ -169,6 +170,7 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
         .supported_targets[TARGET_LINUX] = true,
+        .private = true,
     },
     {
         .name = "compute",
@@ -198,8 +200,6 @@ typedef struct {
     Example *example;
     Target target;
     char *target_name;
-    bool using_clang;
-    bool gen_comp_db;
     bool release;
     Host host;
     bool debug;
@@ -209,10 +209,9 @@ typedef struct {
 void log_usage(const char *program)
 {
     nob_log(NOB_INFO, "usage: %s <flags> <optional_input>", program);
+    nob_log(NOB_INFO, "    -e followed by <example_name> to build");
     nob_log(NOB_INFO, "    -h help (log usage)");
     nob_log(NOB_INFO, "    -c clean build");
-    nob_log(NOB_INFO, "    -e <example_name> optional example");
-    nob_log(NOB_INFO, "    -d generate compilation database (requires clang)");
     nob_log(NOB_INFO, "    -l list available examples");
     nob_log(NOB_INFO, "    -t specify build target (linux, windows, quest)");
     nob_log(NOB_INFO, "    -g debug launch (gf2)"); // https://github.com/nakst/gf
@@ -263,10 +262,6 @@ bool handle_usr_args(Config *config)
                     nob_log(NOB_ERROR, "No such target %s exists", config->target_name);
                     nob_return_defer(false);
                 }
-                break;
-            case 'd':
-                nob_log(NOB_INFO, "compilation database requested (requires clang)");
-                config->using_clang = config->gen_comp_db = true;
                 break;
             case 'h':
                 log_usage(config->program);
@@ -322,13 +317,11 @@ bool build_cvr(Config config, const char *platform_path)
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
         const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
-        const char *comp_db = nob_temp_sprintf("build/compilation_database/%s.o.json", cvr[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, (config.using_clang) ? "clang" : "cc");
-            if (config.gen_comp_db && config.using_clang) nob_cmd_append(&cmd, "-MJ", comp_db);
+            nob_cmd_append(&cmd, "cc");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -407,13 +400,10 @@ bool build_example(const char *build_path, Config config)
     for (size_t i = 0; i < example->c_files.count; i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
         const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
-        const char *comp_db = nob_temp_sprintf("build/compilation_database/%s.o.json", example->name);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, (config.using_clang) ? "clang" : "cc");
-            if (config.gen_comp_db && config.using_clang)
-                nob_cmd_append(&cmd, "-MJ", comp_db);
+            nob_cmd_append(&cmd, "cc");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src");
             nob_cmd_append(&cmd, "-c", input_path);
@@ -431,7 +421,7 @@ bool build_example(const char *build_path, Config config)
     bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
-        nob_cmd_append(&cmd, (config.using_clang) ? "clang" : "cc");
+        nob_cmd_append(&cmd, "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
@@ -467,32 +457,9 @@ void print_examples()
             }
 
         }
-        nob_log(NOB_INFO, "    %s (%s)", examples[i].name, target_list);
+        const char *private = (examples[i].private) ? " (private data needed)" : "";
+        nob_log(NOB_INFO, "    %s (%s)%s", examples[i].name, target_list, private);
     }
-}
-
-bool create_comp_db()
-{
-    bool result = true;
-    Nob_File_Paths paths = {0};
-    nob_read_entire_dir("./build/compilation_database", &paths);
-    Nob_String_Builder sb = {0};
-    nob_sb_append_cstr(&sb, "[\n");
-    for (size_t i = 0; i < paths.count; i++) {
-        if (strstr(paths.items[i], ".json") != 0) {
-            const char *path = nob_temp_sprintf("./build/compilation_database/%s", paths.items[i]);
-            if (!nob_read_entire_file(path, &sb)) nob_return_defer(false);
-        }
-    }
-    sb.count -= 2; // erase last two chars from file to be json compliant for newly concatenated file
-    nob_sb_append_cstr(&sb, "\n]");
-    nob_sb_append_null(&sb);
-    if (!nob_write_entire_file("./build/compile_commands.json", sb.items, sb.count)) nob_return_defer(false);
-
-    nob_log(NOB_INFO, "created compilation database, you may need to restart your LSP");
-
-defer:
-    return result;
 }
 
 bool cd(const char *dir)
@@ -544,22 +511,8 @@ int main(int argc, char **argv)
     };
     if (!handle_usr_args(&config)) return 1;
 
-    /* compilation database */
     Nob_Cmd cmd = {0};
     if (!nob_mkdir_if_not_exists("build")) return 1;
-    if (config.gen_comp_db) {
-        if (!nob_mkdir_if_not_exists("build/compilation_database")) return 1;
-    } else {
-        // test if compilation database was previously used to ensure clang
-        Nob_File_Paths paths = {0};
-        if (!nob_read_entire_dir("build", &paths)) return 1;
-        for (size_t i = 0; i < paths.count; i++) {
-            if (strstr(paths.items[i], "compile_commands.json") != 0) {
-                config.using_clang = true;
-            }
-        }
-    }
-
     const char *platform_path = nob_temp_sprintf("./build/%s", target_names[config.target]);
     if (!nob_mkdir_if_not_exists(platform_path)) return 1;
     if (!build_cvr(config, platform_path)) return 1;
@@ -629,10 +582,6 @@ int main(int argc, char **argv)
             if (!nob_cmd_run_sync(cmd)) return 1;
         }
         if (!cd("../../../../")) return 1;
-    }
-
-    if (config.gen_comp_db) {
-        if (!create_comp_db()) return 1;
     }
 
     nob_cmd_free(cmd);

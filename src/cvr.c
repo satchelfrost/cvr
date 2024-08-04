@@ -1066,3 +1066,34 @@ bool get_matrix_tos(Matrix *model)
 defer:
     return result;
 }
+
+Color color_from_HSV(float hue, float saturation, float value)
+{
+    Color color = { 0, 0, 0, 255 };
+
+    // Red channel
+    float k = fmodf((5.0f + hue/60.0f), 6);
+    float t = 4.0f - k;
+    k = (t < k)? t : k;
+    k = (k < 1)? k : 1;
+    k = (k > 0)? k : 0;
+    color.r = (unsigned char)((value - value*saturation*k)*255.0f);
+
+    // Green channel
+    k = fmodf((3.0f + hue/60.0f), 6);
+    t = 4.0f - k;
+    k = (t < k)? t : k;
+    k = (k < 1)? k : 1;
+    k = (k > 0)? k : 0;
+    color.g = (unsigned char)((value - value*saturation*k)*255.0f);
+
+    // Blue channel
+    k = fmodf((1.0f + hue/60.0f), 6);
+    t = 4.0f - k;
+    k = (t < k)? t : k;
+    k = (k < 1)? k : 1;
+    k = (k > 0)? k : 0;
+    color.b = (unsigned char)((value - value*saturation*k)*255.0f);
+
+    return color;
+}
