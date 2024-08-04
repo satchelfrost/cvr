@@ -68,35 +68,6 @@ typedef struct {
     size_t capacity;
 } Point_Clouds;
 
-/* Uniform buffer object for texture example */
-typedef struct {
-    float16 model;
-    float16 view;
-    float16 proj;
-    float time;
-} Texture_UBO;
-
-typedef struct {
-    Vk_Buffer buff;
-    Texture_UBO ubo;
-} Texture_Example;
-
-/* Uniform buffer object for advanced point cloud example */
-typedef struct {
-    float16 camera_mvps[4];
-    int idx;
-    int shader_mode;
-    int cam_0;
-    int cam_1;
-    int cam_2;
-    int cam_3;
-} Point_Cloud_UBO;
-
-typedef struct {
-    Vk_Buffer buff;
-    Point_Cloud_UBO ubo;
-} Adv_Point_Cloud_Example;
-
 typedef struct {
     Matrix view;
     Matrix proj;
@@ -113,8 +84,6 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-Texture_Example tex_example = {0};
-Adv_Point_Cloud_Example adv_point_cloud = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -124,6 +93,7 @@ void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
+void destroy_ubos();
 
 bool init_window(int width, int height, const char *title)
 {
@@ -273,14 +243,12 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    if (tex_example.buff.handle) {
-        /* update uniform buffer for texture exaxmple */
-        tex_example.ubo.model = MatrixToFloatV(MatrixIdentity());
-        tex_example.ubo.view  = MatrixToFloatV(matrices.view);
-        tex_example.ubo.proj  = MatrixToFloatV(matrices.proj);
-        tex_example.ubo.time = get_time();
-        memcpy(tex_example.buff.mapped, &tex_example.ubo, sizeof(Texture_UBO));
+    for (size_t i = 0; i < UBO_TYPE_COUNT; i++) {
+        UBO ubo = ctx.ubos[i];
+        if (ubo.buff.handle)
+            memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
     }
+
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -299,6 +267,16 @@ void end_drawing()
 
     poll_input_events();
     cvr_time.frame_count++;
+}
+
+void begin_compute()
+{
+    assert(vk_begin_compute() && "failed to begin compute");
+}
+
+void end_compute()
+{
+    assert(vk_end_compute() && "failed to end compute");
 }
 
 void push_matrix()
@@ -506,8 +484,7 @@ bool alloc_shape_res(Shape_Type shape_type)
         nob_return_defer(false);
     }
 
-
-    if ((!vtx_buff_init(&shape->vtx_buff, shape->verts)) || (!idx_buff_init(&shape->idx_buff, shape->idxs))) {
+    if ((!vk_vtx_buff_upload(&shape->vtx_buff, shape->verts)) || (!vk_idx_buff_upload(&shape->idx_buff, shape->idxs))) {
         nob_log(NOB_ERROR, "failed to allocate resources for shape %d", shape_type);
         nob_return_defer(false);
     }
@@ -536,9 +513,12 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
-    vk_buff_destroy(adv_point_cloud.buff);
-    vk_buff_destroy(tex_example.buff);
     destroy_shape_res();
+    destroy_ubos();
+    for (size_t i = 0; i < SSBO_TYPE_COUNT; i++) {
+        vkDestroyDescriptorPool(ctx.device, ctx.ssbo_sets[i].descriptor_pool, NULL);
+        vkDestroyDescriptorSetLayout(ctx.device, ctx.ssbo_sets[i].set_layout, NULL);
+    }
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -590,27 +570,35 @@ Texture load_pc_texture_from_image(Image img)
 
 void unload_texture(Texture texture)
 {
-    vk_unload_texture(texture.id);
+    vk_unload_texture(texture.id, SAMPLER_TYPE_ONE_TEX);
 }
 
 void unload_pc_texture(Texture texture)
 {
-    vk_unload_pc_texture(texture.id);
+    vk_unload_texture(texture.id, SAMPLER_TYPE_FOUR_TEX);
+}
+
+bool tex_sampler_init()
+{
+    Sampler_Type type = SAMPLER_TYPE_ONE_TEX;
+    if (!vk_sampler_descriptor_set_layout_init(type))
+        return false;
+    if (!vk_sampler_descriptor_pool_init(type))
+        return false;
+    if (!vk_sampler_descriptor_set_init(type))
+        return false;
+    return true;
 }
 
 bool draw_texture(Texture texture, Shape_Type shape_type)
 {
     bool result = true;
 
-    if (!tex_example.buff.handle) {
-        tex_example.buff.size = sizeof(Texture_UBO);
-        if (!vk_tex_ubo_init(&tex_example.buff)) nob_return_defer(false);
-        if (!vk_tex_sampler_init())              nob_return_defer(false);
-    }
-
-    if (!ctx.pipelines[PIPELINE_TEXTURE])
+    if (!ctx.pipelines[PIPELINE_TEXTURE]) {
+        if (!tex_sampler_init()) nob_return_defer(false);
         if (!vk_basic_pl_init(PIPELINE_TEXTURE))
             nob_return_defer(false);
+    }
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
@@ -774,7 +762,7 @@ bool upload_point_cloud(Buffer buff, size_t *id)
         .count = buff.count,
         .size  = buff.size,
     };
-    if (!vtx_buff_init(&vk_buff, buff.items)) {
+    if (!vk_vtx_buff_staged_upload(&vk_buff, buff.items)) {
         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
         return false;
     }
@@ -784,77 +772,194 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-void destroy_point_cloud(size_t id)
+bool upload_compute_points(Buffer buff, size_t *id)
 {
-    vkDeviceWaitIdle(ctx.device); // TODO: alternatives?
-
-    for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle)
-            vk_buff_destroy(point_clouds.items[i]);
+    Vk_Buffer vk_buff = {
+        .count = buff.count,
+        .size  = buff.size,
+    };
+    if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) {
+        nob_log(NOB_ERROR, "failed to upload compute points");
+        return false;
     }
+    
+    *id = ctx.ssbo_sets[SSBO_TYPE_ONE].count;
+    nob_da_append(&ctx.ssbo_sets[SSBO_TYPE_ONE], vk_buff);
+
+    return true;
 }
 
-bool draw_point_cloud(size_t id)
+bool ubo_init(Buffer buff, Example example)
 {
-    bool result = true;
+    UBO_Type ubo_type; 
+    VkShaderStageFlags flags;
+    switch (example) {
+    case EXAMPLE_TEX:
+        ubo_type = UBO_TYPE_TEX;
+        flags = VK_SHADER_STAGE_VERTEX_BIT;
+        break;
+    case EXAMPLE_ADV_POINT_CLOUD:
+        ubo_type = UBO_TYPE_ADV_POINT_CLOUD;
+        flags = VK_SHADER_STAGE_VERTEX_BIT;
+        break;
+    case EXAMPLE_COMPUTE:
+        ubo_type = UBO_TYPE_COMPUTE;
+        flags = VK_SHADER_STAGE_COMPUTE_BIT;
+        break;
+    case EXAMPLE_POINT_CLOUD:
+    default:
+        nob_log(NOB_ERROR, "example %d not handled for ubo_init", example);
+        return false;
+    }
 
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
-            nob_return_defer(false);
+    UBO ubo = {
+        .buff = {
+            .count = buff.count,
+            .size  = buff.size
+        },
+        .data = buff.items,
+    };
+    if (!vk_ubo_init(ubo, ubo_type)) return false;
+    if (!vk_ubo_descriptor_set_layout_init(flags, ubo_type)) return false;
+    if (!vk_ubo_descriptor_pool_init(ubo_type))              return false;
+    if (!vk_ubo_descriptor_set_init(ubo_type))               return false;
 
-    Vk_Buffer vtx_buff = {0};
+    return true;
+}
+
+bool ssbo_init(Example example)
+{
+    if (example == EXAMPLE_COMPUTE) {
+        if (!ctx.ssbo_sets[SSBO_TYPE_ONE].count) {
+            nob_log(NOB_ERROR, "no compute buffer was uploaded");
+            return false;
+        }
+
+        SSBO_Type ssbo_type = SSBO_TYPE_ONE;
+        if (!vk_ssbo_descriptor_set_layout_init(ssbo_type)) return false;
+        if (!vk_ssbo_descriptor_pool_init(ssbo_type))       return false;
+        if (!vk_ssbo_descriptor_set_init(ssbo_type))        return false;
+    } else {
+        nob_log(NOB_ERROR, "only EXAMPLE_COMPUTE is supported for ssbo_init for now.");
+        return false;
+    }
+
+    return true;
+}
+
+bool pc_sampler_init()
+{
+    Sampler_Type type = SAMPLER_TYPE_FOUR_TEX;
+    if (!vk_sampler_descriptor_set_layout_init(type))
+        return false;
+    if (!vk_sampler_descriptor_pool_init(type))
+        return false;
+    if (!vk_sampler_descriptor_set_init(type))
+        return false;
+
+    return true;
+}
+
+void destroy_point_cloud(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device);
+
+    bool found = false;
     for (size_t i = 0; i < point_clouds.count; i++) {
         if (i == id && point_clouds.items[i].handle) {
-            vtx_buff = point_clouds.items[i];
+            vk_buff_destroy(point_clouds.items[i]);
+            found = true;
         }
     }
 
-    if (!vtx_buff.handle) {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", id);
-        nob_return_defer(false);
+    if (!found)
+        nob_log(NOB_WARNING, "point cloud &zu does not exist cannot destroy", id);
+}
+
+void destroy_ubos()
+{
+    vkDeviceWaitIdle(ctx.device);
+
+    for (size_t i = 0; i < UBO_TYPE_COUNT; i++)
+        if (ctx.ubos[i].buff.handle)
+            vk_buff_destroy(ctx.ubos[i].buff);
+
+    for (size_t i = 0; i < UBO_TYPE_COUNT; i++) {
+        vkDestroyDescriptorPool(ctx.device, ctx.ubos[i].descriptor_pool, NULL);
+        vkDestroyDescriptorSetLayout(ctx.device, ctx.ubos[i].set_layout, NULL);
+    }
+}
+
+void destroy_compute_buff(size_t id)
+{
+    vkDeviceWaitIdle(ctx.device);
+
+    bool found = false;
+    for (size_t i = 0; i < ctx.ssbo_sets[SSBO_TYPE_ONE].count; i++) {
+        if (i == id && ctx.ssbo_sets[SSBO_TYPE_ONE].items[i].handle) {
+            vk_buff_destroy(ctx.ssbo_sets[SSBO_TYPE_ONE].items[i]);
+            found = true;
+        }
     }
 
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+    if (!found)
+        nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
+}
+
+bool compute_points()
+{
+    bool result = true;
+
+    if (!ctx.compute_pipeline) {
+        if (!vk_compute_pl_init())
+            nob_return_defer(false);
     }
 
-    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    Vk_Buffer dummy = {0};
-    if (!vk_draw(PIPELINE_POINT_CLOUD, vtx_buff, dummy, mvp))
-        nob_return_defer(false);
+    vk_compute();
 
 defer:
     return result;
 }
 
-bool draw_point_cloud_adv(size_t vtx_id)
+bool draw_points(size_t vtx_id, Example example)
 {
     bool result = true;
 
-    if (!adv_point_cloud.buff.handle) {
-        adv_point_cloud.buff.size = sizeof(Point_Cloud_UBO);
-        if (!vk_pc_ubo_init(&adv_point_cloud.buff)) nob_return_defer(false);
-        if (!vk_pc_sampler_init())                  nob_return_defer(false);
+    if (example == EXAMPLE_ADV_POINT_CLOUD) {
+        if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
+            pc_sampler_init();
+            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
+                nob_return_defer(false);
+        }
+    } else if (example == EXAMPLE_POINT_CLOUD) {
+        if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
+            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
+                nob_return_defer(false);
+    } else if (example == EXAMPLE_COMPUTE) {
+        if (!ctx.pipelines[PIPELINE_COMPUTE]) {
+            if (!vk_basic_pl_init(PIPELINE_COMPUTE))
+                nob_return_defer(false);
+        }
+    } else {
+        nob_log(NOB_ERROR, "no other example supported yet for draw points");
+        nob_return_defer(false);
     }
-
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV])
-        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
-            nob_return_defer(false);
 
     Vk_Buffer vtx_buff = {0};
-    for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == vtx_id && point_clouds.items[i].handle) {
-            vtx_buff = point_clouds.items[i];
+    if (example == EXAMPLE_COMPUTE) {
+        if (vtx_id < ctx.ssbo_sets[SSBO_TYPE_ONE].count && ctx.ssbo_sets[SSBO_TYPE_ONE].items[vtx_id].handle) {
+            vtx_buff = ctx.ssbo_sets[SSBO_TYPE_ONE].items[vtx_id];
+        } else {
+            nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+            nob_return_defer(false);
         }
-    }
-
-    if (!vtx_buff.handle) {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with %id", vtx_id);
-        nob_return_defer(false);
+    } else {
+        if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
+            vtx_buff = point_clouds.items[vtx_id];
+        } else {
+            nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+            nob_return_defer(false);
+        }
     }
 
     Matrix model = {0};
@@ -866,7 +971,7 @@ bool draw_point_cloud_adv(size_t vtx_id)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.viewProj);
-    if (!vk_draw_adv_point_cloud(vtx_buff, mvp))
+    if (!vk_draw_points(vtx_buff, mvp, example))
         nob_return_defer(false);
 
 defer:
@@ -947,46 +1052,48 @@ void look_at(Camera camera)
         nob_log(NOB_ERROR, "no matrix available to translate");
 }
 
-bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order)
+bool get_matrix_tos(Matrix *model)
 {
     bool result = true;
 
-    Matrix model = {0};
     if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
+        *model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
-    }
-
-    Matrix mvps[4] = {0};
-    for (size_t i = 0; i < 4; i++) {
-        Matrix view = MatrixLookAt(
-            four_cameras[i].position,
-            four_cameras[i].target,
-            four_cameras[i].up
-        );
-        Matrix proj = get_proj(four_cameras[i]);
-        Matrix viewProj = MatrixMultiply(view, proj);
-        mvps[i] = MatrixMultiply(model, viewProj);
-    }
-
-    if (adv_point_cloud.buff.handle) {
-        for (size_t i = 0; i < 4; i++) {
-            adv_point_cloud.ubo.camera_mvps[i] = MatrixToFloatV(mvps[i]);
-        }
-        adv_point_cloud.ubo.cam_0 = cam_order[0];
-        adv_point_cloud.ubo.cam_1 = cam_order[1];
-        adv_point_cloud.ubo.cam_2 = cam_order[2];
-        adv_point_cloud.ubo.cam_3 = cam_order[3];
-        adv_point_cloud.ubo.shader_mode = shader_mode;
-        adv_point_cloud.ubo.idx = cam_order[3];
-        memcpy(adv_point_cloud.buff.mapped, &adv_point_cloud.ubo, sizeof(Point_Cloud_UBO));
-    } else {
-        nob_log(NOB_ERROR, "failed to initialize advanced point cloud ubos");
+        nob_log(NOB_ERROR, "No matrix on stack");
         nob_return_defer(false);
     }
 
 defer:
     return result;
+}
+
+Color color_from_HSV(float hue, float saturation, float value)
+{
+    Color color = { 0, 0, 0, 255 };
+
+    // Red channel
+    float k = fmodf((5.0f + hue/60.0f), 6);
+    float t = 4.0f - k;
+    k = (t < k)? t : k;
+    k = (k < 1)? k : 1;
+    k = (k > 0)? k : 0;
+    color.r = (unsigned char)((value - value*saturation*k)*255.0f);
+
+    // Green channel
+    k = fmodf((3.0f + hue/60.0f), 6);
+    t = 4.0f - k;
+    k = (t < k)? t : k;
+    k = (k < 1)? k : 1;
+    k = (k > 0)? k : 0;
+    color.g = (unsigned char)((value - value*saturation*k)*255.0f);
+
+    // Blue channel
+    k = fmodf((1.0f + hue/60.0f), 6);
+    t = 4.0f - k;
+    k = (t < k)? t : k;
+    k = (k < 1)? k : 1;
+    k = (k > 0)? k : 0;
+    color.b = (unsigned char)((value - value*saturation*k)*255.0f);
+
+    return color;
 }

@@ -1,6 +1,6 @@
 #include "cvr.h"
 #include "ext/nob.h"
-#include "geometry.h"
+#include "ext/raylib-5.0/raymath.h"
 #include <float.h>
 
 /* point cloud sizes */
@@ -18,7 +18,12 @@
     } while(0)
 
 typedef struct {
-    Small_Vertex *items;
+    float x, y, z;
+    unsigned char r, g, b, a;
+} Point_Vert;
+
+typedef struct {
+    Point_Vert *items;
     size_t count;
     size_t capacity;
 } Vertices;
@@ -28,6 +33,18 @@ typedef struct {
     Buffer buff;
     size_t id;
 } Point_Cloud;
+
+typedef struct {
+    float16 camera_mvps[4];
+    int idx;
+    int shader_mode;
+    int cam_0;
+    int cam_1;
+    int cam_2;
+    int cam_3;
+} Point_Cloud_Uniform;
+
+Point_Cloud_Uniform uniform = {0};
 
 bool read_vtx(const char *file, Vertices *verts)
 {
@@ -51,9 +68,9 @@ bool read_vtx(const char *file, Vertices *verts)
         read_attr(g, sv);
         read_attr(b, sv);
 
-        Small_Vertex vert = {
-            .pos = {x, y, z},
-            .r = r, .g = g, .b = b,
+        Point_Vert vert = {
+            .x = x, .y = y, .z = z,
+            .r = r, .g = g, .b = b, .a = 255,
         };
         nob_da_append(verts, vert);
     }
@@ -79,11 +96,9 @@ bool load_points(const char *name, Point_Cloud *point_cloud)
 
     Vertices verts = {0};
     if (!read_vtx(name, &verts)) {
-        nob_log(NOB_WARNING, "loading default instead");
-        if (!read_vtx("res/flowers.vtx", &verts)) {
-            nob_log(NOB_ERROR, "failed to load default point cloud");
-            nob_return_defer(false);
-        }
+        nob_log(NOB_ERROR, "failed to load point cloud");
+        nob_log(NOB_ERROR, "this example requires private data");
+        nob_return_defer(false);
     }
     nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
 
@@ -160,6 +175,11 @@ void get_cam_order(Camera *cameras, size_t count, int *cam_order, size_t cam_ord
         cam_order[i] = sqr_distances[i].idx;
 }
 
+void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
+{
+    for (size_t i = 0; i < count; i++) dst[i] = src[i];
+}
+
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
@@ -169,14 +189,19 @@ void log_controls()
     nob_log(NOB_INFO, "    [A] - Left");
     nob_log(NOB_INFO, "    [S] - Back");
     nob_log(NOB_INFO, "    [D] - Right");
+    nob_log(NOB_INFO, "    [E] - Up");
+    nob_log(NOB_INFO, "    [Q] - Down");
+    nob_log(NOB_INFO, "    [Shift] - Fast movement");
     nob_log(NOB_INFO, "    Right Click + Mouse Movement = Rotation");
     nob_log(NOB_INFO, "------------");
     nob_log(NOB_INFO, "| Hot keys |");
     nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "    [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
     nob_log(NOB_INFO, "    [C] - Change piloted camera");
     nob_log(NOB_INFO, "    [R] - Resolution toggle");
     nob_log(NOB_INFO, "    [V] - View change (also pilots current view)");
     nob_log(NOB_INFO, "    [P] - Print camera info");
+    nob_log(NOB_INFO, "    [Space] - Reset cameras to default position");
 }
 
 typedef enum {
@@ -206,6 +231,38 @@ void log_shader_mode(Shader_Mode mode)
         nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
         break;
     }
+}
+
+bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_Uniform *uniform)
+{
+    bool result = true;
+
+    Matrix model = {0};
+    if (!get_matrix_tos(&model)) nob_return_defer(false);
+
+    Matrix mvps[4] = {0};
+    for (size_t i = 0; i < 4; i++) {
+        Matrix view = MatrixLookAt(
+            four_cameras[i].position,
+            four_cameras[i].target,
+            four_cameras[i].up
+        );
+        Matrix proj = get_proj(four_cameras[i]);
+        Matrix viewProj = MatrixMultiply(view, proj);
+        mvps[i] = MatrixMultiply(model, viewProj);
+    }
+
+    for (size_t i = 0; i < 4; i++)
+        uniform->camera_mvps[i] = MatrixToFloatV(mvps[i]);
+    uniform->cam_0 = cam_order[0];
+    uniform->cam_1 = cam_order[1];
+    uniform->cam_2 = cam_order[2];
+    uniform->cam_3 = cam_order[3];
+    uniform->shader_mode = shader_mode;
+    uniform->idx = cam_order[3]; // farthest away camera
+
+defer:
+    return result;
 }
 
 Camera cameras[] = {
@@ -246,13 +303,15 @@ Camera cameras[] = {
     },
 };
 
+Camera camera_defaults[4] = {0};
+
 int main()
 {
     /* load resources into main memory */
     Point_Cloud hres = {0};
-    if (!load_points("res/arena_"M"_f32.vtx", &hres)) return 1;
+    if (!load_points("res/arena_" M "_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
-    if (!load_points("res/arena_"S"_f32.vtx", &lres)) return 1;
+    if (!load_points("res/arena_" S "_f32.vtx", &lres)) return 1;
     Image imgs[NUM_IMGS] = {0};
     for (size_t i = 0; i < NUM_IMGS; i++) {
         const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
@@ -265,7 +324,6 @@ int main()
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
-    set_target_fps(60);
 
     /* upload resources to GPU */
     Texture texs[NUM_IMGS] = {0};
@@ -278,8 +336,18 @@ int main()
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
+    /* initialize and map the uniform data */
+    Buffer buff = {
+        .size  = sizeof(uniform),
+        .count = 1,
+        .items = &uniform,
+    };
+    if (!ubo_init(buff, EXAMPLE_ADV_POINT_CLOUD)) return 1;
+
     /* settings & logging*/
+    copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
     bool use_hres = false;
+    bool print_fps = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
@@ -291,6 +359,8 @@ int main()
 
     /* game loop */
     while (!window_should_close()) {
+        if (print_fps) log_fps();
+
         /* input */
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
@@ -309,6 +379,11 @@ int main()
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
         }
+        if (is_key_pressed(KEY_SPACE)) {
+            nob_log(NOB_INFO, "resetting camera defaults");
+            copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
+        }
+        if (is_key_pressed(KEY_F)) print_fps = !print_fps;
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
@@ -328,11 +403,12 @@ int main()
             }
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
-            if (!draw_point_cloud_adv(vtx_id)) return 1;
+            if (!draw_points(vtx_id, EXAMPLE_ADV_POINT_CLOUD)) return 1;
+
+            /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
-            update_cameras_ubo(&cameras[1], shader_mode, cam_order);
+            if (!update_pc_uniform(&cameras[1], shader_mode, cam_order, &uniform)) return 1;
 
         end_mode_3d();
         end_drawing();

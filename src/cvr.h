@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -206,6 +207,38 @@ typedef enum {
     SHAPE_COUNT,
 } Shape_Type;
 
+#define RL_MATRIX_TYPE
+typedef struct {
+    float m0, m4, m8, m12;
+    float m1, m5, m9, m13;
+    float m2, m6, m10, m14;
+    float m3, m7, m11, m15;
+} Matrix;
+
+typedef enum {
+    SHADER_STAGE_VERT,
+    SHADER_STAGE_FRAG,
+    SHADER_STAGE_BOTH,
+    SHADER_STAGE_COUNT,
+} ShaderStage;
+
+/* correspond to pre-defined descriptor set layouts */
+typedef enum {
+    EXAMPLE_TEX,
+    EXAMPLE_POINT_CLOUD,
+    EXAMPLE_ADV_POINT_CLOUD,
+    EXAMPLE_COMPUTE,
+    EXAMPLE_CUSTOM,
+    EXAMPLE_COUNT,
+} Example;
+
+/* Structure for configuring uniform buffers */
+typedef struct {
+    ShaderStage stage;
+    Example example;
+    uint32_t binding;
+} Uniform_Config;
+
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
@@ -216,6 +249,9 @@ void begin_mode_3d(Camera camera);                          /* Set camera and pu
 void end_mode_3d();                                         /* Pops matrix, checks for errors */
 void end_drawing();                                         /* Submits commands, presents, and polls for input */
 void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
+void begin_compute();
+void end_compute();
+bool compute_points();
 
 bool is_key_pressed(int key);
 bool is_key_down(int key);
@@ -260,10 +296,11 @@ typedef struct {
     int format;
 } Texture;
 
+/* Generic buffer */
 typedef struct {
-    void *items;
-    size_t size;
-    size_t count;
+    void *items;  // pointer to elements
+    size_t size;  // size of the entire buffer
+    size_t count; // number of items
 } Buffer;
 
 Texture load_texture_from_image(Image img);
@@ -275,9 +312,16 @@ bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 
 bool upload_point_cloud(Buffer buff, size_t *id);
+bool upload_compute_points(Buffer buff, size_t *id);
 void destroy_point_cloud(size_t id);
-bool draw_point_cloud(size_t id);
-bool draw_point_cloud_adv(size_t vtx_id);
+void destroy_compute_buff(size_t id);
+bool draw_points(size_t vtx_id, Example example);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
+bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
+bool pc_sampler_init();
+Matrix get_proj(Camera camera);
+bool ubo_init(Buffer buff, Example example);
+bool ssbo_init(Example example);
+Color color_from_HSV(float hue, float saturation, float value);
 
 #endif // CVR_H_
