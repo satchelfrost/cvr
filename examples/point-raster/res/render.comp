@@ -1,0 +1,43 @@
+#version 450
+
+struct Vertex {
+    float x, y, z;
+    uint colors;
+};
+
+layout(set = 0, binding = 0) uniform uniform_data {
+    mat4 mvp;
+    vec2 img_size;
+} ubo;
+
+layout(std140, set = 1, binding = 0) buffer vert_data {
+   Vertex vertices[ ];
+};
+
+layout(std140, set = 1, binding = 1) buffer frame_data {
+   uint frame_buff[ ];
+};
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+void main()
+{
+    Vertex vert = vertices[gl_GlobalInvokationID.x];
+    vec4 pos = ubo.mvp * vec4(vert.x, vert.y, vert.z, 1.0);
+    vec3 ndc = pos.xyz / pos.w;
+
+    if (pos.w <= 0 ||
+        ndc.x < -pos.w || ndc.x > pos.w ||
+        ndc.y < -pos.w || ndc.y > pos.w ||
+        ndc.z < -pos.w || ndc.z > pos.w)
+        return;
+
+    vec2 uv = (ndc.xy * 0.5 + 0.5) * ubo.img_size;
+    uint64_t depth = floatBitsToUint(pos.w);
+    uint64_t old_depth = frame_buff[pixel_id] >> 32;
+
+    if (depth < old_depth) {
+        uint64_t packed = depth << 32 | uint64_t(vert.colors);
+        atomicMin(frame_buff[pixel_id], packed);
+    }
+}

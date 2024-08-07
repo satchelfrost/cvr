@@ -228,6 +228,7 @@ typedef enum {
     EXAMPLE_POINT_CLOUD,
     EXAMPLE_ADV_POINT_CLOUD,
     EXAMPLE_COMPUTE,
+    EXAMPLE_COMPUTE_RASTERIZER,
     EXAMPLE_CUSTOM,
     EXAMPLE_COUNT,
 } Example;
@@ -312,7 +313,7 @@ bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 
 bool upload_point_cloud(Buffer buff, size_t *id);
-bool upload_compute_points(Buffer buff, size_t *id);
+bool upload_compute_points(Buffer buff, size_t *id, Example example);
 void destroy_point_cloud(size_t id);
 void destroy_compute_buff(size_t id);
 bool draw_points(size_t vtx_id, Example example);

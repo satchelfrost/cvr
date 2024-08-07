@@ -132,6 +132,7 @@ typedef enum {
 
 typedef enum {
     SSBO_TYPE_ONE,
+    SSBO_TYPE_TWO,
     SSBO_TYPE_COUNT,
 } SSBO_Type;
 
@@ -1625,7 +1626,7 @@ bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type)
     bool result = true;
 
     VkDescriptorSetLayoutBinding binding = {
-        .binding = 1,
+        .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         .descriptorCount = 1,
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -1704,7 +1705,7 @@ bool vk_ssbo_descriptor_set_init(SSBO_Type ssbo_type)
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = ssbo->descriptor_set,
-        .dstBinding = 1,
+        .dstBinding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         .descriptorCount = 1,
         .pBufferInfo = &buff_info,

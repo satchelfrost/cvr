@@ -1,0 +1,40 @@
+#version 450
+
+struct Vertex {
+    float x, y, z;
+    uint colors;
+};
+
+layout(set = 0, binding = 0) uniform uniform_data {
+    mat4 mvp;
+    vec2 img_size;
+} ubo;
+
+layout(std140, set = 1, binding = 0) buffer vert_data {
+   Vertex vertices[ ];
+};
+
+layout(std140, set = 1, binding = 1) buffer frame_data {
+   uint frame_buff[ ];
+};
+
+layout(rgba8ui, set = 2, binding = 0) uniform uimage2D out_img;
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+main()
+{
+    uvec2 id = gl_GlobalInvokationID.xy;
+
+    if (id.x >= ubo.image_size) return;
+
+    int pixel_id = id.x + id.y * ubo.img_size.x;
+
+    uvec4 color = uvec4(0, 0, 0, 255);
+    uint tmp_color = uint(frame_buff[pixel_id] & 0x00FFFFFFUL);
+    if (tmp_color != 0)
+        color = uvec4(255.0 * unpackUnorm4x8(tmp_color));
+
+    imageStore(out_img, id, color);
+    frame_buff[pixel_id] = 0xffffffffff003030UL;
+}

@@ -69,7 +69,7 @@ int main()
         },
     };
 
-    if (!upload_compute_points(compute.buff, &compute.id)) return 1;
+    if (!upload_compute_points(compute.buff, &compute.id, EXAMPLE_COMPUTE)) return 1;
     if (!ssbo_init(EXAMPLE_COMPUTE)) return 1;
 
     float time = 0.0f;

@@ -37,7 +37,7 @@ typedef enum {
 /* Data necessary for compiling an example */
 typedef struct {
     const char *name;
-    const Shaders shaders;
+    const Shaders shaders; // TODO: alternatively I could just read the whole directory looking for file extensions .vert, .frag, & .comp
     const CFiles c_files;
     bool supported_targets[TARGET_COUNT];
     bool private;
@@ -183,6 +183,21 @@ static Example examples[] = {
                 "particle.frag",
             },
             .count = 5,
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+        .supported_targets[TARGET_LINUX] = true,
+    },
+    {
+        .name = "point-raster",
+        .shaders = {
+            .names = (const char *[]) {
+                "point-cloud.vert",
+                "point-cloud.frag",
+            },
+            .count = 2,
         },
         .c_files = {
             .names = default_c_file_names,

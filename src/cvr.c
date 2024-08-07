@@ -101,6 +101,14 @@ bool init_window(int width, int height, const char *title)
 
     /* Initialize glfw stuff */
     glfwInit();
+
+    // /* Interesting option for full screen */
+    // int num_monitors;
+    // GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
+    // const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
+    // width = mode->width;
+    // height = mode->height;
+
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
     glfwSetWindowUserPointer(ctx.window, &ctx);
@@ -547,7 +555,7 @@ Texture load_texture_from_image(Image img)
         .format   = img.format,
     };
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, false))
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, SAMPLER_TYPE_ONE_TEX))
         nob_log(NOB_ERROR, "unable to load texture");
 
     return texture;
@@ -562,7 +570,7 @@ Texture load_pc_texture_from_image(Image img)
         .format   = img.format,
     };
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, true))
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, SAMPLER_TYPE_FOUR_TEX))
         nob_log(NOB_ERROR, "unable to load texture");
 
     return texture;
@@ -772,19 +780,25 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-bool upload_compute_points(Buffer buff, size_t *id)
+bool upload_compute_points(Buffer buff, size_t *id, Example example)
 {
     Vk_Buffer vk_buff = {
         .count = buff.count,
         .size  = buff.size,
     };
-    if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) {
-        nob_log(NOB_ERROR, "failed to upload compute points");
+    if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) return false;
+
+    SSBO_Type ssbo_type;
+    switch (example) {
+    case EXAMPLE_COMPUTE:            ssbo_type = SSBO_TYPE_ONE; break;
+    case EXAMPLE_COMPUTE_RASTERIZER: ssbo_type = SSBO_TYPE_TWO; break;
+    default:
+        nob_log(NOB_ERROR, "example %d is not supported for ssbo upload", example);
         return false;
     }
     
-    *id = ctx.ssbo_sets[SSBO_TYPE_ONE].count;
-    nob_da_append(&ctx.ssbo_sets[SSBO_TYPE_ONE], vk_buff);
+    *id = ctx.ssbo_sets[ssbo_type].count;
+    nob_da_append(&ctx.ssbo_sets[ssbo_type], vk_buff);
 
     return true;
 }
@@ -829,20 +843,27 @@ bool ubo_init(Buffer buff, Example example)
 
 bool ssbo_init(Example example)
 {
+    SSBO_Type ssbo_type;
     if (example == EXAMPLE_COMPUTE) {
-        if (!ctx.ssbo_sets[SSBO_TYPE_ONE].count) {
-            nob_log(NOB_ERROR, "no compute buffer was uploaded");
+        ssbo_type = SSBO_TYPE_ONE;
+        if (ctx.ssbo_sets[ssbo_type].count != 1) {
+            nob_log(NOB_ERROR, "one compute buffer was expected for this example");
             return false;
         }
-
-        SSBO_Type ssbo_type = SSBO_TYPE_ONE;
-        if (!vk_ssbo_descriptor_set_layout_init(ssbo_type)) return false;
-        if (!vk_ssbo_descriptor_pool_init(ssbo_type))       return false;
-        if (!vk_ssbo_descriptor_set_init(ssbo_type))        return false;
+    } else if (example == EXAMPLE_COMPUTE_RASTERIZER) {
+        ssbo_type = SSBO_TYPE_ONE;
+        if (ctx.ssbo_sets[ssbo_type].count != 2) {
+            nob_log(NOB_ERROR, "two compute buffers were expected for this example");
+            return false;
+        }
     } else {
-        nob_log(NOB_ERROR, "only EXAMPLE_COMPUTE is supported for ssbo_init for now.");
+        nob_log(NOB_ERROR, "example %d is not supported for ssbo initialization", example);
         return false;
     }
+
+    if (!vk_ssbo_descriptor_set_layout_init(ssbo_type)) return false;
+    if (!vk_ssbo_descriptor_pool_init(ssbo_type))       return false;
+    if (!vk_ssbo_descriptor_set_init(ssbo_type))        return false;
 
     return true;
 }
