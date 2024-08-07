@@ -22,6 +22,14 @@ typedef struct {
     size_t id;
 } Point_Cloud;
 
+typedef struct {
+    float16 mvps;
+    float img_width;
+    float img_height;
+} Point_Cloud_Uniform;
+
+Point_Cloud_Uniform uniform = {0};
+
 void log_fps()
 {
     static int fps = -1;
@@ -84,9 +92,9 @@ int main()
     };
 
     /* upload resources to GPU */
-    if (!upload_point_cloud(point_cloud.buff, &point_cloud.id)) return 1;
-    // if (!upload_compute_points(point_cloud.buff, &point_cloud.id)) return 1;
-    // if (!ssbo_init(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
+    // if (!upload_point_cloud(point_cloud.buff, &point_cloud.id)) return 1;
+    if (!upload_compute_points(point_cloud.buff, &point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
+    if (!ssbo_init(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
     nob_da_free(point_cloud.verts);
 
     while (!window_should_close()) {
@@ -100,7 +108,7 @@ int main()
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
             // if (!draw_points(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
-            if (!draw_points(point_cloud.id, EXAMPLE_POINT_CLOUD)) return 1;
+            // if (!draw_points(point_cloud.id, EXAMPLE_POINT_CLOUD)) return 1;
         end_mode_3d();
         end_drawing();
     }

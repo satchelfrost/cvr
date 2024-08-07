@@ -846,13 +846,13 @@ bool ssbo_init(Example example)
     SSBO_Type ssbo_type;
     if (example == EXAMPLE_COMPUTE) {
         ssbo_type = SSBO_TYPE_ONE;
-        if (ctx.ssbo_sets[ssbo_type].count != 1) {
+        if (ctx.ssbo_sets[ssbo_type].count != ssbo_type) {
             nob_log(NOB_ERROR, "one compute buffer was expected for this example");
             return false;
         }
     } else if (example == EXAMPLE_COMPUTE_RASTERIZER) {
-        ssbo_type = SSBO_TYPE_ONE;
-        if (ctx.ssbo_sets[ssbo_type].count != 2) {
+        ssbo_type = SSBO_TYPE_TWO;
+        if (ctx.ssbo_sets[ssbo_type].count != ssbo_type) {
             nob_log(NOB_ERROR, "two compute buffers were expected for this example");
             return false;
         }

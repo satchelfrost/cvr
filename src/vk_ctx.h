@@ -97,6 +97,7 @@ typedef struct {
     VkDescriptorSetLayout set_layout;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
+    // TODO: I think I'd like a grouped flag might be nice
 } Vk_Texture_Set;
 
 typedef struct {
@@ -106,6 +107,12 @@ typedef struct {
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout set_layout;
 } UBO;
+
+typedef struct {
+    VkDescriptorSetLayoutBinding *items;
+    size_t count;
+    size_t capacity;
+} Descriptor_Set_Layout_Bindings;
 
 typedef enum {
     PIPELINE_DEFAULT = 0,
@@ -118,7 +125,10 @@ typedef enum {
 } Pipeline_Type;
 
 typedef enum {
-    SAMPLER_TYPE_ONE_TEX = 0,
+    SAMPLER_TYPE_NOT_ALLOWED,
+    SAMPLER_TYPE_ONE_TEX,
+    SAMPLER_TYPE_TWO_TEX,
+    SAMPLER_TYPE_THREE_TEX,
     SAMPLER_TYPE_FOUR_TEX,
     SAMPLER_TYPE_COUNT,
 } Sampler_Type;
@@ -131,6 +141,7 @@ typedef enum {
 } UBO_Type;
 
 typedef enum {
+    SSBO_TYPE_NOT_ALLOWED,
     SSBO_TYPE_ONE,
     SSBO_TYPE_TWO,
     SSBO_TYPE_COUNT,
@@ -1377,12 +1388,6 @@ defer:
     return result;
 }
 
-typedef struct {
-    VkDescriptorSetLayoutBinding *items;
-    size_t count;
-    size_t capacity;
-} Descriptor_Set_Layout_Bindings;
-
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_type)
 {
     bool result = true;
@@ -1495,12 +1500,7 @@ bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type)
     bool result = true;
 
     Descriptor_Set_Layout_Bindings bindings = {0};
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[sampler_type];
-    for (size_t i = 0; i < texture_set->count; i++) {
-        /* don't use separate bindings if only one sampler per shader */
-        if (sampler_type == SAMPLER_TYPE_ONE_TEX && i > 0)
-            break;
-
+    for (size_t i = 0; i < sampler_type; i++) {
         VkDescriptorSetLayoutBinding binding = {
             .binding = i,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1510,13 +1510,18 @@ bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type)
         nob_da_append(&bindings, binding);
     }
 
+    if (sampler_type == SAMPLER_TYPE_NOT_ALLOWED) {
+        nob_log(NOB_ERROR, "sampler type was not specified");
+        nob_return_defer(false);
+    }
+
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pBindings = bindings.items,
         .bindingCount = bindings.count,
     };
 
-    VkDescriptorSetLayout *layout = &texture_set->set_layout;
+    VkDescriptorSetLayout *layout = &ctx.texture_sets[sampler_type].set_layout;
     if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
         nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
         nob_return_defer(false);
@@ -1625,17 +1630,27 @@ bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type)
 {
     bool result = true;
 
-    VkDescriptorSetLayoutBinding binding = {
-        .binding = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-    };
+    Descriptor_Set_Layout_Bindings bindings = {0};
+
+    for (size_t i = 0; i < ssbo_type; i++) {
+        VkDescriptorSetLayoutBinding binding = {
+            .binding = i,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        };
+        nob_da_append(&bindings, binding);
+    }
+
+    if (ssbo_type == SSBO_TYPE_NOT_ALLOWED) {
+        nob_log(NOB_ERROR, "ssbo type was not specified");
+        nob_return_defer(false);
+    }
 
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &binding,
+        .bindingCount = bindings.count,
+        .pBindings = bindings.items,
     };
 
     VkDescriptorSetLayout *layout = &ctx.ssbo_sets[ssbo_type].set_layout;
@@ -1646,6 +1661,7 @@ bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type)
     }
 
 defer:
+    nob_da_free(bindings);
     return result;
 }
 
