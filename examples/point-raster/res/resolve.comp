@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_ARB_gpu_shader_int64 : enable
+
 struct Vertex {
     float x, y, z;
     uint colors;
@@ -15,26 +17,28 @@ layout(std140, set = 1, binding = 0) buffer vert_data {
 };
 
 layout(std140, set = 1, binding = 1) buffer frame_data {
-   uint frame_buff[ ];
+   uint64_t frame_buff[ ];
 };
 
 layout(rgba8ui, set = 2, binding = 0) uniform uimage2D out_img;
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-main()
+void main()
 {
-    uvec2 id = gl_GlobalInvokationID.xy;
+    uvec2 id = gl_GlobalInvocationID.xy;
 
-    if (id.x >= ubo.image_size) return;
+    ivec2 img_size = ivec2(ubo.img_size);
+    if (id.x >= img_size.x) return;
 
-    int pixel_id = id.x + id.y * ubo.img_size.x;
+    ivec2 pixel_coords = ivec2(id);
+    int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
 
     uvec4 color = uvec4(0, 0, 0, 255);
     uint tmp_color = uint(frame_buff[pixel_id] & 0x00FFFFFFUL);
     if (tmp_color != 0)
         color = uvec4(255.0 * unpackUnorm4x8(tmp_color));
 
-    imageStore(out_img, id, color);
+    imageStore(out_img, pixel_coords, color);
     frame_buff[pixel_id] = 0xffffffffff003030UL;
 }

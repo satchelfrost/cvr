@@ -61,7 +61,7 @@ int main()
         particle->color = color_to_vec4(colors[i % NOB_ARRAY_LEN(colors)]);
     }
 
-    Compute_Buffer compute = {
+    Compute_Buffer ssbo = {
         .buff = {
             .items = particles,
             .size  = PARTICLE_COUNT * sizeof(Particle),
@@ -69,7 +69,7 @@ int main()
         },
     };
 
-    if (!upload_compute_points(compute.buff, &compute.id, EXAMPLE_COMPUTE)) return 1;
+    if (!upload_compute_points(ssbo.buff, &ssbo.id, EXAMPLE_COMPUTE)) return 1;
     if (!ssbo_init(EXAMPLE_COMPUTE)) return 1;
 
     float time = 0.0f;
@@ -83,17 +83,17 @@ int main()
     while (!window_should_close()) {
         time = get_time();
         begin_compute();
-            if (!compute_points()) return 1;
+            if (!compute(EXAMPLE_COMPUTE)) return 1;
         end_compute();
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
-            if (!draw_points(compute.id, EXAMPLE_COMPUTE)) return 1;
+            if (!draw_points(ssbo.id, EXAMPLE_COMPUTE)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
-    destroy_compute_buff(compute.id);
+    destroy_compute_buff(ssbo.id);
     close_window();
     return 0;
 }

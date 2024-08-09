@@ -101,13 +101,13 @@ int main()
         update_camera_free(&camera);
 
         begin_compute();
-            if (!compute_points()) return 1;
+            if (!compute(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
         end_compute();
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
-            // if (!draw_points(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
+            if (!draw_points(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
             // if (!draw_points(point_cloud.id, EXAMPLE_POINT_CLOUD)) return 1;
         end_mode_3d();
         end_drawing();

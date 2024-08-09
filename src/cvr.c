@@ -928,16 +928,29 @@ void destroy_compute_buff(size_t id)
         nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
 }
 
-bool compute_points()
+bool compute(Example example)
 {
     bool result = true;
 
-    if (!ctx.compute_pipeline) {
-        if (!vk_compute_pl_init())
+    Descriptor_Type ds_type;
+    switch (example) {
+    case EXAMPLE_COMPUTE:
+        ds_type = DS_TYPE_COMPUTE;
+        break;
+    case EXAMPLE_COMPUTE_RASTERIZER:
+        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
+        break;
+    default:
+        nob_log(NOB_ERROR, "unrecognized example %d for compute", example);
+        nob_return_defer(false);
+    }
+
+    if (!ctx.compute_pl_sets[ds_type].items) {
+        if (!vk_compute_pl_init(ds_type))
             nob_return_defer(false);
     }
 
-    vk_compute();
+    vk_compute(ds_type);
 
 defer:
     return result;
@@ -947,22 +960,26 @@ bool draw_points(size_t vtx_id, Example example)
 {
     bool result = true;
 
-    if (example == EXAMPLE_ADV_POINT_CLOUD) {
+    switch (example) {
+    case EXAMPLE_ADV_POINT_CLOUD:
         if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
             pc_sampler_init();
             if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
                 nob_return_defer(false);
         }
-    } else if (example == EXAMPLE_POINT_CLOUD) {
+        break;
+    case EXAMPLE_POINT_CLOUD:
         if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
             if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
                 nob_return_defer(false);
-    } else if (example == EXAMPLE_COMPUTE) {
+        break; 
+    case EXAMPLE_COMPUTE:
         if (!ctx.pipelines[PIPELINE_COMPUTE]) {
             if (!vk_basic_pl_init(PIPELINE_COMPUTE))
                 nob_return_defer(false);
         }
-    } else {
+        break;
+    default:
         nob_log(NOB_ERROR, "no other example supported yet for draw points");
         nob_return_defer(false);
     }
