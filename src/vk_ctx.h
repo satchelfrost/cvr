@@ -97,7 +97,6 @@ typedef struct {
     VkDescriptorSetLayout set_layout;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
-    // TODO: I think I'd like a grouped flag might be nice
 } Vk_Texture_Set;
 
 typedef struct {
@@ -125,27 +124,12 @@ typedef enum {
 } Pipeline_Type;
 
 typedef enum {
-    SAMPLER_TYPE_NOT_ALLOWED,
-    SAMPLER_TYPE_ONE_TEX,
-    SAMPLER_TYPE_TWO_TEX,
-    SAMPLER_TYPE_THREE_TEX,
-    SAMPLER_TYPE_FOUR_TEX,
-    SAMPLER_TYPE_COUNT,
-} Sampler_Type;
-
-typedef enum {
-    UBO_TYPE_TEX,
-    UBO_TYPE_ADV_POINT_CLOUD,
-    UBO_TYPE_COMPUTE,
-    UBO_TYPE_COUNT,
-} UBO_Type;
-
-typedef enum {
-    SSBO_TYPE_NOT_ALLOWED,
-    SSBO_TYPE_ONE,
-    SSBO_TYPE_TWO,
-    SSBO_TYPE_COUNT,
-} SSBO_Type;
+    DS_TYPE_TEX,
+    DS_TYPE_ADV_POINT_CLOUD,
+    DS_TYPE_COMPUTE,
+    DS_TYPE_COMPUTE_RASTERIZER,
+    DS_TYPE_COUNT,
+} Descriptor_Type;
 
 typedef struct {
     VkDescriptorSetLayout *items;
@@ -160,10 +144,8 @@ typedef struct {
     VkDescriptorSet descriptor_set;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout set_layout;
-} SSBO_Set;
 
-typedef struct {
-} Compute_Buffers;
+} SSBO_Set;
 
 typedef struct {
     GLFWwindow *window;
@@ -185,9 +167,9 @@ typedef struct {
     VkPipeline pipelines[PIPELINE_COUNT];
     VkPipeline compute_pipeline;
     VkPipelineLayout compute_pl_layout;
-    Vk_Texture_Set texture_sets[SAMPLER_TYPE_COUNT];
-    UBO ubos[UBO_TYPE_COUNT];
-    SSBO_Set ssbo_sets[SSBO_TYPE_COUNT];
+    Vk_Texture_Set texture_sets[DS_TYPE_COUNT];
+    UBO ubos[DS_TYPE_COUNT];
+    SSBO_Set ssbo_sets[DS_TYPE_COUNT];
 } Vk_Context;
 
 bool vk_init();
@@ -207,16 +189,16 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 
 /* general ubo initializer */
-bool vk_ubo_init(UBO ubo, UBO_Type type);
-bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_type);
-bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type);
-bool vk_ubo_descriptor_set_init(UBO_Type ubo_type);
-bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type);
-bool vk_sampler_descriptor_pool_init(Sampler_Type sampler_type);
-bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type);
-bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type);
-bool vk_ssbo_descriptor_pool_init(SSBO_Type ssbo_type);
-bool vk_ssbo_descriptor_set_init(SSBO_Type ssbo_type);
+bool vk_ubo_init(UBO ubo, Descriptor_Type type);
+bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, Descriptor_Type ds_type);
+bool vk_ubo_descriptor_pool_init(Descriptor_Type ds_type);
+bool vk_ubo_descriptor_set_init(Descriptor_Type ds_type);
+bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type);
+bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type);
+bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type);
+bool vk_ssbo_descriptor_set_layout_init(Descriptor_Type ds_type);
+bool vk_ssbo_descriptor_pool_init(Descriptor_Type ds_type);
+bool vk_ssbo_descriptor_set_init(Descriptor_Type ds_type);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
@@ -355,8 +337,8 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
-bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Sampler_Type sampler_type);
-bool vk_unload_texture(size_t id, Sampler_Type sampler_type);
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type);
+bool vk_unload_texture(size_t id, Descriptor_Type ds_type);
 
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
@@ -404,11 +386,11 @@ bool vk_destroy()
     cmd_man_destroy(&cmd_man);
     cleanup_swapchain();
     vkDeviceWaitIdle(ctx.device);
-    for (size_t i = 0; i < SAMPLER_TYPE_COUNT; i++) {
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         Vk_Texture_Set texture_set = ctx.texture_sets[i];
         vkDestroyDescriptorPool(ctx.device, texture_set.descriptor_pool, NULL);
     }
-    for (size_t i = 0; i < SAMPLER_TYPE_COUNT; i++) {
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         Vk_Texture_Set texture_set = ctx.texture_sets[i];
         vkDestroyDescriptorSetLayout(ctx.device, texture_set.set_layout, NULL);
     }
@@ -727,11 +709,11 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
     if (pipeline_type == PIPELINE_TEXTURE) {
-        nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_TEX].set_layout);
-        nob_da_append(&set_layouts, ctx.texture_sets[SAMPLER_TYPE_ONE_TEX].set_layout);
+        nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_TEX].set_layout);
+        nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_TEX].set_layout);
     } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
-        nob_da_append(&set_layouts, ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].set_layout);
-        nob_da_append(&set_layouts, ctx.texture_sets[SAMPLER_TYPE_FOUR_TEX].set_layout);
+        nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_ADV_POINT_CLOUD].set_layout);
+        nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_ADV_POINT_CLOUD].set_layout);
     }
     pipeline_layout_ci.pSetLayouts = set_layouts.items;
     pipeline_layout_ci.setLayoutCount = set_layouts.count;
@@ -795,15 +777,15 @@ bool vk_compute_pl_init()
     if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
         nob_return_defer(false);
 
-    if (!ctx.ubos[UBO_TYPE_COMPUTE].set_layout ||
-        !ctx.ssbo_sets[SSBO_TYPE_ONE].set_layout) {
+    if (!ctx.ubos[DS_TYPE_COMPUTE].set_layout ||
+        !ctx.ssbo_sets[DS_TYPE_COMPUTE].set_layout) {
         nob_log(NOB_ERROR, "set layouts for compute are null");
         nob_return_defer(false);
     }
 
     VkDescriptorSetLayout set_layouts[] = {
-        ctx.ubos[UBO_TYPE_COMPUTE].set_layout,
-        ctx.ssbo_sets[SSBO_TYPE_ONE].set_layout
+        ctx.ubos[DS_TYPE_COMPUTE].set_layout,
+        ctx.ssbo_sets[DS_TYPE_COMPUTE].set_layout
     };
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -1025,23 +1007,23 @@ void vk_compute()
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
         ctx.compute_pl_layout, 0, 1,
-        &ctx.ubos[UBO_TYPE_COMPUTE].descriptor_set,
+        &ctx.ubos[DS_TYPE_COMPUTE].descriptor_set,
         0, NULL
     );
 
-    assert(ctx.ssbo_sets[SSBO_TYPE_ONE].count && "no compute buffers");
+    assert(ctx.ssbo_sets[DS_TYPE_COMPUTE].count && "no compute buffers");
 
     vkCmdBindDescriptorSets(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
         ctx.compute_pl_layout, 1, 1,
-        &ctx.ssbo_sets[SSBO_TYPE_ONE].descriptor_set,
+        &ctx.ssbo_sets[DS_TYPE_COMPUTE].descriptor_set,
         0, NULL
     );
 
     vkCmdDispatch(
         cmd_man.compute_buff,
-        ctx.ssbo_sets[SSBO_TYPE_ONE].items[0].count / 256, 1, 1 // TODO: hard-coding alert
+        ctx.ssbo_sets[DS_TYPE_COMPUTE].items[0].count / 256, 1, 1 // TODO: hard-coding alert
     );
 }
 
@@ -1077,7 +1059,7 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
 
     if (example == EXAMPLE_ADV_POINT_CLOUD) {
-        VkDescriptorSet *descriptor_set = &ctx.ubos[UBO_TYPE_ADV_POINT_CLOUD].descriptor_set;
+        VkDescriptorSet *descriptor_set = &ctx.ubos[DS_TYPE_ADV_POINT_CLOUD].descriptor_set;
         vkCmdBindDescriptorSets(
             cmd_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1088,7 +1070,7 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
             cmd_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
             ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 1, 1,
-            &ctx.texture_sets[SAMPLER_TYPE_FOUR_TEX].descriptor_set, 0, NULL
+            &ctx.texture_sets[DS_TYPE_ADV_POINT_CLOUD].descriptor_set, 0, NULL
         );
     }
 
@@ -1131,10 +1113,10 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
         cmd_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
         ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1,
-        &ctx.ubos[UBO_TYPE_TEX].descriptor_set, 0, NULL
+        &ctx.ubos[DS_TYPE_TEX].descriptor_set, 0, NULL
     );
 
-    Vk_Texture_Set texture_set = ctx.texture_sets[SAMPLER_TYPE_ONE_TEX];
+    Vk_Texture_Set texture_set = ctx.texture_sets[DS_TYPE_TEX];
     if (id < texture_set.count && texture_set.items[id].active) {
         vkCmdBindDescriptorSets(
             cmd_buffer,
@@ -1358,7 +1340,7 @@ defer:
     return result;
 }
 
-bool vk_ubo_init(UBO ubo, UBO_Type type)
+bool vk_ubo_init(UBO ubo, Descriptor_Type type)
 {
     bool result = true;
 
@@ -1388,7 +1370,7 @@ defer:
     return result;
 }
 
-bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_type)
+bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, Descriptor_Type ds_type)
 {
     bool result = true;
 
@@ -1405,7 +1387,7 @@ bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, UBO_Type ubo_ty
         .pBindings = &binding,
     };
 
-    VkDescriptorSetLayout *layout = &ctx.ubos[ubo_type].set_layout;
+    VkDescriptorSetLayout *layout = &ctx.ubos[ds_type].set_layout;
     VkResult res = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor set layout for uniform buffer");
@@ -1422,7 +1404,7 @@ typedef struct {
     size_t capacity;
 } Pool_Sizes;
 
-bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type)
+bool vk_ubo_descriptor_pool_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
@@ -1438,7 +1420,7 @@ bool vk_ubo_descriptor_pool_init(UBO_Type ubo_type)
         .maxSets = 1,
     };
 
-    VkDescriptorPool *pool = &ctx.ubos[ubo_type].descriptor_pool;
+    VkDescriptorPool *pool = &ctx.ubos[ds_type].descriptor_pool;
     VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
     if(!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor pool");
@@ -1455,12 +1437,12 @@ typedef struct {
     size_t capacity;
 } Descriptor_Writes;
 
-bool vk_ubo_descriptor_set_init(UBO_Type ubo_type)
+bool vk_ubo_descriptor_set_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
     /* allocate uniform buffer descriptor sets */
-    UBO *ubo = &ctx.ubos[ubo_type];
+    UBO *ubo = &ctx.ubos[ds_type];
     VkDescriptorSetAllocateInfo alloc = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = ubo->descriptor_pool,
@@ -1495,12 +1477,21 @@ defer:
     return result;
 }
 
-bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type)
+bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
     Descriptor_Set_Layout_Bindings bindings = {0};
-    for (size_t i = 0; i < sampler_type; i++) {
+    size_t tex_count = ctx.texture_sets[ds_type].count;
+    if (!tex_count) {
+        nob_log(NOB_ERROR, "no textures were loaded for descriptor type %d", ds_type);
+        nob_return_defer(false);
+    }
+
+    for (size_t i = 0; i < tex_count; i++) {
+        if (ds_type == DS_TYPE_TEX && i > 0)
+            break;
+
         VkDescriptorSetLayoutBinding binding = {
             .binding = i,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1510,18 +1501,13 @@ bool vk_sampler_descriptor_set_layout_init(Sampler_Type sampler_type)
         nob_da_append(&bindings, binding);
     }
 
-    if (sampler_type == SAMPLER_TYPE_NOT_ALLOWED) {
-        nob_log(NOB_ERROR, "sampler type was not specified");
-        nob_return_defer(false);
-    }
-
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pBindings = bindings.items,
         .bindingCount = bindings.count,
     };
 
-    VkDescriptorSetLayout *layout = &ctx.texture_sets[sampler_type].set_layout;
+    VkDescriptorSetLayout *layout = &ctx.texture_sets[ds_type].set_layout;
     if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
         nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
         nob_return_defer(false);
@@ -1532,27 +1518,26 @@ defer:
     return result;
 }
 
-bool vk_sampler_descriptor_pool_init(Sampler_Type sampler_type)
+bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
-    uint32_t max_sets = 0;
-    VkDescriptorPoolSize pool_size = {0};
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[sampler_type];
-    if (texture_set->count) {
-        pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        pool_size.descriptorCount = texture_set->count;
-        max_sets += texture_set->count;
-    } else {
-        nob_log(NOB_ERROR, "no textures loaded, descriptor pool failure");
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
+    if (!texture_set->count) {
+        nob_log(NOB_ERROR, "descriptor pool cannot be created for texture set count zero");
         nob_return_defer(false);
     }
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = texture_set->count,
+    };
 
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = 1,
         .pPoolSizes = &pool_size,
-        .maxSets = max_sets,
+        .maxSets = texture_set->count,
     };
 
     VkDescriptorPool *pool = &texture_set->descriptor_pool;
@@ -1566,12 +1551,12 @@ defer:
     return result;
 }
 
-bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type)
+bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
     /* allocate texture descriptor sets */
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[sampler_type];
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
     VkDescriptorSetAllocateInfo alloc = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = texture_set->descriptor_pool,
@@ -1579,13 +1564,13 @@ bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type)
         .pSetLayouts = &texture_set->set_layout,
     };
 
-    if (sampler_type == SAMPLER_TYPE_ONE_TEX) {
+    if (ds_type == DS_TYPE_TEX) {
         for (size_t i = 0; i < texture_set->count; i++) {
             VkDescriptorSet *set = &texture_set->items[i].descriptor_set;
             VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
             if (!VK_SUCCEEDED(res)) {
                 nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
-                goto defer;
+                nob_return_defer(false);
             }
         }
     } else {
@@ -1593,7 +1578,7 @@ bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type)
         VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
         if (!VK_SUCCEEDED(res)) {
             nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
-            goto defer;
+            nob_return_defer(false);
         }
     }
 
@@ -1613,7 +1598,7 @@ bool vk_sampler_descriptor_set_init(Sampler_Type sampler_type)
             .sampler     = texture_set->items[tex].sampler,
         };
         write.pImageInfo = &img_info;
-        if (sampler_type == SAMPLER_TYPE_ONE_TEX) {
+        if (ds_type == DS_TYPE_TEX) {
             write.dstSet = texture_set->items[tex].descriptor_set;
         } else {
             write.dstBinding = tex;
@@ -1626,13 +1611,21 @@ defer:
     return result;
 }
 
-bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type)
+bool vk_ssbo_descriptor_set_layout_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
     Descriptor_Set_Layout_Bindings bindings = {0};
+    size_t ssbo_count = ctx.ssbo_sets[ds_type].count;
+    if (!ssbo_count) {
+        nob_log(NOB_ERROR, "no ssbos were loaded for descriptor type %d", ds_type);
+        nob_return_defer(false);
+    }
 
-    for (size_t i = 0; i < ssbo_type; i++) {
+    for (size_t i = 0; i < ssbo_count; i++) {
+        if (ds_type == DS_TYPE_COMPUTE && i > 0)
+            break;
+
         VkDescriptorSetLayoutBinding binding = {
             .binding = i,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -1642,18 +1635,13 @@ bool vk_ssbo_descriptor_set_layout_init(SSBO_Type ssbo_type)
         nob_da_append(&bindings, binding);
     }
 
-    if (ssbo_type == SSBO_TYPE_NOT_ALLOWED) {
-        nob_log(NOB_ERROR, "ssbo type was not specified");
-        nob_return_defer(false);
-    }
-
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = bindings.count,
         .pBindings = bindings.items,
     };
 
-    VkDescriptorSetLayout *layout = &ctx.ssbo_sets[ssbo_type].set_layout;
+    VkDescriptorSetLayout *layout = &ctx.ssbo_sets[ds_type].set_layout;
     VkResult res = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor set layout for shader storage buffer");
@@ -1665,9 +1653,15 @@ defer:
     return result;
 }
 
-bool vk_ssbo_descriptor_pool_init(SSBO_Type ssbo_type)
+bool vk_ssbo_descriptor_pool_init(Descriptor_Type ds_type)
 {
     bool result = true;
+
+    size_t ssbo_count = ctx.ssbo_sets[ds_type].count;
+    if (!ssbo_count) {
+        nob_log(NOB_ERROR, "no ssbos were loaded for descriptor type %d", ds_type);
+        nob_return_defer(false);
+    }
 
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -1678,10 +1672,10 @@ bool vk_ssbo_descriptor_pool_init(SSBO_Type ssbo_type)
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = 1,
         .pPoolSizes = &pool_size,
-        .maxSets = 1,
+        .maxSets = ssbo_count,
     };
 
-    VkDescriptorPool *pool = &ctx.ssbo_sets[ssbo_type].descriptor_pool;
+    VkDescriptorPool *pool = &ctx.ssbo_sets[ds_type].descriptor_pool;
     VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
     if(!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor pool for storage buffer");
@@ -1692,12 +1686,12 @@ defer:
     return result;
 }
 
-bool vk_ssbo_descriptor_set_init(SSBO_Type ssbo_type)
+bool vk_ssbo_descriptor_set_init(Descriptor_Type ds_type)
 {
     bool result = true;
 
     /* allocate uniform buffer descriptor sets */
-    SSBO_Set *ssbo = &ctx.ssbo_sets[ssbo_type];
+    SSBO_Set *ssbo = &ctx.ssbo_sets[ds_type];
     VkDescriptorSetAllocateInfo alloc = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = ssbo->descriptor_pool,
@@ -2596,7 +2590,7 @@ static inline int format_to_size(VkFormat fmt)
     }
 }
 
-bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Sampler_Type sampler_type)
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type)
 {
     bool result = true;
 
@@ -2611,7 +2605,7 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
     );
     if(!result) {
         nob_log(NOB_ERROR, "failed to create staging buffer");
-        goto defer;
+        nob_return_defer(false);
     }
     VkResult res = vkMapMemory(ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped);
     vk_chk(res, "unable to map memory");
@@ -2666,7 +2660,7 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
     VkSampler sampler;
     vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
 
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[sampler_type];
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
     Vk_Texture texture = {
         .view = img_view,
         .sampler = sampler,
@@ -2683,11 +2677,11 @@ defer:
     return result;
 }
 
-bool vk_unload_texture(size_t id, Sampler_Type sampler_type)
+bool vk_unload_texture(size_t id, Descriptor_Type ds_type)
 {
     vkDeviceWaitIdle(ctx.device);
 
-    Vk_Texture_Set texture_set = ctx.texture_sets[sampler_type];
+    Vk_Texture_Set texture_set = ctx.texture_sets[ds_type];
     for (size_t i = 0; i < texture_set.count; i++) {
         Vk_Texture *texture = &texture_set.items[i];
         if (texture->id == id) {

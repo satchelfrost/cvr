@@ -251,7 +251,7 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    for (size_t i = 0; i < UBO_TYPE_COUNT; i++) {
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         UBO ubo = ctx.ubos[i];
         if (ubo.buff.handle)
             memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
@@ -523,7 +523,7 @@ void close_window()
 
     destroy_shape_res();
     destroy_ubos();
-    for (size_t i = 0; i < SSBO_TYPE_COUNT; i++) {
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         vkDestroyDescriptorPool(ctx.device, ctx.ssbo_sets[i].descriptor_pool, NULL);
         vkDestroyDescriptorSetLayout(ctx.device, ctx.ssbo_sets[i].set_layout, NULL);
     }
@@ -555,7 +555,7 @@ Texture load_texture_from_image(Image img)
         .format   = img.format,
     };
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, SAMPLER_TYPE_ONE_TEX))
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, DS_TYPE_TEX))
         nob_log(NOB_ERROR, "unable to load texture");
 
     return texture;
@@ -570,7 +570,7 @@ Texture load_pc_texture_from_image(Image img)
         .format   = img.format,
     };
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, SAMPLER_TYPE_FOUR_TEX))
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, DS_TYPE_ADV_POINT_CLOUD))
         nob_log(NOB_ERROR, "unable to load texture");
 
     return texture;
@@ -578,17 +578,17 @@ Texture load_pc_texture_from_image(Image img)
 
 void unload_texture(Texture texture)
 {
-    vk_unload_texture(texture.id, SAMPLER_TYPE_ONE_TEX);
+    vk_unload_texture(texture.id, DS_TYPE_TEX);
 }
 
 void unload_pc_texture(Texture texture)
 {
-    vk_unload_texture(texture.id, SAMPLER_TYPE_FOUR_TEX);
+    vk_unload_texture(texture.id, DS_TYPE_ADV_POINT_CLOUD);
 }
 
 bool tex_sampler_init()
 {
-    Sampler_Type type = SAMPLER_TYPE_ONE_TEX;
+    Descriptor_Type type = DS_TYPE_TEX;
     if (!vk_sampler_descriptor_set_layout_init(type))
         return false;
     if (!vk_sampler_descriptor_pool_init(type))
@@ -788,36 +788,36 @@ bool upload_compute_points(Buffer buff, size_t *id, Example example)
     };
     if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) return false;
 
-    SSBO_Type ssbo_type;
+    Descriptor_Type ds_type;
     switch (example) {
-    case EXAMPLE_COMPUTE:            ssbo_type = SSBO_TYPE_ONE; break;
-    case EXAMPLE_COMPUTE_RASTERIZER: ssbo_type = SSBO_TYPE_TWO; break;
+    case EXAMPLE_COMPUTE:            ds_type = DS_TYPE_COMPUTE; break;
+    case EXAMPLE_COMPUTE_RASTERIZER: ds_type = DS_TYPE_COMPUTE_RASTERIZER; break;
     default:
         nob_log(NOB_ERROR, "example %d is not supported for ssbo upload", example);
         return false;
     }
     
-    *id = ctx.ssbo_sets[ssbo_type].count;
-    nob_da_append(&ctx.ssbo_sets[ssbo_type], vk_buff);
+    *id = ctx.ssbo_sets[ds_type].count;
+    nob_da_append(&ctx.ssbo_sets[ds_type], vk_buff);
 
     return true;
 }
 
 bool ubo_init(Buffer buff, Example example)
 {
-    UBO_Type ubo_type; 
+    Descriptor_Type ds_type; 
     VkShaderStageFlags flags;
     switch (example) {
     case EXAMPLE_TEX:
-        ubo_type = UBO_TYPE_TEX;
+        ds_type = DS_TYPE_TEX;
         flags = VK_SHADER_STAGE_VERTEX_BIT;
         break;
     case EXAMPLE_ADV_POINT_CLOUD:
-        ubo_type = UBO_TYPE_ADV_POINT_CLOUD;
+        ds_type = DS_TYPE_ADV_POINT_CLOUD;
         flags = VK_SHADER_STAGE_VERTEX_BIT;
         break;
     case EXAMPLE_COMPUTE:
-        ubo_type = UBO_TYPE_COMPUTE;
+        ds_type = DS_TYPE_COMPUTE;
         flags = VK_SHADER_STAGE_COMPUTE_BIT;
         break;
     case EXAMPLE_POINT_CLOUD:
@@ -833,26 +833,26 @@ bool ubo_init(Buffer buff, Example example)
         },
         .data = buff.items,
     };
-    if (!vk_ubo_init(ubo, ubo_type)) return false;
-    if (!vk_ubo_descriptor_set_layout_init(flags, ubo_type)) return false;
-    if (!vk_ubo_descriptor_pool_init(ubo_type))              return false;
-    if (!vk_ubo_descriptor_set_init(ubo_type))               return false;
+    if (!vk_ubo_init(ubo, ds_type)) return false;
+    if (!vk_ubo_descriptor_set_layout_init(flags, ds_type)) return false;
+    if (!vk_ubo_descriptor_pool_init(ds_type))              return false;
+    if (!vk_ubo_descriptor_set_init(ds_type))               return false;
 
     return true;
 }
 
 bool ssbo_init(Example example)
 {
-    SSBO_Type ssbo_type;
+    Descriptor_Type ds_type;
     if (example == EXAMPLE_COMPUTE) {
-        ssbo_type = SSBO_TYPE_ONE;
-        if (ctx.ssbo_sets[ssbo_type].count != ssbo_type) {
+        ds_type = DS_TYPE_COMPUTE;
+        if (ctx.ssbo_sets[ds_type].count != 1) {
             nob_log(NOB_ERROR, "one compute buffer was expected for this example");
             return false;
         }
     } else if (example == EXAMPLE_COMPUTE_RASTERIZER) {
-        ssbo_type = SSBO_TYPE_TWO;
-        if (ctx.ssbo_sets[ssbo_type].count != ssbo_type) {
+        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
+        if (ctx.ssbo_sets[ds_type].count != 2) {
             nob_log(NOB_ERROR, "two compute buffers were expected for this example");
             return false;
         }
@@ -861,16 +861,16 @@ bool ssbo_init(Example example)
         return false;
     }
 
-    if (!vk_ssbo_descriptor_set_layout_init(ssbo_type)) return false;
-    if (!vk_ssbo_descriptor_pool_init(ssbo_type))       return false;
-    if (!vk_ssbo_descriptor_set_init(ssbo_type))        return false;
+    if (!vk_ssbo_descriptor_set_layout_init(ds_type)) return false;
+    if (!vk_ssbo_descriptor_pool_init(ds_type))       return false;
+    if (!vk_ssbo_descriptor_set_init(ds_type))        return false;
 
     return true;
 }
 
 bool pc_sampler_init()
 {
-    Sampler_Type type = SAMPLER_TYPE_FOUR_TEX;
+    Descriptor_Type type = DS_TYPE_ADV_POINT_CLOUD;
     if (!vk_sampler_descriptor_set_layout_init(type))
         return false;
     if (!vk_sampler_descriptor_pool_init(type))
@@ -901,11 +901,11 @@ void destroy_ubos()
 {
     vkDeviceWaitIdle(ctx.device);
 
-    for (size_t i = 0; i < UBO_TYPE_COUNT; i++)
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++)
         if (ctx.ubos[i].buff.handle)
             vk_buff_destroy(ctx.ubos[i].buff);
 
-    for (size_t i = 0; i < UBO_TYPE_COUNT; i++) {
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         vkDestroyDescriptorPool(ctx.device, ctx.ubos[i].descriptor_pool, NULL);
         vkDestroyDescriptorSetLayout(ctx.device, ctx.ubos[i].set_layout, NULL);
     }
@@ -916,9 +916,10 @@ void destroy_compute_buff(size_t id)
     vkDeviceWaitIdle(ctx.device);
 
     bool found = false;
-    for (size_t i = 0; i < ctx.ssbo_sets[SSBO_TYPE_ONE].count; i++) {
-        if (i == id && ctx.ssbo_sets[SSBO_TYPE_ONE].items[i].handle) {
-            vk_buff_destroy(ctx.ssbo_sets[SSBO_TYPE_ONE].items[i]);
+    Descriptor_Type type = DS_TYPE_COMPUTE;
+    for (size_t i = 0; i < ctx.ssbo_sets[type].count; i++) {
+        if (i == id && ctx.ssbo_sets[type].items[i].handle) {
+            vk_buff_destroy(ctx.ssbo_sets[type].items[i]);
             found = true;
         }
     }
@@ -967,9 +968,10 @@ bool draw_points(size_t vtx_id, Example example)
     }
 
     Vk_Buffer vtx_buff = {0};
+    Descriptor_Type type = DS_TYPE_COMPUTE;
     if (example == EXAMPLE_COMPUTE) {
-        if (vtx_id < ctx.ssbo_sets[SSBO_TYPE_ONE].count && ctx.ssbo_sets[SSBO_TYPE_ONE].items[vtx_id].handle) {
-            vtx_buff = ctx.ssbo_sets[SSBO_TYPE_ONE].items[vtx_id];
+        if (vtx_id < ctx.ssbo_sets[type].count && ctx.ssbo_sets[type].items[vtx_id].handle) {
+            vtx_buff = ctx.ssbo_sets[type].items[vtx_id];
         } else {
             nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
             nob_return_defer(false);

@@ -100,9 +100,9 @@ int main()
     while (!window_should_close()) {
         update_camera_free(&camera);
 
-        // begin_compute();
-        //     if (!compute_points()) return 1;
-        // end_compute();
+        begin_compute();
+            if (!compute_points()) return 1;
+        end_compute();
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
