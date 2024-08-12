@@ -144,7 +144,6 @@ typedef struct {
     VkDescriptorSet descriptor_set;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout set_layout;
-
 } SSBO_Set;
 
 typedef struct {
@@ -1717,7 +1716,7 @@ bool vk_ssbo_descriptor_pool_init(Descriptor_Type ds_type)
 
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 1,
+        .descriptorCount = ssbo_count,
     };
 
     VkDescriptorPoolCreateInfo pool_ci = {
@@ -2020,14 +2019,6 @@ bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t
     }
 
     return false;
-}
-
-void frame_buff_resized(GLFWwindow* window, int width, int height)
-{
-    (void)window;
-    (void)width;
-    (void)height;
-    ctx.swapchain.buff_resized = true;
 }
 
 void init_ext_managner()

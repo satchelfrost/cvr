@@ -23,9 +23,14 @@ typedef struct {
 } Point_Cloud;
 
 typedef struct {
-    float16 mvps;
-    float img_width;
-    float img_height;
+    Buffer buff;
+    size_t id;
+} Frame_Buffer;
+
+typedef struct {
+    float16 mvp;
+    int img_width;
+    int img_height;
 } Point_Cloud_Uniform;
 
 Point_Cloud_Uniform uniform = {0};
@@ -76,9 +81,35 @@ Point_Cloud gen_points()
     return point_cloud;
 }
 
+Frame_Buffer alloc_frame_buff()
+{
+    size_t buff_count = 1024 * 1024 * 4;
+    size_t buff_size  = sizeof(uint64_t) * buff_count;
+    uint64_t *data = malloc(buff_size);
+
+    Frame_Buffer frame_buff = {
+        .buff.size = buff_size,
+        .buff.items = data,
+        .buff.count = buff_count,
+    };
+
+    return frame_buff;
+}
+
+bool update_ubo()
+{
+    if (!get_mvp_float16(&uniform.mvp)) return false;
+    Window_Size win_size = get_window_size();
+    uniform.img_width = win_size.width;
+    uniform.img_height = win_size.height;
+
+    return true;
+}
+
 int main()
 {
     Point_Cloud point_cloud = gen_points();
+    Frame_Buffer frame_buff = alloc_frame_buff();
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "compute based rasterization for a point cloud");
@@ -92,10 +123,22 @@ int main()
     };
 
     /* upload resources to GPU */
-    // if (!upload_point_cloud(point_cloud.buff, &point_cloud.id)) return 1;
     if (!upload_compute_points(point_cloud.buff, &point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
+    if (!upload_compute_points(frame_buff.buff, &frame_buff.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
     if (!ssbo_init(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
     nob_da_free(point_cloud.verts);
+    free(frame_buff.buff.items);
+
+    /* initialize and map the uniform data */
+    Buffer buff = {
+        .size  = sizeof(uniform),
+        .count = 1,
+        .items = &uniform,
+    };
+    if (!ubo_init(buff, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
+
+
+    goto end;
 
     while (!window_should_close()) {
         update_camera_free(&camera);
@@ -108,12 +151,14 @@ int main()
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
             if (!draw_points(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
-            // if (!draw_points(point_cloud.id, EXAMPLE_POINT_CLOUD)) return 1;
+            if (!update_ubo()) return 1;;
         end_mode_3d();
         end_drawing();
     }
 
-    destroy_point_cloud(point_cloud.id);
+end:
+    destroy_compute_buff(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER);
+    destroy_compute_buff(frame_buff.id, EXAMPLE_COMPUTE_RASTERIZER);
     close_window();
     return 0;
 }

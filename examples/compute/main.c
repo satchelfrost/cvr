@@ -93,7 +93,7 @@ int main()
         end_drawing();
     }
 
-    destroy_compute_buff(ssbo.id);
+    destroy_compute_buff(ssbo.id, EXAMPLE_COMPUTE);
     close_window();
     return 0;
 }

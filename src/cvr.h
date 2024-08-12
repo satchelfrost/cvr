@@ -215,6 +215,11 @@ typedef struct {
     float m3, m7, m11, m15;
 } Matrix;
 
+#define RL_FLOAT_16
+typedef struct float16 {
+    float v[16];
+} float16;
+
 typedef enum {
     SHADER_STAGE_VERT,
     SHADER_STAGE_FRAG,
@@ -240,9 +245,15 @@ typedef struct {
     uint32_t binding;
 } Uniform_Config;
 
+typedef struct {
+    int width;
+    int height;
+} Window_Size;
+
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
+Window_Size get_window_size();
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
@@ -315,10 +326,13 @@ bool is_mouse_button_down(int button);
 bool upload_point_cloud(Buffer buff, size_t *id);
 bool upload_compute_points(Buffer buff, size_t *id, Example example);
 void destroy_point_cloud(size_t id);
-void destroy_compute_buff(size_t id);
+void destroy_compute_buff(size_t id, Example example);
 bool draw_points(size_t vtx_id, Example example);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
 bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
+bool get_mvp(Matrix *mvp);
+bool get_mvp_float16(float16 *mvp);
+Matrix get_view_proj();
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
 bool ubo_init(Buffer buff, Example example);

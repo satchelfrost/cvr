@@ -159,9 +159,12 @@ typedef struct float3 {
     float v[3];
 } float3;
 
+#if !defined(RL_FLOAT_16)
 typedef struct float16 {
     float v[16];
 } float16;
+#define RL_FLOAT_16
+#endif
 
 #include <math.h>       // Required for: sinf(), cosf(), tan(), atan2f(), sqrtf(), floor(), fminf(), fmaxf(), fabs()
 

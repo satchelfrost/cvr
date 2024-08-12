@@ -71,7 +71,7 @@ typedef struct {
 typedef struct {
     Matrix view;
     Matrix proj;
-    Matrix viewProj;
+    Matrix view_proj;
 } Matrices;
 
 /* State */
@@ -84,6 +84,7 @@ Time cvr_time = {0};
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
+Window_Size win_size = {0};
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
@@ -108,6 +109,8 @@ bool init_window(int width, int height, const char *title)
     // const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
     // width = mode->width;
     // height = mode->height;
+    win_size.width = width;
+    win_size.height = height;
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
@@ -151,7 +154,7 @@ bool draw_shape(Shape_Type shape_type)
         nob_return_defer(false);
     }
 
-    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     result = vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
 
 defer:
@@ -178,7 +181,7 @@ bool draw_shape_wireframe(Shape_Type shape_type)
         nob_return_defer(false);
     }
 
-    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     result = vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mvp);
 
 defer:
@@ -213,9 +216,38 @@ void begin_mode_3d(Camera camera)
 {
     matrices.proj = get_proj(camera);
     matrices.view = MatrixLookAt(camera.position, camera.target, camera.up);
-    matrices.viewProj = MatrixMultiply(matrices.view, matrices.proj);
+    matrices.view_proj = MatrixMultiply(matrices.view, matrices.proj);
 
     push_matrix();
+}
+
+Matrix get_view_proj()
+{
+    return matrices.view_proj;
+}
+
+bool get_mvp(Matrix *mvp)
+{
+    bool result = true;
+
+    Matrix model = {0};
+    if (!get_matrix_tos(&model)) nob_return_defer(false);
+    *mvp = MatrixMultiply(model, matrices.view_proj);
+
+defer:
+    return result;
+}
+
+bool get_mvp_float16(float16 *mvp)
+{
+    bool result = true;
+
+    Matrix m = {0};
+    if (!get_mvp(&m)) nob_return_defer(false);
+    *mvp = MatrixToFloatV(m);
+
+defer:
+    return result;
 }
 
 static void wait_time(double seconds)
@@ -621,7 +653,7 @@ bool draw_texture(Texture texture, Shape_Type shape_type)
         nob_return_defer(false);
     }
 
-    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
         nob_return_defer(false);
 
@@ -894,7 +926,7 @@ void destroy_point_cloud(size_t id)
     }
 
     if (!found)
-        nob_log(NOB_WARNING, "point cloud &zu does not exist cannot destroy", id);
+        nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
 }
 
 void destroy_ubos()
@@ -911,12 +943,26 @@ void destroy_ubos()
     }
 }
 
-void destroy_compute_buff(size_t id)
+void destroy_compute_buff(size_t id, Example example)
 {
     vkDeviceWaitIdle(ctx.device);
 
     bool found = false;
-    Descriptor_Type type = DS_TYPE_COMPUTE;
+
+    Descriptor_Type type;
+    switch (example) {
+    case EXAMPLE_COMPUTE:
+        type = DS_TYPE_COMPUTE;
+        break;
+    case EXAMPLE_COMPUTE_RASTERIZER:
+        type = DS_TYPE_COMPUTE_RASTERIZER;
+        break;
+    default:
+        nob_log(NOB_ERROR, "unrecognized example %d for compute", example);
+        return;
+    }
+
+    // Descriptor_Type type = DS_TYPE_COMPUTE;
     for (size_t i = 0; i < ctx.ssbo_sets[type].count; i++) {
         if (i == id && ctx.ssbo_sets[type].items[i].handle) {
             vk_buff_destroy(ctx.ssbo_sets[type].items[i]);
@@ -925,7 +971,7 @@ void destroy_compute_buff(size_t id)
     }
 
     if (!found)
-        nob_log(NOB_WARNING, "compute buffer &zu does not exist cannot destroy", id);
+        nob_log(NOB_WARNING, "compute buffer %zu does not exist cannot destroy", id);
 }
 
 bool compute(Example example)
@@ -1010,7 +1056,7 @@ bool draw_points(size_t vtx_id, Example example)
         nob_return_defer(false);
     }
 
-    Matrix mvp = MatrixMultiply(model, matrices.viewProj);
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     if (!vk_draw_points(vtx_buff, mvp, example))
         nob_return_defer(false);
 
@@ -1136,4 +1182,17 @@ Color color_from_HSV(float hue, float saturation, float value)
     color.b = (unsigned char)((value - value*saturation*k)*255.0f);
 
     return color;
+}
+
+void frame_buff_resized(GLFWwindow* window, int width, int height)
+{
+    (void)window;
+    win_size.width = width;
+    win_size.height = height;
+    ctx.swapchain.buff_resized = true;
+}
+
+Window_Size get_window_size()
+{
+    return win_size;
 }
