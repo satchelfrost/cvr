@@ -150,7 +150,13 @@ typedef struct {
     VkPipeline *items;
     size_t count;
     size_t capacity;
-} Pipeline_Set;
+} Vk_Pipeline_Set;
+
+typedef struct {
+    VkPipelineLayout *items;
+    size_t count;
+    size_t capacity;
+} Vk_Pipeline_Layout_Set;
 
 typedef struct {
     GLFWwindow *window;
@@ -170,8 +176,8 @@ typedef struct {
     VkImageView depth_img_view;
     VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
     VkPipeline pipelines[PIPELINE_COUNT];
-    Pipeline_Set compute_pl_sets[DS_TYPE_COUNT];
-    VkPipelineLayout compute_pl_layout;
+    Vk_Pipeline_Set compute_pl_sets[DS_TYPE_COUNT];
+    Vk_Pipeline_Layout_Set compute_pl_layout_sets[DS_TYPE_COUNT];
     Vk_Texture_Set texture_sets[DS_TYPE_COUNT];
     UBO ubos[DS_TYPE_COUNT];
     SSBO_Set ssbo_sets[DS_TYPE_COUNT];
@@ -406,13 +412,18 @@ bool vk_destroy()
     }
 
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        Pipeline_Set pipeline_set = ctx.compute_pl_sets[i];
+        Vk_Pipeline_Set pipeline_set = ctx.compute_pl_sets[i];
         for (size_t j = 0; j < pipeline_set.count; j++) {
             vkDestroyPipeline(ctx.device, pipeline_set.items[j], NULL);
         }
     }
 
-    vkDestroyPipelineLayout(ctx.device, ctx.compute_pl_layout, NULL);
+    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
+        Vk_Pipeline_Layout_Set layout_set = ctx.compute_pl_layout_sets[i];
+        for (size_t j = 0; j < layout_set.count; j++)
+            vkDestroyPipelineLayout(ctx.device, layout_set.items[j], NULL);
+    }
+
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
 #ifdef ENABLE_VALIDATION
@@ -439,7 +450,7 @@ bool vk_instance_init()
     app_info.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
     app_info.pEngineName = "No Engine";
     app_info.engineVersion = VK_MAKE_VERSION(0, 0, 1);
-    app_info.apiVersion = VK_API_VERSION_1_0;
+    app_info.apiVersion = VK_API_VERSION_1_2;
 
     VkInstanceCreateInfo instance_ci = {0};
     instance_ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -493,10 +504,22 @@ bool vk_device_init()
 
     VkDeviceCreateInfo device_ci = {0};
     device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    VkPhysicalDeviceFeatures features = {0};
-    features.samplerAnisotropy = VK_TRUE;
-    features.fillModeNonSolid = VK_TRUE;
-    device_ci.pEnabledFeatures = &features;
+    VkPhysicalDeviceFeatures features = {
+        .samplerAnisotropy = VK_TRUE,
+        .fillModeNonSolid = VK_TRUE,
+        .shaderInt64 = VK_TRUE,
+    };
+    VkPhysicalDeviceVulkan12Features features12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .shaderBufferInt64Atomics = VK_TRUE,
+    };
+    VkPhysicalDeviceFeatures2 all_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &features12,
+        .features = features,
+    };
+    device_ci.pNext = &all_features;
+    device_ci.pEnabledFeatures = NULL; // necessary when pNext is used
     device_ci.pQueueCreateInfos = queue_cis.items;
     device_ci.queueCreateInfoCount = queue_cis.count;
     device_ci.enabledExtensionCount = ext_manager.device_exts.count;
@@ -807,21 +830,23 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
         nob_return_defer(false);
     }
 
-    VkDescriptorSetLayout set_layouts[] = {
-        ctx.ubos[ds_type].set_layout,
-        ctx.ssbo_sets[ds_type].set_layout
-    };
+    Descriptor_Set_Layouts set_layouts = {0};
+    nob_da_append(&set_layouts, ctx.ubos[ds_type].set_layout);
+    nob_da_append(&set_layouts, ctx.ssbo_sets[ds_type].set_layout);
+
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = NOB_ARRAY_LEN(set_layouts),
-        .pSetLayouts = set_layouts,
+        .setLayoutCount = set_layouts.count,
+        .pSetLayouts = set_layouts.items,
     };
+    VkPipelineLayout pl_layout;
     VkResult res = vkCreatePipelineLayout(
         ctx.device,
         &pipeline_layout_ci,
         NULL,
-        &ctx.compute_pl_layout
+        &pl_layout
     );
+    nob_da_append(&ctx.compute_pl_layout_sets[ds_type], pl_layout);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create layout for compute pipeline");
         nob_return_defer(false);
@@ -829,7 +854,7 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
 
     VkComputePipelineCreateInfo pipeline_ci = {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .layout = ctx.compute_pl_layout,
+        .layout = pl_layout,
         .stage = shader_ci,
     };
 
@@ -853,6 +878,23 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
         vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
         if (!vk_shader_mod_init("./res/resolve.comp.spv", &shader_ci.module))
             nob_return_defer(false);
+
+        /* add the storage image to the set layout */
+        if (!ctx.texture_sets[ds_type].count) {
+            nob_log(NOB_ERROR, "no texture sets available for compute rasterizer");
+            nob_return_defer(false);
+        }
+        nob_da_append(&set_layouts, ctx.texture_sets[ds_type].set_layout);
+        pipeline_layout_ci.setLayoutCount = set_layouts.count;
+
+        VkResult res = vkCreatePipelineLayout(
+            ctx.device,
+            &pipeline_layout_ci,
+            NULL,
+            &pl_layout
+        );
+        nob_da_append(&ctx.compute_pl_layout_sets[ds_type], pl_layout);
+
         res = vkCreateComputePipelines(
             ctx.device,
             VK_NULL_HANDLE,
@@ -1045,7 +1087,7 @@ defer:
 
 void vk_compute(Descriptor_Type ds_type)
 {
-    Pipeline_Set pipeline_set = ctx.compute_pl_sets[ds_type];
+    Vk_Pipeline_Set pipeline_set = ctx.compute_pl_sets[ds_type];
     vkCmdBindPipeline(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1055,7 +1097,7 @@ void vk_compute(Descriptor_Type ds_type)
     vkCmdBindDescriptorSets(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        ctx.compute_pl_layout, 0, 1,
+        ctx.compute_pl_layout_sets[ds_type].items[0], 0, 1, // TODO: hard-coding
         &ctx.ubos[ds_type].descriptor_set,
         0, NULL
     );
@@ -1065,7 +1107,7 @@ void vk_compute(Descriptor_Type ds_type)
     vkCmdBindDescriptorSets(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        ctx.compute_pl_layout, 1, 1,
+        ctx.compute_pl_layout_sets[ds_type].items[0], 1, 1, // TODO: hard-coding
         &ctx.ssbo_sets[ds_type].descriptor_set,
         0, NULL
     );
@@ -1289,7 +1331,6 @@ bool vk_end_compute()
 defer:
     return result;
 }
-
 
 bool vk_end_drawing()
 {
@@ -2401,8 +2442,10 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
 {
     bool result = true;
 
-    cvr_chk(img->extent.width, "Vk_Image must be set with width before calling vk_img_init");
-    cvr_chk(img->extent.height, "Vk_Image must be set with height before calling vk_img_init");
+    if (img->extent.width == 0 && img->extent.height == 0) {
+        nob_log(NOB_ERROR, "Vk_Image must be set with width/height before calling vk_img_init");
+        nob_return_defer(false);
+    }
 
     VkImageCreateInfo img_ci = {
         .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -2421,15 +2464,25 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
     VkMemoryRequirements mem_reqs = {0};
     vkGetImageMemoryRequirements(ctx.device, img->handle, &mem_reqs);
 
-    VkMemoryAllocateInfo alloc_ci = {0};
-    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_ci.allocationSize = mem_reqs.size;
-    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
-    cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(ctx.device, &alloc_ci, NULL, &img->mem);
-    vk_chk(vk_result, "failed to allocate buffer memory!");
+    VkMemoryAllocateInfo alloc_ci = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_reqs.size,
+    };
+    if (!find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex)) {
+        nob_log(NOB_ERROR, "Memory not suitable based on memory requirements");
+        nob_return_defer(false);
+    }
+    VkResult res = vkAllocateMemory(ctx.device, &alloc_ci, NULL, &img->mem);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to allocate buffer memory!");
+        nob_return_defer(false);
+    }
 
-    vk_chk(vkBindImageMemory(ctx.device, img->handle, img->mem, 0), "failed to bind image buffer memory");
+    res = vkBindImageMemory(ctx.device, img->handle, img->mem, 0);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to bind image buffer memory");
+        nob_return_defer(false);
+    }
 
 defer:
     return result;

@@ -852,6 +852,10 @@ bool ubo_init(Buffer buff, Example example)
         ds_type = DS_TYPE_COMPUTE;
         flags = VK_SHADER_STAGE_COMPUTE_BIT;
         break;
+    case EXAMPLE_COMPUTE_RASTERIZER:
+        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
+        flags = VK_SHADER_STAGE_COMPUTE_BIT;
+        break;
     case EXAMPLE_POINT_CLOUD:
     default:
         nob_log(NOB_ERROR, "example %d not handled for ubo_init", example);
