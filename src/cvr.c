@@ -1200,3 +1200,81 @@ Window_Size get_window_size()
 {
     return win_size;
 }
+
+bool storage_img_init(int width, int height, Example example)
+{
+    bool result = true;
+
+    Descriptor_Type ds_type;
+    if (example != EXAMPLE_COMPUTE_RASTERIZER) {
+        nob_log(NOB_ERROR, "storage img only supports compute rasterizer currently");
+        nob_return_defer(false);
+    } else {
+        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
+    }
+
+    Vk_Image vk_img = {
+        .extent  = {width, height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+    };
+
+    result = vk_img_init(
+        &vk_img,
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (!result) return result;
+
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL
+    );
+
+    /* here we could also check if the graphics and compute queues are the same
+     * if they are not the same then we can make an image memory barrier 
+     * for now I will skip this */
+
+    /* create image view */
+    VkImageView img_view;
+    if (!vk_img_view_init(vk_img, &img_view))
+        nob_return_defer(false);
+
+    /* create sampler */
+    VkPhysicalDeviceProperties props = {0};
+    vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
+    VkSamplerCreateInfo sampler_ci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = props.limits.maxSamplerAnisotropy,
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+    };
+    VkSampler sampler;
+    vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
+
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
+    Vk_Texture texture = {
+        .view = img_view,
+        .sampler = sampler,
+        .img = vk_img,
+        .id = texture_set->count,
+        .active = true,
+    };
+
+    nob_da_append(texture_set, texture);
+
+    if (!vk_sampler_descriptor_set_layout_init(ds_type)) return false;
+    if (!vk_sampler_descriptor_pool_init(ds_type))       return false;
+    if (!vk_sampler_descriptor_set_init(ds_type))        return false;
+
+defer:
+    return result;
+}

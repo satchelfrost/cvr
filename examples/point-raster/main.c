@@ -137,7 +137,11 @@ int main()
     };
     if (!ubo_init(buff, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
 
-    /* TODO: I need to create the image for the */
+    /* initialize the storage image */
+    Window_Size win_size = get_window_size();
+    int width = win_size.width;
+    int height = win_size.height;
+    if (!storage_img_init(width, height, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
 
     while (!window_should_close()) {
         update_camera_free(&camera);

@@ -593,21 +593,33 @@ bool vk_swapchain_init()
 
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
 {
-    VkImageViewCreateInfo img_view_ci = {0};
-    img_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    img_view_ci.image = img.handle;
-    img_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    img_view_ci.format = img.format;
-    img_view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    img_view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    img_view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    img_view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    img_view_ci.subresourceRange.aspectMask = img.aspect_mask;
-    img_view_ci.subresourceRange.baseMipLevel = 0;
-    img_view_ci.subresourceRange.levelCount = 1;
-    img_view_ci.subresourceRange.baseArrayLayer = 0;
-    img_view_ci.subresourceRange.layerCount = 1;
-    return VK_SUCCEEDED(vkCreateImageView(ctx.device, &img_view_ci, NULL, img_view));
+    VkImageViewCreateInfo img_view_ci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = img.handle,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = img.format,
+        .components = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        },
+        .subresourceRange = {
+            .aspectMask = img.aspect_mask,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
+
+    VkResult res = vkCreateImageView(ctx.device, &img_view_ci, NULL, img_view);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create image view");
+        return false;
+    }
+
+    return true;
 }
 
 bool vk_img_views_init()
@@ -817,7 +829,7 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
             nob_return_defer(false);
         break;
     case DS_TYPE_COMPUTE_RASTERIZER:
-        if (!vk_shader_mod_init("./res/render.comp.spv", &shader_ci.module))
+        if (!vk_shader_mod_init("./res/resolve.comp.spv", &shader_ci.module))
             nob_return_defer(false);
         break;
     default:
@@ -833,6 +845,7 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
     Descriptor_Set_Layouts set_layouts = {0};
     nob_da_append(&set_layouts, ctx.ubos[ds_type].set_layout);
     nob_da_append(&set_layouts, ctx.ssbo_sets[ds_type].set_layout);
+    nob_da_append(&set_layouts, ctx.texture_sets[ds_type].set_layout);
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -874,9 +887,15 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
     }
     nob_da_append(&ctx.compute_pl_sets[ds_type], pipeline);
 
+    return false;
+
     if (ds_type == DS_TYPE_COMPUTE_RASTERIZER) {
-        vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
-        if (!vk_shader_mod_init("./res/resolve.comp.spv", &shader_ci.module))
+        VkPipelineShaderStageCreateInfo resolve_ci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pName = "main",
+        };
+        if (!vk_shader_mod_init("./res/resolve.comp.spv", &resolve_ci.module))
             nob_return_defer(false);
 
         /* add the storage image to the set layout */
@@ -885,29 +904,40 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
             nob_return_defer(false);
         }
         nob_da_append(&set_layouts, ctx.texture_sets[ds_type].set_layout);
-        pipeline_layout_ci.setLayoutCount = set_layouts.count;
+        VkPipelineLayoutCreateInfo pipeline_layout_ci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .setLayoutCount = set_layouts.count,
+            .pSetLayouts = set_layouts.items,
+        };
 
+        VkPipelineLayout comp_2_pl_layout;
         VkResult res = vkCreatePipelineLayout(
             ctx.device,
             &pipeline_layout_ci,
             NULL,
-            &pl_layout
+            &comp_2_pl_layout
         );
-        nob_da_append(&ctx.compute_pl_layout_sets[ds_type], pl_layout);
+        nob_da_append(&ctx.compute_pl_layout_sets[ds_type], comp_2_pl_layout);
 
+        VkPipeline comp_2_pl;
+        VkComputePipelineCreateInfo pipeline_ci = {
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .layout = comp_2_pl_layout,
+            .stage = resolve_ci,
+        };
         res = vkCreateComputePipelines(
             ctx.device,
             VK_NULL_HANDLE,
             1,
             &pipeline_ci,
             NULL,
-            &pipeline
+            &comp_2_pl
         );
         if (!VK_SUCCEEDED(res)) {
             nob_log(NOB_ERROR, "failed to create compute pipeline");
             nob_return_defer(false);
         }
-        nob_da_append(&ctx.compute_pl_sets[ds_type], pipeline);
+        nob_da_append(&ctx.compute_pl_sets[ds_type], comp_2_pl);
     }
 
 defer:
@@ -2599,10 +2629,11 @@ bool cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
     bool result = true;
     vk_chk(vkEndCommandBuffer(*tmp_cmd_buff), "failed to end cmd buffer");
 
-    VkSubmitInfo submit = {0};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = tmp_cmd_buff;
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = tmp_cmd_buff,
+    };
     vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
     vk_chk(vkQueueWaitIdle(ctx.gfx_queue), "failed to wait idle in quick cmd");
 
@@ -2614,25 +2645,38 @@ defer:
 bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
 {
     bool result = true;
+
     VkCommandBuffer tmp_cmd_buff;
     cvr_chk(cmd_quick_begin(&tmp_cmd_buff), "failed quick cmd begin");
-    
-    bool layout_dst = old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
-                      new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    bool layout_shader = old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
-                         new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    const char *msg = nob_temp_sprintf(
-        "old_layout %d with new_layout %d not allowed yet",
-        old_layout,
-        new_layout
-    );
-    assert(layout_dst || (layout_shader && msg));
+    VkPipelineStageFlags src_stg_mask;
+    VkPipelineStageFlags dst_stg_mask;
+    VkAccessFlags src_access_mask;
+    VkAccessFlags dst_access_mask;
+    if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        src_access_mask = 0;
+        dst_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        src_stg_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dst_stg_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        dst_access_mask = VK_ACCESS_SHADER_READ_BIT;
+        src_stg_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dst_stg_mask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_GENERAL) {
+        src_access_mask = 0;
+        dst_access_mask = 0;
+        src_stg_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        dst_stg_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    } else {
+        nob_log(NOB_ERROR, "old_layout %d with new_layout %d not allowed yet", old_layout, new_layout);
+        nob_return_defer(false);
+    }
 
     VkImageMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .srcAccessMask = (layout_dst) ? 0 : VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = (layout_dst) ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_SHADER_READ_BIT,
+        .srcAccessMask = src_access_mask,
+        .dstAccessMask = dst_access_mask,
         .oldLayout = old_layout,
         .newLayout = new_layout,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -2646,15 +2690,8 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
     };
 
     vkCmdPipelineBarrier(
-        tmp_cmd_buff,
-        (layout_dst) ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
-        (layout_dst) ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0,
-        0,
-        NULL,
-        0,
-        NULL,
-        1,
+        tmp_cmd_buff, src_stg_mask, dst_stg_mask,
+        0, 0, NULL, 0, NULL, 1,
         &barrier
     );
 
