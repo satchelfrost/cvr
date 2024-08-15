@@ -149,8 +149,6 @@ int main()
         begin_compute();
             if (!compute(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
         end_compute();
-    
-        goto end;
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
@@ -161,8 +159,6 @@ int main()
         end_drawing();
     }
 
-end:
-    nob_log(NOB_INFO, "early debug ending");
     destroy_compute_buff(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER);
     destroy_compute_buff(frame_buff.id, EXAMPLE_COMPUTE_RASTERIZER);
     close_window();

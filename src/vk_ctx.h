@@ -204,7 +204,7 @@ bool vk_ubo_init(UBO ubo, Descriptor_Type type);
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, Descriptor_Type ds_type);
 bool vk_ubo_descriptor_pool_init(Descriptor_Type ds_type);
 bool vk_ubo_descriptor_set_init(Descriptor_Type ds_type);
-bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type);
+bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type, VkShaderStageFlags flags);
 bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type);
 bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type);
 bool vk_ssbo_descriptor_set_layout_init(Descriptor_Type ds_type);
@@ -404,6 +404,13 @@ bool vk_destroy()
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         Vk_Texture_Set texture_set = ctx.texture_sets[i];
         vkDestroyDescriptorSetLayout(ctx.device, texture_set.set_layout, NULL);
+        for (size_t j = 0; j < texture_set.count; j++) {
+            Vk_Texture *texture = &texture_set.items[j];
+            vkDestroySampler(ctx.device, texture->sampler, NULL);
+            vkDestroyImageView(ctx.device, texture->view, NULL);
+            vkDestroyImage(ctx.device, texture->img.handle, NULL);
+            vkFreeMemory(ctx.device, texture->img.mem, NULL);
+        }
     }
 
     for (size_t i = 0; i < PIPELINE_COUNT; i++) {
@@ -450,7 +457,7 @@ bool vk_instance_init()
     app_info.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
     app_info.pEngineName = "No Engine";
     app_info.engineVersion = VK_MAKE_VERSION(0, 0, 1);
-    app_info.apiVersion = VK_API_VERSION_1_2;
+    app_info.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo instance_ci = {0};
     instance_ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -502,15 +509,18 @@ bool vk_device_init()
         nob_da_append(&queue_cis, queue_ci);
     }
 
-    VkDeviceCreateInfo device_ci = {0};
-    device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     VkPhysicalDeviceFeatures features = {
         .samplerAnisotropy = VK_TRUE,
         .fillModeNonSolid = VK_TRUE,
         .shaderInt64 = VK_TRUE,
     };
+    VkPhysicalDeviceVulkan13Features features13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .synchronization2 = VK_TRUE,
+    };
     VkPhysicalDeviceVulkan12Features features12 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &features13,
         .shaderBufferInt64Atomics = VK_TRUE,
     };
     VkPhysicalDeviceFeatures2 all_features = {
@@ -518,12 +528,15 @@ bool vk_device_init()
         .pNext = &features12,
         .features = features,
     };
-    device_ci.pNext = &all_features;
-    device_ci.pEnabledFeatures = NULL; // necessary when pNext is used
-    device_ci.pQueueCreateInfos = queue_cis.items;
-    device_ci.queueCreateInfoCount = queue_cis.count;
-    device_ci.enabledExtensionCount = ext_manager.device_exts.count;
-    device_ci.ppEnabledExtensionNames = ext_manager.device_exts.items;
+    VkDeviceCreateInfo device_ci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &all_features,
+        .pEnabledFeatures = NULL, // necessary when pNext is used
+        .pQueueCreateInfos = queue_cis.items,
+        .queueCreateInfoCount = queue_cis.count,
+        .enabledExtensionCount = ext_manager.device_exts.count,
+        .ppEnabledExtensionNames = ext_manager.device_exts.items,
+    };
 #ifdef ENABLE_VALIDATION
     device_ci.enabledLayerCount = ext_manager.validation_layers.count;
     device_ci.ppEnabledLayerNames = ext_manager.validation_layers.items;
@@ -829,7 +842,7 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
             nob_return_defer(false);
         break;
     case DS_TYPE_COMPUTE_RASTERIZER:
-        if (!vk_shader_mod_init("./res/resolve.comp.spv", &shader_ci.module))
+        if (!vk_shader_mod_init("./res/render.comp.spv", &shader_ci.module))
             nob_return_defer(false);
         break;
     default:
@@ -845,7 +858,6 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
     Descriptor_Set_Layouts set_layouts = {0};
     nob_da_append(&set_layouts, ctx.ubos[ds_type].set_layout);
     nob_da_append(&set_layouts, ctx.ssbo_sets[ds_type].set_layout);
-    nob_da_append(&set_layouts, ctx.texture_sets[ds_type].set_layout);
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -887,14 +899,12 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
     }
     nob_da_append(&ctx.compute_pl_sets[ds_type], pipeline);
 
-    return false;
-
+    VkPipelineShaderStageCreateInfo resolve_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+        .pName = "main",
+    };
     if (ds_type == DS_TYPE_COMPUTE_RASTERIZER) {
-        VkPipelineShaderStageCreateInfo resolve_ci = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-            .pName = "main",
-        };
         if (!vk_shader_mod_init("./res/resolve.comp.spv", &resolve_ci.module))
             nob_return_defer(false);
 
@@ -942,6 +952,8 @@ bool vk_compute_pl_init(Descriptor_Type ds_type)
 
 defer:
     vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
+    if (ds_type == DS_TYPE_COMPUTE_RASTERIZER)
+        vkDestroyShaderModule(ctx.device, resolve_ci.module, NULL);
     return result;
 }
 
@@ -1121,13 +1133,13 @@ void vk_compute(Descriptor_Type ds_type)
     vkCmdBindPipeline(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        pipeline_set.items[0] // TODO: currently binding to first pipline
+        pipeline_set.items[0]
     );
 
     vkCmdBindDescriptorSets(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        ctx.compute_pl_layout_sets[ds_type].items[0], 0, 1, // TODO: hard-coding
+        ctx.compute_pl_layout_sets[ds_type].items[0], 0, 1,
         &ctx.ubos[ds_type].descriptor_set,
         0, NULL
     );
@@ -1137,14 +1149,69 @@ void vk_compute(Descriptor_Type ds_type)
     vkCmdBindDescriptorSets(
         cmd_man.compute_buff,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        ctx.compute_pl_layout_sets[ds_type].items[0], 1, 1, // TODO: hard-coding
+        ctx.compute_pl_layout_sets[ds_type].items[0], 1, 1,
         &ctx.ssbo_sets[ds_type].descriptor_set,
         0, NULL
     );
-    vkCmdDispatch(
-        cmd_man.compute_buff,
-        ctx.ssbo_sets[ds_type].items[0].count / 256, 1, 1 // TODO: hard-coding alert
-    );
+
+    float k_size = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? 128 : 256;
+    uint32_t group_x = ceil(ctx.ssbo_sets[ds_type].items[0].count / k_size);
+
+    vkCmdDispatch(cmd_man.compute_buff, group_x, 1, 1);
+
+    /* resolve pipeline */
+    if (ds_type == DS_TYPE_COMPUTE_RASTERIZER) {
+
+        /* barrier */
+        VkMemoryBarrier2KHR barrier = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
+            .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
+            .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR
+        };
+
+        VkDependencyInfo dependency = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .memoryBarrierCount = 1,
+            .pMemoryBarriers = &barrier,
+        };
+
+        vkCmdPipelineBarrier2(cmd_man.compute_buff, &dependency);
+
+        /* bind to resolve pipeline */
+        vkCmdBindPipeline(
+            cmd_man.compute_buff,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline_set.items[1]
+        );
+
+        /* resolve descriptor sets */
+        vkCmdBindDescriptorSets(
+            cmd_man.compute_buff,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ctx.compute_pl_layout_sets[ds_type].items[1], 0, 1,
+            &ctx.ubos[ds_type].descriptor_set,
+            0, NULL
+        );
+        vkCmdBindDescriptorSets(
+            cmd_man.compute_buff,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ctx.compute_pl_layout_sets[ds_type].items[1], 1, 1,
+            &ctx.ssbo_sets[ds_type].descriptor_set,
+            0, NULL
+        );
+        vkCmdBindDescriptorSets(
+            cmd_man.compute_buff,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ctx.compute_pl_layout_sets[ds_type].items[1], 2, 1,
+            &ctx.texture_sets[ds_type].descriptor_set,
+            0, NULL
+        );
+
+        /* dispatch */
+        vkCmdDispatch(cmd_man.compute_buff, 1600 / 16, 900 / 16, 1);
+    }
 }
 
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
@@ -1596,7 +1663,7 @@ defer:
     return result;
 }
 
-bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type)
+bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type, VkShaderStageFlags flags)
 {
     bool result = true;
 
@@ -1607,16 +1674,19 @@ bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type)
         nob_return_defer(false);
     }
 
-    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD;
+    VkDescriptorType vk_ds_type;
+    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER;
     for (size_t i = 0; i < tex_count; i++) {
         if (!grouped_bindings && i > 0)
             break;
 
         VkDescriptorSetLayoutBinding binding = {
             .binding = i,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorType = vk_ds_type,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = flags,
         };
         nob_da_append(&bindings, binding);
     }
@@ -1648,8 +1718,11 @@ bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type)
         nob_return_defer(false);
     }
 
+    VkDescriptorType vk_ds_type;
+    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .type = vk_ds_type,
         .descriptorCount = texture_set->count,
     };
 
@@ -1684,7 +1757,7 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
         .pSetLayouts = &texture_set->set_layout,
     };
 
-    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD;
+    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER;
     if (grouped_bindings) {
         VkDescriptorSet *set = &texture_set->descriptor_set;
         VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
@@ -1703,18 +1776,24 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
         }
     }
 
+    VkDescriptorType vk_ds_type;
+    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     /* update texture descriptor sets */
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstBinding = 0,
         .dstArrayElement = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorType = vk_ds_type,
         .descriptorCount = 1,
     };
 
+    VkImageLayout vk_img_layout;
+    vk_img_layout = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+        VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     for (size_t tex = 0; tex < texture_set->count; tex++) {
         VkDescriptorImageInfo img_info = {
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageLayout = vk_img_layout,
             .imageView   = texture_set->items[tex].view,
             .sampler     = texture_set->items[tex].sampler,
         };

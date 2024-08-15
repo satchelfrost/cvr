@@ -621,7 +621,7 @@ void unload_pc_texture(Texture texture)
 bool tex_sampler_init()
 {
     Descriptor_Type type = DS_TYPE_TEX;
-    if (!vk_sampler_descriptor_set_layout_init(type))
+    if (!vk_sampler_descriptor_set_layout_init(type, VK_SHADER_STAGE_FRAGMENT_BIT))
         return false;
     if (!vk_sampler_descriptor_pool_init(type))
         return false;
@@ -907,7 +907,7 @@ bool ssbo_init(Example example)
 bool pc_sampler_init()
 {
     Descriptor_Type type = DS_TYPE_ADV_POINT_CLOUD;
-    if (!vk_sampler_descriptor_set_layout_init(type))
+    if (!vk_sampler_descriptor_set_layout_init(type, VK_SHADER_STAGE_FRAGMENT_BIT))
         return false;
     if (!vk_sampler_descriptor_pool_init(type))
         return false;
@@ -1271,7 +1271,7 @@ bool storage_img_init(int width, int height, Example example)
 
     nob_da_append(texture_set, texture);
 
-    if (!vk_sampler_descriptor_set_layout_init(ds_type)) return false;
+    if (!vk_sampler_descriptor_set_layout_init(ds_type, VK_SHADER_STAGE_COMPUTE_BIT)) return false;
     if (!vk_sampler_descriptor_pool_init(ds_type))       return false;
     if (!vk_sampler_descriptor_set_init(ds_type))        return false;
 
