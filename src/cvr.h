@@ -256,6 +256,7 @@ bool window_should_close();                                 /* Check if window s
 Window_Size get_window_size();
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
+bool draw_sst();                                            /* Draw a screen space triangle for compute rasterization */
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
 void begin_mode_3d(Camera camera);                          /* Set camera and push a matrix */
 void end_mode_3d();                                         /* Pops matrix, checks for errors */

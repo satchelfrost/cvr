@@ -120,6 +120,7 @@ typedef enum {
     PIPELINE_POINT_CLOUD_ADV,
     PIPELINE_TEXTURE,
     PIPELINE_COMPUTE,
+    PIPELINE_SST,
     PIPELINE_COUNT,
 } Pipeline_Type;
 
@@ -723,25 +724,26 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     else
         input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    VkViewport viewport = {0};
-    viewport.width = (float) ctx.extent.width;
-    viewport.height = (float) ctx.extent.height;
-    viewport.maxDepth = 1.0f;
-    VkRect2D scissor = {0};
-    scissor.extent = ctx.extent;
-    VkPipelineViewportStateCreateInfo viewport_state_ci = {0};
-    viewport_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport_state_ci.viewportCount = 1;
-    viewport_state_ci.pViewports = &viewport;
-    viewport_state_ci.scissorCount = 1;
-    viewport_state_ci.pScissors = &scissor;
+    VkViewport viewport = {
+        .width    = (float) ctx.extent.width,
+        .height   = (float) ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D scissor = {.extent = ctx.extent,};
+    VkPipelineViewportStateCreateInfo viewport_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor,
+    };
 
     VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer_ci.polygonMode = (pipeline_type == PIPELINE_WIREFRAME) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
     rasterizer_ci.lineWidth = 1.0f;
     rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
-    rasterizer_ci.lineWidth = VK_FRONT_FACE_CLOCKWISE;
+    // rasterizer_ci.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling_ci = {0};
     multisampling_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -799,21 +801,22 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
         .maxDepthBounds = 1.0f,
     };
 
-    VkGraphicsPipelineCreateInfo pipeline_ci = {0};
-    pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipeline_ci.stageCount = NOB_ARRAY_LEN(stages);
-    pipeline_ci.pStages = stages;
-    pipeline_ci.pVertexInputState = &vertex_input_ci;
-    pipeline_ci.pInputAssemblyState = &input_assembly_ci;
-    pipeline_ci.pViewportState = &viewport_state_ci;
-    pipeline_ci.pRasterizationState = &rasterizer_ci;
-    pipeline_ci.pMultisampleState = &multisampling_ci;
-    pipeline_ci.pColorBlendState = &color_blend_ci;
-    pipeline_ci.pDynamicState = &dynamic_state_ci;
-    pipeline_ci.pDepthStencilState = &depth_ci;
-    pipeline_ci.layout = ctx.pipeline_layouts[pipeline_type];
-    pipeline_ci.renderPass = ctx.render_pass;
-    pipeline_ci.subpass = 0;
+    VkGraphicsPipelineCreateInfo pipeline_ci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = NOB_ARRAY_LEN(stages),
+        .pStages = stages,
+        .pVertexInputState = &vertex_input_ci,
+        .pInputAssemblyState = &input_assembly_ci,
+        .pViewportState = &viewport_state_ci,
+        .pRasterizationState = &rasterizer_ci,
+        .pMultisampleState = &multisampling_ci,
+        .pColorBlendState = &color_blend_ci,
+        .pDynamicState = &dynamic_state_ci,
+        .pDepthStencilState = &depth_ci,
+        .layout = ctx.pipeline_layouts[pipeline_type],
+        .renderPass = ctx.render_pass,
+        .subpass = 0,
+    };
 
     vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines[pipeline_type]);
     vk_chk(vk_result, "failed to create pipeline");
@@ -823,6 +826,121 @@ defer:
     vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
     nob_da_free(vert_attrs);
     nob_da_free(set_layouts);
+    return result;
+}
+
+bool vk_sst_pl_init()
+{
+    bool result = true;
+
+    /* setup shader stages */
+    VkPipelineShaderStageCreateInfo stages[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pName = "main",
+        },
+    };
+    if (!vk_shader_mod_init("./res/default.vert.spv", &stages[0].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init("./res/default.frag.spv", &stages[1].module)) nob_return_defer(false);
+
+    /* create pipeline layout */
+    VkPipelineLayoutCreateInfo pipeline_layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pSetLayouts = &ctx.texture_sets[DS_TYPE_COMPUTE_RASTERIZER].set_layout,
+        .setLayoutCount = 1,
+    };
+    VkResult res = vkCreatePipelineLayout(
+        ctx.device,
+        &pipeline_layout_ci,
+        NULL,
+        &ctx.pipeline_layouts[PIPELINE_SST]
+    );
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create pipeline screen space triangle layout");
+        nob_return_defer(false);
+    }
+
+    /* populate fields for graphics pipeline create info */
+    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
+        .pDynamicStates = dynamic_states,
+    };
+    VkPipelineVertexInputStateCreateInfo empty_input_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo viewport_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .lineWidth = 1.0f,
+        .cullMode = VK_CULL_MODE_FRONT_BIT,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineColorBlendAttachmentState color_blend = {
+        .colorWriteMask = 0xf, // rgba
+        .blendEnable = VK_FALSE,
+    };
+    VkPipelineColorBlendStateCreateInfo color_blend_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend,
+    };
+    VkPipelineDepthStencilStateCreateInfo depth_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .maxDepthBounds = 1.0f,
+    };
+    VkGraphicsPipelineCreateInfo pipeline_ci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = NOB_ARRAY_LEN(stages),
+        .pStages = stages,
+        .pVertexInputState = &empty_input_state,
+        .pInputAssemblyState = &input_assembly_ci,
+        .pViewportState = &viewport_state_ci,
+        .pRasterizationState = &rasterizer_ci,
+        .pMultisampleState = &multisampling_ci,
+        .pColorBlendState = &color_blend_ci,
+        .pDynamicState = &dynamic_state_ci,
+        .pDepthStencilState = &depth_ci,
+        .layout = ctx.pipeline_layouts[PIPELINE_SST],
+        .renderPass = ctx.render_pass,
+        .subpass = 0,
+    };
+
+    res = vkCreateGraphicsPipelines(
+        ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL,
+        &ctx.pipelines[PIPELINE_SST]
+    );
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create pipeline for screen space triangle");
+        nob_return_defer(false);
+    }
+
+defer:
+    vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
+    vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
     return result;
 }
 
@@ -1122,6 +1240,38 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     );
 
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+
+defer:
+    return result;
+}
+
+bool vk_draw_sst()
+{
+    bool result = true;
+
+    if (!ctx.pipelines[PIPELINE_SST] || ctx.texture_sets[DS_TYPE_COMPUTE_RASTERIZER].descriptor_set) {
+        nob_log(NOB_ERROR, "pipeline or texture set not setup");
+        nob_return_defer(false);
+    }
+
+    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_SST]);
+    VkViewport viewport = {
+        .width    = (float)ctx.extent.width,
+        .height   = (float)ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = { .extent = ctx.extent, };
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+    vkCmdBindDescriptorSets(
+        cmd_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1,
+        &ctx.texture_sets[DS_TYPE_COMPUTE_RASTERIZER].descriptor_set, 0, NULL
+    );
+    vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
 
 defer:
     return result;

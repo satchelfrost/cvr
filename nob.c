@@ -194,8 +194,8 @@ static Example examples[] = {
         .name = "point-raster",
         .shaders = {
             .names = (const char *[]) {
-                "point-cloud.vert",
-                "point-cloud.frag",
+                "default.vert",
+                "default.frag",
                 "render.comp",
                 "resolve.comp",
             },

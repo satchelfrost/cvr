@@ -95,6 +95,7 @@ bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
 void destroy_ubos();
+bool tex_sampler_init();
 
 bool init_window(int width, int height, const char *title)
 {
@@ -159,6 +160,68 @@ bool draw_shape(Shape_Type shape_type)
 
 defer:
     return result;
+}
+
+bool sst_dscriptor_init()
+{
+    bool result = true;
+
+    VkDescriptorSetLayoutBinding binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT,
+    };
+
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pBindings = &binding,
+        .bindingCount = 1,
+    };
+
+    VkDescriptorSetLayout *layout = &ctx.texture_sets[DS_TYPE_TEX].set_layout;
+    if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
+        nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
+        nob_return_defer(false);
+    }
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = texture_set->count,
+    };
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = texture_set->count,
+    };
+    VkDescriptorPool throw_away_pool;
+    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, throw_away_pool);
+    if(!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool");
+        nob_return_defer(false);
+    }
+
+defer:
+    return result;
+}
+
+bool draw_sst()
+{
+    /* ensure that the compute pipeline has been set up*/
+    if (!ctx.compute_pl_sets[DS_TYPE_COMPUTE_RASTERIZER].items) {
+        nob_log(NOB_ERROR, "expected compute pipelines in place");
+        return false;
+    }
+
+    if (!ctx.pipelines[PIPELINE_SST]) {
+        if (!sst_dscriptor_init()) return false;
+        if (!vk_sst_pl_init()) return false;
+    }
+
+    if (!vk_draw_sst()) return false;
+
+    return true;
 }
 
 bool draw_shape_wireframe(Shape_Type shape_type)
@@ -1258,7 +1321,11 @@ bool storage_img_init(int width, int height, Example example)
         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
     };
     VkSampler sampler;
-    vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
+    VkResult res = vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create sampler");
+        nob_return_defer(false);
+    }
 
     Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
     Vk_Texture texture = {

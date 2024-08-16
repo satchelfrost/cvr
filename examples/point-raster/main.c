@@ -153,7 +153,7 @@ int main()
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
-            if (!draw_points(point_cloud.id, EXAMPLE_COMPUTE_RASTERIZER)) return 1;
+            if (!draw_sst()) return 1;
             if (!update_ubo()) return 1;;
         end_mode_3d();
         end_drawing();
