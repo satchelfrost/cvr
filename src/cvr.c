@@ -1347,19 +1347,3 @@ void wait_idle()
 {
     vkDeviceWaitIdle(ctx.device);
 }
-
-bool create_ds_pool(void *pool_ci, void *pool)
-{
-    VkResult res = vkCreateDescriptorPool(
-        ctx.device,
-        (VkDescriptorPoolCreateInfo *)pool_ci,
-        NULL,
-        (VkDescriptorPool *)pool
-    );
-    if(!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor pool");
-        return false;
-    }
-
-    return true;
-}

@@ -184,11 +184,7 @@ int main()
     };
 
     /* upload resources to GPU */
-    // if (!ssbo_init(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
-    // if (!vk_ssbo_descriptor_set_layout_init(DS_TYPE_COMPUTE_RASTERIZER)) return false;
-    // if (!vk_ssbo_descriptor_pool_init(DS_TYPE_COMPUTE_RASTERIZER))       return false;
     // if (!vk_ssbo_descriptor_set_init(DS_TYPE_COMPUTE_RASTERIZER))        return false;
-
     if (!init_compute_buffs(point_cloud.buff)) return 1;
     if (!init_compute_buffs(frame_buff.buff)) return 1;
     nob_da_free(point_cloud.verts);
