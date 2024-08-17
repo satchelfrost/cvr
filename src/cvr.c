@@ -166,43 +166,43 @@ bool sst_dscriptor_init()
 {
     bool result = true;
 
-    VkDescriptorSetLayoutBinding binding = {
-        .binding = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT,
-    };
+    // VkDescriptorSetLayoutBinding binding = {
+    //     .binding = 0,
+    //     .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+    //     .descriptorCount = 1,
+    //     .stageFlags = VK_SHADER_STAGE_FRAGMENT,
+    // };
+    //
+    // VkDescriptorSetLayoutCreateInfo layout_ci = {
+    //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    //     .pBindings = &binding,
+    //     .bindingCount = 1,
+    // };
+    //
+    // VkDescriptorSetLayout *layout = &ctx.texture_sets[DS_TYPE_TEX].set_layout;
+    // if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
+    //     nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
+    //     nob_return_defer(false);
+    // }
+    //
+    // VkDescriptorPoolSize pool_size = {
+    //     .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    //     .descriptorCount = texture_set->count,
+    // };
+    // VkDescriptorPoolCreateInfo pool_ci = {
+    //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+    //     .poolSizeCount = 1,
+    //     .pPoolSizes = &pool_size,
+    //     .maxSets = texture_set->count,
+    // };
+    // VkDescriptorPool throw_away_pool;
+    // VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, throw_away_pool);
+    // if(!VK_SUCCEEDED(res)) {
+    //     nob_log(NOB_ERROR, "failed to create descriptor pool");
+    //     nob_return_defer(false);
+    // }
 
-    VkDescriptorSetLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .pBindings = &binding,
-        .bindingCount = 1,
-    };
-
-    VkDescriptorSetLayout *layout = &ctx.texture_sets[DS_TYPE_TEX].set_layout;
-    if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
-        nob_log(NOB_ERROR, "failed to create descriptor set layout for texture");
-        nob_return_defer(false);
-    }
-
-    VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = texture_set->count,
-    };
-    VkDescriptorPoolCreateInfo pool_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_size,
-        .maxSets = texture_set->count,
-    };
-    VkDescriptorPool throw_away_pool;
-    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, throw_away_pool);
-    if(!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor pool");
-        nob_return_defer(false);
-    }
-
-defer:
+// defer:
     return result;
 }
 
@@ -1207,17 +1207,14 @@ void look_at(Camera camera)
 
 bool get_matrix_tos(Matrix *model)
 {
-    bool result = true;
-
     if (mat_stack_p) {
         *model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix on stack");
-        nob_return_defer(false);
+        return false;
     }
 
-defer:
-    return result;
+    return true;
 }
 
 Color color_from_HSV(float hue, float saturation, float value)
@@ -1344,4 +1341,25 @@ bool storage_img_init(int width, int height, Example example)
 
 defer:
     return result;
+}
+
+void wait_idle()
+{
+    vkDeviceWaitIdle(ctx.device);
+}
+
+bool create_ds_pool(void *pool_ci, void *pool)
+{
+    VkResult res = vkCreateDescriptorPool(
+        ctx.device,
+        (VkDescriptorPoolCreateInfo *)pool_ci,
+        NULL,
+        (VkDescriptorPool *)pool
+    );
+    if(!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool");
+        return false;
+    }
+
+    return true;
 }

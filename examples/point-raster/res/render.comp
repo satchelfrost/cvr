@@ -8,16 +8,16 @@ struct Vertex {
     uint colors;
 };
 
-layout(set = 0, binding = 0) uniform uniform_data {
+layout(binding = 0) uniform uniform_data {
     mat4 mvp;
     vec2 img_size;
 } ubo;
 
-layout(std140, set = 1, binding = 0) buffer vert_data {
+layout(std140, binding = 1) buffer vert_data {
    Vertex vertices[ ];
 };
 
-layout(std140, set = 1, binding = 1) buffer frame_data {
+layout(std140, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 

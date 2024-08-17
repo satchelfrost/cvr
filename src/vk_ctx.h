@@ -26,6 +26,16 @@
         }                            \
     } while (0)
 
+#define DS_POOL(DS_TYPE, COUNT)             \
+    .type = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
+    .descriptorCount = COUNT,
+
+#define DS_BINDING(BINDING, DS_TYPE, BIT_FLAGS)       \
+    .binding = BINDING,                               \
+    .descriptorCount = 1,                             \
+    .descriptorType = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
+    .stageFlags = VK_SHADER_STAGE_ ## BIT_FLAGS,
+
 /* TODO: get rid of vk_chk */
 #define vk_chk(vk_result, msg) cvr_chk(VK_SUCCEEDED(vk_result), msg)
 #define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
@@ -222,6 +232,26 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 void vk_compute(Descriptor_Type ds_type);
 
+bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
+void vk_buff_destroy(Vk_Buffer buffer);
+
+/* A staged upload to the GPU requires a copy from a host (CPU) visible buffer
+ * to a device (GPU) visible buffer. It's slower to upload, because of the copy
+ * but should be faster at runtime (with the exception of integrated graphics)*/
+bool vk_vtx_buff_upload(Vk_Buffer *vtx_buff, const void *data);
+bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data);
+bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data);
+bool vk_idx_buff_upload(Vk_Buffer *idx_buff, const void *data);
+bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data);
+
+/* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
+bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
+
+bool vk_create_ds_layout(VkDescriptorSetLayoutCreateInfo layout_ci, VkDescriptorSetLayout *layout);
+bool vk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool);
+void vk_destroy_ds_pool(VkDescriptorPool pool);
+void vk_destroy_ds_layout(VkDescriptorSetLayout layout);
+
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
 Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
@@ -332,20 +362,6 @@ bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
 
-bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
-void vk_buff_destroy(Vk_Buffer buffer);
-
-/* A staged upload to the GPU requires a copy from a host (CPU) visible buffer
- * to a device (GPU) visible buffer. It's slower to upload, because of the copy
- * but should be faster at runtime (with the exception of integrated graphics)*/
-bool vk_vtx_buff_upload(Vk_Buffer *vtx_buff, const void *data);
-bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data);
-bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data);
-bool vk_idx_buff_upload(Vk_Buffer *idx_buff, const void *data);
-bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data);
-
-/* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
-bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
@@ -405,27 +421,17 @@ bool vk_destroy()
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         Vk_Texture_Set texture_set = ctx.texture_sets[i];
         vkDestroyDescriptorSetLayout(ctx.device, texture_set.set_layout, NULL);
-        for (size_t j = 0; j < texture_set.count; j++) {
-            Vk_Texture *texture = &texture_set.items[j];
-            vkDestroySampler(ctx.device, texture->sampler, NULL);
-            vkDestroyImageView(ctx.device, texture->view, NULL);
-            vkDestroyImage(ctx.device, texture->img.handle, NULL);
-            vkFreeMemory(ctx.device, texture->img.mem, NULL);
-        }
     }
-
     for (size_t i = 0; i < PIPELINE_COUNT; i++) {
         vkDestroyPipeline(ctx.device, ctx.pipelines[i], NULL);
         vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layouts[i], NULL);
     }
-
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         Vk_Pipeline_Set pipeline_set = ctx.compute_pl_sets[i];
         for (size_t j = 0; j < pipeline_set.count; j++) {
             vkDestroyPipeline(ctx.device, pipeline_set.items[j], NULL);
         }
     }
-
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         Vk_Pipeline_Layout_Set layout_set = ctx.compute_pl_layout_sets[i];
         for (size_t j = 0; j < layout_set.count; j++)
@@ -3079,6 +3085,38 @@ bool vk_unload_texture(size_t id, Descriptor_Type ds_type)
     }
 
     return true;
+}
+
+bool vk_create_ds_layout(VkDescriptorSetLayoutCreateInfo layout_ci, VkDescriptorSetLayout *layout)
+{
+    VkResult res = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor set layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool)
+{
+    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
+    if(!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create descriptor pool");
+        return false;
+    }
+
+    return true;
+}
+
+void vk_destroy_ds_pool(VkDescriptorPool pool)
+{
+    vkDestroyDescriptorPool(ctx.device, pool, NULL);
+}
+
+void vk_destroy_ds_layout(VkDescriptorSetLayout layout)
+{
+    vkDestroyDescriptorSetLayout(ctx.device, layout, NULL);
 }
 
 #endif // VK_CTX_IMPLEMENTATION
