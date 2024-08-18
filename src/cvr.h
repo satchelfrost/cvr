@@ -341,5 +341,6 @@ bool ssbo_init(Example example);
 Color color_from_HSV(float hue, float saturation, float value);
 bool storage_img_init(int width, int height, Example example);
 void wait_idle();
+void log_fps();
 
 #endif // CVR_H_

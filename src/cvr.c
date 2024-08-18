@@ -1261,6 +1261,7 @@ Window_Size get_window_size()
     return win_size;
 }
 
+/* TODO: Deprecated */
 bool storage_img_init(int width, int height, Example example)
 {
     bool result = true;
@@ -1346,4 +1347,14 @@ defer:
 void wait_idle()
 {
     vkDeviceWaitIdle(ctx.device);
+}
+
+void log_fps()
+{
+    static int fps = -1;
+    int curr_fps = get_fps();
+    if (curr_fps != fps) {
+        nob_log(NOB_INFO, "FPS %d", curr_fps);
+        fps = curr_fps;
+    }
 }

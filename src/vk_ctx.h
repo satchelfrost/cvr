@@ -26,16 +26,6 @@
         }                            \
     } while (0)
 
-#define DS_POOL(DS_TYPE, COUNT)             \
-    .type = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
-    .descriptorCount = COUNT,
-
-#define DS_BINDING(BINDING, DS_TYPE, BIT_FLAGS)       \
-    .binding = BINDING,                               \
-    .descriptorCount = 1,                             \
-    .descriptorType = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
-    .stageFlags = VK_SHADER_STAGE_ ## BIT_FLAGS,
-
 /* TODO: get rid of vk_chk */
 #define vk_chk(vk_result, msg) cvr_chk(VK_SUCCEEDED(vk_result), msg)
 #define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
@@ -96,7 +86,7 @@ typedef struct {
     VkSampler sampler;
     Vk_Image img;
     size_t id;
-    bool active;
+    bool active; // TODO: I don't like this
     VkDescriptorSet descriptor_set;
 } Vk_Texture;
 
@@ -212,6 +202,7 @@ bool vk_depth_init();
 
 /* general ubo initializer */
 bool vk_ubo_init(UBO ubo, Descriptor_Type type);
+bool vk_ubo_init2(UBO *ubo);
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, Descriptor_Type ds_type);
 bool vk_ubo_descriptor_pool_init(Descriptor_Type ds_type);
 bool vk_ubo_descriptor_set_init(Descriptor_Type ds_type);
@@ -247,10 +238,50 @@ bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data);
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
 bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
+bool vk_create_storage_img(Vk_Texture *texture);
+void vk_unload_texture2(Vk_Texture texture);
+
+/* descriptor set macros */
+#define DS_POOL(DS_TYPE, COUNT)             \
+    .type = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
+    .descriptorCount = COUNT,
+
+#define DS_BINDING(BINDING, DS_TYPE, BIT_FLAGS)       \
+    .binding = BINDING,                               \
+    .descriptorCount = 1,                             \
+    .descriptorType = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
+    .stageFlags = VK_SHADER_STAGE_ ## BIT_FLAGS,
+
+#define DS_ALLOC(LAYOUTS, COUNT, POOL)                       \
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, \
+    .descriptorPool = POOL,                                  \
+    .descriptorSetCount = COUNT,                             \
+    .pSetLayouts = LAYOUTS,
+
+#define DS_WRITE_BUFF(BINDING, TYPE, SET, BUFF_INFO)  \
+    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  \
+    .dstSet = SET,                                    \
+    .dstBinding = BINDING,                            \
+    .dstArrayElement = 0,                             \
+    .descriptorType = VK_DESCRIPTOR_TYPE_ ## TYPE,    \
+    .descriptorCount = 1,                             \
+    .pBufferInfo = BUFF_INFO,                         \
+
+#define DS_WRITE_IMG(BINDING, TYPE, SET, IMG_INFO)    \
+    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  \
+    .dstSet = SET,                                    \
+    .dstBinding = BINDING,                            \
+    .dstArrayElement = 0,                             \
+    .descriptorType = VK_DESCRIPTOR_TYPE_ ## TYPE,    \
+    .descriptorCount = 1,                             \
+    .pImageInfo = IMG_INFO,                           \
+
 bool vk_create_ds_layout(VkDescriptorSetLayoutCreateInfo layout_ci, VkDescriptorSetLayout *layout);
 bool vk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool);
 void vk_destroy_ds_pool(VkDescriptorPool pool);
 void vk_destroy_ds_layout(VkDescriptorSetLayout layout);
+bool vk_alloc_ds(VkDescriptorSetAllocateInfo alloc, VkDescriptorSet *sets);
+void vk_update_ds(size_t count, VkWriteDescriptorSet *writes);
 
 /* Utilities */
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
@@ -361,7 +392,6 @@ void destroy_ext_manager();
 bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
-
 
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
@@ -1710,6 +1740,21 @@ bool vk_ubo_init(UBO ubo, Descriptor_Type type)
 
 defer:
     return result;
+}
+
+bool vk_ubo_init2(UBO *ubo)
+{
+    Vk_Buffer *buff = &ubo->buff;
+    bool result = vk_buff_init(
+        buff,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    if (result) vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
+    else return false;
+
+    return true;
 }
 
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, Descriptor_Type ds_type)
@@ -3087,6 +3132,79 @@ bool vk_unload_texture(size_t id, Descriptor_Type ds_type)
     return true;
 }
 
+void vk_unload_texture2(Vk_Texture texture)
+{
+    vkDestroySampler(ctx.device, texture.sampler, NULL);
+    vkDestroyImageView(ctx.device, texture.view, NULL);
+    vkDestroyImage(ctx.device, texture.img.handle, NULL);
+    vkFreeMemory(ctx.device, texture.img.mem, NULL);
+}
+
+bool vk_create_storage_img(Vk_Texture *texture)
+{
+    if (texture->img.extent.width == 0 && texture->img.extent.height == 0) {
+        nob_log(NOB_ERROR, "storage image does not have width or height");
+        return false;
+    }
+
+    /* setup storage image */
+    Vk_Image vk_img = {
+        .extent  = texture->img.extent,
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+    };
+
+    bool result = vk_img_init(
+        &vk_img,
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (!result) return false;
+
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL
+    );
+
+    /* here we could also check if the graphics and compute queues are the same
+     * if they are not the same then we can make an image memory barrier
+     * for now I will skip this */
+
+    /* create image view */
+    VkImageView img_view;
+    if (!vk_img_view_init(vk_img, &img_view)) return false;
+
+    /* create sampler */
+    VkPhysicalDeviceProperties props = {0};
+    vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
+    VkSamplerCreateInfo sampler_ci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = props.limits.maxSamplerAnisotropy,
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+    };
+    VkSampler sampler;
+    VkResult res = vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create sampler");
+        return false;
+    }
+
+    texture->view = img_view;
+    texture->sampler = sampler;
+    texture->img = vk_img;
+
+    return true;
+}
+
 bool vk_create_ds_layout(VkDescriptorSetLayoutCreateInfo layout_ci, VkDescriptorSetLayout *layout)
 {
     VkResult res = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout);
@@ -3101,7 +3219,7 @@ bool vk_create_ds_layout(VkDescriptorSetLayoutCreateInfo layout_ci, VkDescriptor
 bool vk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool)
 {
     VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
-    if(!VK_SUCCEEDED(res)) {
+    if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create descriptor pool");
         return false;
     }
@@ -3117,6 +3235,25 @@ void vk_destroy_ds_pool(VkDescriptorPool pool)
 void vk_destroy_ds_layout(VkDescriptorSetLayout layout)
 {
     vkDestroyDescriptorSetLayout(ctx.device, layout, NULL);
+}
+
+bool vk_alloc_ds(VkDescriptorSetAllocateInfo alloc, VkDescriptorSet *sets)
+{
+    VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, sets);
+    if (res == VK_ERROR_OUT_OF_POOL_MEMORY) {
+        nob_log(NOB_ERROR, "out of pool memory");
+        return false;
+    } else if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to allocate descriptor sets");
+        return false;
+    }
+
+    return true;
+}
+
+void vk_update_ds(size_t count, VkWriteDescriptorSet *writes)
+{
+    vkUpdateDescriptorSets(ctx.device, (uint32_t)count, writes, 0, NULL);
 }
 
 #endif // VK_CTX_IMPLEMENTATION

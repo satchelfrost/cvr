@@ -22,16 +22,6 @@ typedef struct {
     size_t id;
 } Point_Cloud;
 
-void log_fps()
-{
-    static int fps = -1;
-    int curr_fps = get_fps();
-    if (curr_fps != fps) {
-        nob_log(NOB_INFO, "FPS %d", curr_fps);
-        fps = curr_fps;
-    }
-}
-
 float rand_float()
 {
     return (float)rand() / RAND_MAX;
