@@ -199,6 +199,9 @@ bool vk_render_pass_init();
 bool vk_frame_buffs_init();
 bool vk_recreate_swapchain();
 bool vk_depth_init();
+void cleanup_pipeline(VkPipeline pipeline, VkPipelineLayout pl_layout);
+bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout);
+bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 
 /* general ubo initializer */
 bool vk_ubo_init(UBO ubo, Descriptor_Type type);
@@ -215,13 +218,20 @@ bool vk_ssbo_descriptor_set_init(Descriptor_Type ds_type);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
-bool vk_begin_compute(); /* Begins recording compute commands */
-bool vk_end_compute();   /* Submits compute commands. */
-
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+
 void vk_compute(Descriptor_Type ds_type);
+bool vk_begin_compute(); // TODO: get rid of this ASAP
+bool vk_end_compute();   // TODO: get rid of this ASAP
+bool vk_rec_compute();
+bool vk_submit_compute();
+bool vk_end_rec_compute();
+void vk_compute2(VkPipeline pipeline, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t group_x, size_t group_y, size_t group_z);
+void vk_compute_pl_barrier();
+bool vk_push_cmd_buff();
+bool vk_pop_cmd_buff();
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
@@ -360,6 +370,10 @@ typedef struct {
     VkFence compute_fence;
 } Vk_Cmd_Man;
 static Vk_Cmd_Man cmd_man = {0};
+
+#define MAX_CMD_BUFF_STACK 5
+VkCommandBuffer cmd_buff_stack[MAX_CMD_BUFF_STACK];
+size_t cmd_buff_tos = 0;
 
 bool cmd_man_init();
 bool cmd_buff_create();
@@ -1111,6 +1125,55 @@ defer:
     return result;
 }
 
+bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout)
+{
+    VkPipelineLayoutCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &layout,
+    };
+    VkResult res = vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create pipeline layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
+{
+    bool result = true;
+
+    VkPipelineShaderStageCreateInfo shader_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+        .pName = "main",
+    };
+    if (!vk_shader_mod_init(shader_name, &shader_ci.module)) nob_return_defer(false);
+
+    VkComputePipelineCreateInfo pipeline_ci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .layout = pl_layout,
+        .stage = shader_ci,
+    };
+    VkResult res = vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pipeline);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create compute pipeline");
+        nob_return_defer(false);
+    }
+
+defer:
+    vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
+    return result;
+}
+
+void cleanup_pipeline(VkPipeline pipeline, VkPipelineLayout pl_layout)
+{
+    vkDestroyPipeline(ctx.device, pipeline, NULL);
+    vkDestroyPipelineLayout(ctx.device, pl_layout, NULL);
+}
+
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
     bool result = true;
@@ -1398,6 +1461,123 @@ void vk_compute(Descriptor_Type ds_type)
         /* dispatch */
         vkCmdDispatch(cmd_man.compute_buff, 1600 / 16, 900 / 16, 1);
     }
+}
+
+void vk_compute2(VkPipeline pipeline, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t group_x, size_t group_y, size_t group_z)
+{
+    vkCmdBindPipeline(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdBindDescriptorSets(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl_layout, 0, 1, &ds, 0, NULL);
+    vkCmdDispatch(cmd_man.compute_buff, group_x, group_y, group_z);
+}
+
+bool vk_rec_compute()
+{
+    VkResult res = vkWaitForFences(
+        ctx.device, 1, &cmd_man.compute_fence, VK_TRUE, UINT64_MAX
+    );
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed waiting for compute fence");
+        return false;
+    }
+        res = vkResetFences(ctx.device, 1, &cmd_man.compute_fence);
+        if (!VK_SUCCEEDED(res)) {
+            nob_log(NOB_ERROR, "failed resetting compute fence");
+            return false;
+        }
+    res = vkResetCommandBuffer(cmd_man.compute_buff, 0);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed resetting compute command buffer");
+        return false;
+    }
+
+    VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    };
+    res = vkBeginCommandBuffer(cmd_man.compute_buff, &begin_info);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to begin compute command buffer");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_end_rec_compute()
+{
+    VkResult res = vkEndCommandBuffer(cmd_man.compute_buff);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to end compute pass");
+        return false;
+    }
+
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd_man.compute_buff,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &cmd_man.compute_fin_sem,
+    };
+
+    res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to submit compute queue");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_submit_compute()
+{
+    /* first wait for compute fence */
+    VkResult res = vkWaitForFences(
+        ctx.device, 1, &cmd_man.compute_fence, VK_TRUE, UINT64_MAX
+    );
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed waiting for compute fence");
+        return false;
+    }
+    res = vkResetFences(ctx.device, 1, &cmd_man.compute_fence);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed resetting compute fence");
+        return false;
+    }
+
+    /* submit compute buffer */
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd_man.compute_buff,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &cmd_man.compute_fin_sem,
+    };
+
+    res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to submit compute queue");
+        return false;
+    }
+
+    return true;
+}
+
+void vk_compute_pl_barrier()
+{
+    /* barrier */
+    VkMemoryBarrier2KHR barrier = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
+        .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR
+    };
+
+    VkDependencyInfo dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &barrier,
+    };
+    vkCmdPipelineBarrier2(cmd_man.compute_buff, &dependency);
 }
 
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
@@ -2800,54 +2980,55 @@ defer:
 
 bool cmd_man_init()
 {
-    bool result = true;
-    cvr_chk(cmd_pool_create(), "failed to create command pool");
-    cvr_chk(cmd_buff_create(), "failed to create cmd buffers");
-    cvr_chk(cmd_syncs_create(), "failed to create cmd sync objects");
-
-defer:
-    return result;
+    if (!cmd_pool_create())  return false;
+    if (!cmd_buff_create())  return false;
+    if (!cmd_syncs_create()) return false;
+    return true;
 }
 
 bool cmd_pool_create()
 {
-    bool result = true;
     Queue_Fams queue_fams = find_queue_fams(ctx.phys_device);
-    cvr_chk(queue_fams.has_gfx, "failed to create command pool, no graphics queue");
-    VkCommandPoolCreateInfo cmd_pool_ci = {0};
-    cmd_pool_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    cmd_pool_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    cmd_pool_ci.queueFamilyIndex = queue_fams.gfx_idx;
-    vk_chk(vkCreateCommandPool(ctx.device, &cmd_pool_ci, NULL, &cmd_man.pool), "failed to create command pool");
+    if (!queue_fams.has_gfx) {
+        nob_log(NOB_ERROR, "failed to create command pool, no graphics queue");
+        return false;
+    }
 
-defer:
-    return result;
+    VkCommandPoolCreateInfo cmd_pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = queue_fams.gfx_idx,
+    };
+    VkResult res = vkCreateCommandPool(ctx.device, &cmd_pool_ci, NULL, &cmd_man.pool);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create command pool");
+        return false;
+    }
+
+    return true;
 }
 
 bool cmd_buff_create()
 {
-    bool result = true;
-
     VkCommandBufferAllocateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = cmd_man.pool,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
-
     VkResult res = vkAllocateCommandBuffers(ctx.device, &ci, &cmd_man.buff);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create graphics command buffer");
-        nob_return_defer(false);
+        return false;
     }
 
     res = vkAllocateCommandBuffers(ctx.device, &ci, &cmd_man.compute_buff);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create compute command buffer");
-        nob_return_defer(false);
+        return false;
     }
-defer:
-    return result;
+
+    return true;
 }
 
 void cmd_man_destroy()
@@ -2862,63 +3043,164 @@ void cmd_man_destroy()
 
 bool cmd_syncs_create()
 {
-    bool result = true;
-    VkSemaphoreCreateInfo sem_ci = {0};
-    sem_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VkFenceCreateInfo fence_ci = {0};
-    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    VkResult vk_result;
-    vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.img_avail_sem);
-    vk_chk(vk_result, "failed to create img available semaphore");
-    vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.render_fin_sem);
-    vk_chk(vk_result, "failed to create render finished semaphore");
-    vk_result = vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.compute_fin_sem);
-    vk_chk(vk_result, "failed to create compute finihsed semaphore");
-    vk_result = vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.fence);
-    vk_chk(vk_result, "failed to create fence");
-    vk_result = vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.compute_fence);
-    vk_chk(vk_result, "failed to create compute fence");
+    VkSemaphoreCreateInfo sem_ci = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    VkFenceCreateInfo fence_ci = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+    };
 
-defer:
-    return result;
+    VkResult res = VK_SUCCESS;
+    res |= vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.img_avail_sem);
+    res |= vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.render_fin_sem);
+    res |= vkCreateSemaphore(ctx.device, &sem_ci, NULL, &cmd_man.compute_fin_sem);
+    res |= vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.fence);
+    res |= vkCreateFence(ctx.device, &fence_ci, NULL, &cmd_man.compute_fence);
+
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create sync objects");
+        return false;
+    }
+
+    return true;
 }
 
 bool cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
 {
-    bool result = true;
+    VkCommandBufferAllocateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = cmd_man.pool,
+        .commandBufferCount = 1,
+    };
+    VkResult res = vkAllocateCommandBuffers(ctx.device, &ci, tmp_cmd_buff);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create quick cmd");
+        return false;
+    }
+    VkCommandBufferBeginInfo cmd_begin = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    res = vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to begin quick cmd");
+        return false;
+    }
 
-    VkCommandBufferAllocateInfo ci = {0};
-    ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ci.commandPool = cmd_man.pool;
-    ci.commandBufferCount = 1;
-    vk_chk(vkAllocateCommandBuffers(ctx.device, &ci, tmp_cmd_buff), "failed to create quick cmd");
-
-    VkCommandBufferBeginInfo cmd_begin = {0};
-    cmd_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmd_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk_chk(vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin), "failed to begin quick cmd");
-
-defer:
-    return result;
+    return true;
 }
 
 bool cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
 {
     bool result = true;
-    vk_chk(vkEndCommandBuffer(*tmp_cmd_buff), "failed to end cmd buffer");
+
+    VkResult res = vkEndCommandBuffer(*tmp_cmd_buff);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to end cmd buffer");
+        nob_return_defer(false);
+    }
 
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = tmp_cmd_buff,
     };
-    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE), "failed to submit quick cmd");
-    vk_chk(vkQueueWaitIdle(ctx.gfx_queue), "failed to wait idle in quick cmd");
+
+    res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to submit quick cmd");
+        nob_return_defer(false);
+    }
+
+    /* TODO: perhaps I should use a fence instead of a queue wait idle */
+
+    res = vkQueueWaitIdle(ctx.gfx_queue);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to wait idle in quick cmd");
+        nob_return_defer(false);
+    }
 
 defer:
     vkFreeCommandBuffers(ctx.device, cmd_man.pool, 1, tmp_cmd_buff);
+    return result;
+}
+
+bool vk_push_cmd_buff()
+{
+    if (cmd_buff_tos < MAX_CMD_BUFF_STACK) {
+        cmd_buff_tos++;
+    } else {
+        nob_log(NOB_ERROR, "command buffer stack overflow");
+        return false;
+    }
+
+    VkCommandBufferAllocateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandPool = cmd_man.pool,
+        .commandBufferCount = 1,
+    };
+    VkResult res = vkAllocateCommandBuffers(ctx.device, &ci, &cmd_buff_stack[cmd_buff_tos - 1]);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create push cmd buffer");
+        return false;
+    }
+    VkCommandBufferBeginInfo cmd_begin = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    res = vkBeginCommandBuffer(cmd_buff_stack[cmd_buff_tos - 1], &cmd_begin);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to begin quick cmd");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_pop_cmd_buff()
+{
+    bool result = true;
+
+    VkCommandBuffer cmd_buff;
+    if (cmd_buff_tos > 0) {
+        cmd_buff = cmd_buff_stack[cmd_buff_tos - 1];
+        cmd_buff_tos--;
+    } else {
+        nob_log(NOB_ERROR, "command buffer stack underflow");
+        nob_return_defer(false);
+    }
+
+    VkResult res = vkEndCommandBuffer(cmd_buff);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to end cmd buffer");
+        nob_return_defer(false);
+    }
+
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd_buff,
+    };
+
+    res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to submit quick cmd");
+        nob_return_defer(false);
+    }
+
+    /* TODO: perhaps I should use a fence instead of a queue wait idle */
+
+    res = vkQueueWaitIdle(ctx.gfx_queue);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to wait idle in quick cmd");
+        nob_return_defer(false);
+    }
+
+defer:
+    vkFreeCommandBuffers(ctx.device, cmd_man.pool, 1, &cmd_buff);
     return result;
 }
 

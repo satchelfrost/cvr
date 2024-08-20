@@ -43,6 +43,10 @@ SSBO_Set ssbos = {0};
 VkDescriptorSetLayout render_layout;
 VkDescriptorSetLayout resolve_layout;
 VkDescriptorSetLayout frag_layout;
+VkPipelineLayout render_pl_layout;
+VkPipelineLayout resolve_pl_layout;
+VkPipeline render_pl; // compute render
+VkPipeline resolve_pl;
 VkDescriptorPool pool;
 Vk_Texture storage_tex = {0};
 
@@ -208,6 +212,7 @@ bool setup_ds_sets()
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RENDER],  &ssbo1_info)},
         /* resolve.comp */ // TODO: test to see if I actually need to duplicate 0, 1, & 2
                            // TDOO: which may be a problem if points are getting duplicated
+                           // TDOO: actually might not be an issue if ssbo info is the same
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RESOLVE], &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo0_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo1_info)},
@@ -251,6 +256,20 @@ int main()
     if (!setup_ds_pool())    return 1;
     if (!setup_ds_sets())    return 1;
 
+    /* create compute pipelines */
+    if (!vk_pl_layout_init(render_layout, &render_pl_layout))  return 1;
+    if (!vk_compute_pl_init2("./res/render.comp.spv", render_pl_layout, &render_pl))   return 1;
+    if (!vk_pl_layout_init(resolve_layout, &resolve_pl_layout)) return 1;
+    if (!vk_compute_pl_init2("./res/resolve.comp.spv", resolve_pl_layout, &resolve_pl)) return 1;
+
+    /* record one time commands for compute buffer */
+    if (!vk_rec_compute()) return 1;;
+        size_t group_x = ceil(ssbos.items[0].count / 128);
+        vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 0, 0);
+        vk_compute_pl_barrier();
+        vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 1600 / 16, 900 / 16, 0);
+    if (!vk_end_rec_compute()) return 1;
+
     nob_log(NOB_INFO, "before end break");
     goto end;
 
@@ -258,9 +277,7 @@ int main()
     while (!window_should_close()) {
         update_camera_free(&camera);
 
-        begin_compute();
-            if (!compute(EXAMPLE_COMPUTE_RASTERIZER)) return 1;
-        end_compute();
+        vk_submit_compute();
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
@@ -281,6 +298,8 @@ end:
     vk_destroy_ds_layout(render_layout);
     vk_destroy_ds_layout(resolve_layout);
     vk_destroy_ds_layout(frag_layout);
+    cleanup_pipeline(render_pl, render_pl_layout); // TODO: maybe vk_destroy_pl_res()?
+    cleanup_pipeline(resolve_pl, resolve_pl_layout);
     vk_unload_texture2(storage_tex);
     close_window();
     return 0;
