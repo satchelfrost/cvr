@@ -28,10 +28,11 @@ void main()
 {
     uvec2 id = gl_GlobalInvocationID.xy;
 
-    ivec2 img_size = ivec2(ubo.img_size);
+    //ivec2 img_size = ivec2(ubo.img_size);
+    ivec2 img_size  = imageSize(out_img);
     if (id.x >= img_size.x) return;
 
-    ivec2 pixel_coords = ivec2(id);
+    ivec2 pixel_coords = ivec2(id) / img_size;
     int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
 
     uvec4 color = uvec4(0, 0, 0, 255);
@@ -39,6 +40,9 @@ void main()
     if (tmp_color != 0)
         color = uvec4(255.0 * unpackUnorm4x8(tmp_color));
 
-    imageStore(out_img, pixel_coords, color);
+    color = uvec4(255, 255, 0, 255);
+    vec3 final_color = vec3(1.0, 1.0, 0.0);
+    imageStore(out_img, ivec2(gl_GlobalInvocationID.xy), vec4(final_color, 1.0));
+    //imageStore(out_img, pixel_coords, color);
     frame_buff[pixel_id] = 0xffffffffff003030UL;
 }

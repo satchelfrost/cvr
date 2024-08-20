@@ -94,7 +94,7 @@ Point_Cloud gen_points()
 
 Frame_Buffer alloc_frame_buff()
 {
-    size_t buff_count = 1024 * 1024 * 4;
+    size_t buff_count = 2048 * 2048;
     size_t buff_size  = sizeof(uint64_t) * buff_count;
     uint64_t *data = malloc(buff_size);
 
@@ -241,7 +241,8 @@ int main()
     init_window(1600, 900, "compute based rasterization for a point cloud");
     set_target_fps(60);
     Camera camera = {
-        .position   = {0.0f, 2.0f, 5.0f},
+        // .position   = {0.0f, 2.0f, 5.0f},
+        .position   = {20.0f, 20.0f, 20.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -254,8 +255,8 @@ int main()
     free(point_cloud.data);
     free(frame_buff.data);
     if (!vk_ubo_init2(&ubo)) return 1;
-    storage_tex.img.extent.width = 1600;
-    storage_tex.img.extent.height = 900;
+    storage_tex.img.extent.width  = 2048;
+    storage_tex.img.extent.height = 2048;
     if (!vk_create_storage_img(&storage_tex)) return 1;
 
     /* setup descriptors */
@@ -276,7 +277,7 @@ int main()
         size_t group_x = ceil(ssbos.items[0].count / 128);
         vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 0, 0);
         vk_compute_pl_barrier();
-        vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 1600 / 16, 900 / 16, 0);
+        vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 2048 / 16, 2048 / 16, 0);
     if (!vk_end_rec_compute()) return 1;
 
     /* game loop */
