@@ -40,17 +40,19 @@ UBO ubo = {
     .data = &uniform,
 };
 SSBO_Set ssbos = {0};
-VkDescriptorSetLayout render_layout;
-VkDescriptorSetLayout resolve_layout;
-VkDescriptorSetLayout frag_layout;
+VkDescriptorSetLayout render_ds_layout;
+VkDescriptorSetLayout resolve_ds_layout;
+VkDescriptorSetLayout sst_ds_layout; // screen space triangle
 VkPipelineLayout render_pl_layout;
 VkPipelineLayout resolve_pl_layout;
+VkPipelineLayout sst_pl_layout;
 VkPipeline render_pl; // compute render
 VkPipeline resolve_pl;
+VkPipeline sst_pl;
 VkDescriptorPool pool;
 Vk_Texture storage_tex = {0};
 
-typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_FRAG, DS_COUNT} DS_SET;
+typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
 float rand_float()
@@ -96,6 +98,10 @@ Frame_Buffer alloc_frame_buff()
     size_t buff_size  = sizeof(uint64_t) * buff_count;
     uint64_t *data = malloc(buff_size);
 
+    for (size_t i = 0; i < buff_count; i++) {
+        data[i] = 0xffffffffff003030;
+    }
+
     Frame_Buffer frame_buff = {
         .buff = {
             .size = buff_size,
@@ -114,6 +120,7 @@ bool update_ubo()
     uniform.img_width = win_size.width;
     uniform.img_height = win_size.height;
 
+    memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
     return true;
 }
 
@@ -141,11 +148,11 @@ bool setup_ds_layouts()
     };
 
     /* render.comp shader layout */
-    if (!vk_create_ds_layout(layout_ci, &render_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &render_ds_layout)) return false;
 
     /* resolve.comp shader layout */
     layout_ci.bindingCount = NOB_ARRAY_LEN(bindings);
-    if (!vk_create_ds_layout(layout_ci, &resolve_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &resolve_ds_layout)) return false;
 
     /* texture sampler in fragment shader */
     VkDescriptorSetLayoutBinding binding = {
@@ -153,7 +160,7 @@ bool setup_ds_layouts()
     };
     layout_ci.bindingCount = 1;
     layout_ci.pBindings = &binding;
-    if (!vk_create_ds_layout(layout_ci, &frag_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &sst_ds_layout)) return false;
 
     return true;
 }
@@ -171,7 +178,7 @@ bool setup_ds_pool()
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
-        .maxSets = 3, // render, resolve, and frag
+        .maxSets = 3, // render, resolve, and screen space triangle (sst)
     };
 
     if (!vk_create_ds_pool(pool_ci, &pool)) return false;
@@ -182,7 +189,7 @@ bool setup_ds_pool()
 bool setup_ds_sets()
 {
     /* allocate descriptor sets based on layouts */
-    VkDescriptorSetLayout layouts[] = {render_layout, resolve_layout, frag_layout};
+    VkDescriptorSetLayout layouts[] = {render_ds_layout, resolve_ds_layout, sst_ds_layout};
     size_t count = NOB_ARRAY_LEN(layouts);
     VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, count, pool)};
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
@@ -218,7 +225,7 @@ bool setup_ds_sets()
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo1_info)},
         {DS_WRITE_IMG (3, STORAGE_IMAGE,  ds_sets[DS_RESOLVE], &img_info)},
         /* default.frag */
-        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_FRAG], &img_info)},
+        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SST], &img_info)},
     };
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
@@ -256,22 +263,21 @@ int main()
     if (!setup_ds_pool())    return 1;
     if (!setup_ds_sets())    return 1;
 
-    /* create compute pipelines */
-    if (!vk_pl_layout_init(render_layout, &render_pl_layout))  return 1;
-    if (!vk_compute_pl_init2("./res/render.comp.spv", render_pl_layout, &render_pl))   return 1;
-    if (!vk_pl_layout_init(resolve_layout, &resolve_pl_layout)) return 1;
+    /* create pipelines */
+    if (!vk_pl_layout_init(render_ds_layout, &render_pl_layout))                        return 1;
+    if (!vk_compute_pl_init2("./res/render.comp.spv", render_pl_layout, &render_pl))    return 1;
+    if (!vk_pl_layout_init(resolve_ds_layout, &resolve_pl_layout))                      return 1;
     if (!vk_compute_pl_init2("./res/resolve.comp.spv", resolve_pl_layout, &resolve_pl)) return 1;
+    if (!vk_pl_layout_init(sst_ds_layout, &sst_pl_layout))                              return 1;
+    if (!vk_basic_pl_init2(sst_pl_layout, &sst_pl))                                     return 1;
 
     /* record one time commands for compute buffer */
-    if (!vk_rec_compute()) return 1;;
+    if (!vk_rec_compute()) return 1;
         size_t group_x = ceil(ssbos.items[0].count / 128);
         vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 0, 0);
         vk_compute_pl_barrier();
         vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 1600 / 16, 900 / 16, 0);
     if (!vk_end_rec_compute()) return 1;
-
-    nob_log(NOB_INFO, "before end break");
-    goto end;
 
     /* game loop */
     while (!window_should_close()) {
@@ -281,25 +287,24 @@ int main()
 
         begin_drawing(BLACK);
         begin_mode_3d(camera);
+            vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
             rotate_y(get_time() * 0.5);
-            if (!draw_sst()) return 1;
             if (!update_ubo()) return 1;;
         end_mode_3d();
         end_drawing();
     }
 
-end:
-    nob_log(NOB_INFO, "early debug end");
     wait_idle();
     vk_buff_destroy(ssbos.items[0]);
     vk_buff_destroy(ssbos.items[1]);
     vk_buff_destroy(ubo.buff);
     vk_destroy_ds_pool(pool);
-    vk_destroy_ds_layout(render_layout);
-    vk_destroy_ds_layout(resolve_layout);
-    vk_destroy_ds_layout(frag_layout);
+    vk_destroy_ds_layout(render_ds_layout);
+    vk_destroy_ds_layout(resolve_ds_layout);
+    vk_destroy_ds_layout(sst_ds_layout);
     cleanup_pipeline(render_pl, render_pl_layout); // TODO: maybe vk_destroy_pl_res()?
     cleanup_pipeline(resolve_pl, resolve_pl_layout);
+    cleanup_pipeline(sst_pl, sst_pl_layout);
     vk_unload_texture2(storage_tex);
     close_window();
     return 0;

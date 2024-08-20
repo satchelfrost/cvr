@@ -193,6 +193,7 @@ bool vk_swapchain_init();
 bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
+bool vk_basic_pl_init2(VkPipelineLayout pl_layout, VkPipeline *pl);
 bool vk_compute_pl_init(Descriptor_Type ds_type);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
@@ -222,16 +223,15 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
-void vk_compute(Descriptor_Type ds_type);
-bool vk_begin_compute(); // TODO: get rid of this ASAP
-bool vk_end_compute();   // TODO: get rid of this ASAP
+void vk_compute(Descriptor_Type ds_type); // TDOD: get rid of this after porting old compute example
+bool vk_begin_compute();                  // TODO: get rid of this after porting old compute example
+bool vk_end_compute();                    // TODO: get rid of this after porting old compute example
 bool vk_rec_compute();
 bool vk_submit_compute();
 bool vk_end_rec_compute();
-void vk_compute2(VkPipeline pipeline, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t group_x, size_t group_y, size_t group_z);
+void vk_compute2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void vk_compute_pl_barrier();
-bool vk_push_cmd_buff();
-bool vk_pop_cmd_buff();
+void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
@@ -361,7 +361,7 @@ Vk_Context ctx = {0};
 
 typedef struct {
     VkCommandPool pool;
-    VkCommandBuffer buff;
+    VkCommandBuffer gfx_buff;
     VkCommandBuffer compute_buff;
     VkSemaphore img_avail_sem;
     VkSemaphore render_fin_sem;
@@ -651,6 +651,7 @@ bool vk_swapchain_init()
         vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &img_count, ctx.swapchain.imgs.items);
         return true;
     } else {
+        nob_log(NOB_ERROR, "failed to create swapchain image");
         return false;
     }
 }
@@ -705,13 +706,13 @@ defer:
     return result;
 }
 
-bool vk_basic_pl_init(Pipeline_Type pipeline_type)
+bool vk_basic_pl_init(Pipeline_Type pl_type)
 {
     bool result = true;
 
     char *vert_shader_name;
     char *frag_shader_name;
-    switch (pipeline_type) {
+    switch (pl_type) {
     case PIPELINE_TEXTURE:
         vert_shader_name = "./res/texture.vert.spv";
         frag_shader_name = "./res/texture.frag.spv";
@@ -758,8 +759,8 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     VkPipelineVertexInputStateCreateInfo vertex_input_ci = {0};
     vertex_input_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     VtxAttrDescs vert_attrs = {0};
-    get_attr_descs(&vert_attrs, pipeline_type);
-    VkVertexInputBindingDescription binding_desc = get_binding_desc(pipeline_type);
+    get_attr_descs(&vert_attrs, pl_type);
+    VkVertexInputBindingDescription binding_desc = get_binding_desc(pl_type);
     vertex_input_ci.vertexBindingDescriptionCount = 1;
     vertex_input_ci.pVertexBindingDescriptions = &binding_desc;
     vertex_input_ci.vertexAttributeDescriptionCount = vert_attrs.count;
@@ -767,9 +768,9 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {0};
     input_assembly_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    if (pipeline_type == PIPELINE_POINT_CLOUD ||
-        pipeline_type == PIPELINE_POINT_CLOUD_ADV ||
-        pipeline_type == PIPELINE_COMPUTE)
+    if (pl_type == PIPELINE_POINT_CLOUD ||
+        pl_type == PIPELINE_POINT_CLOUD_ADV ||
+        pl_type == PIPELINE_COMPUTE)
         input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
     else
         input_assembly_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -790,7 +791,7 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
 
     VkPipelineRasterizationStateCreateInfo rasterizer_ci = {0};
     rasterizer_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer_ci.polygonMode = (pipeline_type == PIPELINE_WIREFRAME) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+    rasterizer_ci.polygonMode = (pl_type == PIPELINE_WIREFRAME) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
     rasterizer_ci.lineWidth = 1.0f;
     rasterizer_ci.cullMode = VK_CULL_MODE_NONE;
     // rasterizer_ci.frontFace = VK_FRONT_FACE_CLOCKWISE;
@@ -800,7 +801,7 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     multisampling_ci.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     VkPipelineColorBlendAttachmentState color_blend = {
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        .colorWriteMask = 0xf, // rgba
         .blendEnable = VK_TRUE,
         .colorBlendOp = VK_BLEND_OP_ADD,
         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
@@ -820,10 +821,10 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {0};
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
-    if (pipeline_type == PIPELINE_TEXTURE) {
+    if (pl_type == PIPELINE_TEXTURE) {
         nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_TEX].set_layout);
         nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_TEX].set_layout);
-    } else if (pipeline_type == PIPELINE_POINT_CLOUD_ADV) {
+    } else if (pl_type == PIPELINE_POINT_CLOUD_ADV) {
         nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_ADV_POINT_CLOUD].set_layout);
         nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_ADV_POINT_CLOUD].set_layout);
     }
@@ -836,13 +837,13 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
     };
     pipeline_layout_ci.pPushConstantRanges = &pk_range;
     pipeline_layout_ci.pushConstantRangeCount = 1;
-    VkResult vk_result = vkCreatePipelineLayout(
+    VkResult res = vkCreatePipelineLayout(
         ctx.device,
         &pipeline_layout_ci,
         NULL,
-        &ctx.pipeline_layouts[pipeline_type]
+        &ctx.pipeline_layouts[pl_type]
     );
-    vk_chk(vk_result, "failed to create pipeline layout");
+    vk_chk(res, "failed to create pipeline layout");
     VkPipelineDepthStencilStateCreateInfo depth_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = VK_TRUE,
@@ -863,13 +864,13 @@ bool vk_basic_pl_init(Pipeline_Type pipeline_type)
         .pColorBlendState = &color_blend_ci,
         .pDynamicState = &dynamic_state_ci,
         .pDepthStencilState = &depth_ci,
-        .layout = ctx.pipeline_layouts[pipeline_type],
+        .layout = ctx.pipeline_layouts[pl_type],
         .renderPass = ctx.render_pass,
         .subpass = 0,
     };
 
-    vk_result = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines[pipeline_type]);
-    vk_chk(vk_result, "failed to create pipeline");
+    res = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines[pl_type]);
+    vk_chk(res, "failed to create pipeline");
 
 defer:
     vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
@@ -879,7 +880,7 @@ defer:
     return result;
 }
 
-bool vk_sst_pl_init()
+bool vk_basic_pl_init2(VkPipelineLayout pl_layout, VkPipeline *pl)
 {
     bool result = true;
 
@@ -898,23 +899,6 @@ bool vk_sst_pl_init()
     };
     if (!vk_shader_mod_init("./res/default.vert.spv", &stages[0].module)) nob_return_defer(false);
     if (!vk_shader_mod_init("./res/default.frag.spv", &stages[1].module)) nob_return_defer(false);
-
-    /* create pipeline layout */
-    VkPipelineLayoutCreateInfo pipeline_layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pSetLayouts = &ctx.texture_sets[DS_TYPE_COMPUTE_RASTERIZER].set_layout,
-        .setLayoutCount = 1,
-    };
-    VkResult res = vkCreatePipelineLayout(
-        ctx.device,
-        &pipeline_layout_ci,
-        NULL,
-        &ctx.pipeline_layouts[PIPELINE_SST]
-    );
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create pipeline screen space triangle layout");
-        nob_return_defer(false);
-    }
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -974,17 +958,14 @@ bool vk_sst_pl_init()
         .pColorBlendState = &color_blend_ci,
         .pDynamicState = &dynamic_state_ci,
         .pDepthStencilState = &depth_ci,
-        .layout = ctx.pipeline_layouts[PIPELINE_SST],
+        .layout = pl_layout,
         .renderPass = ctx.render_pass,
         .subpass = 0,
     };
 
-    res = vkCreateGraphicsPipelines(
-        ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL,
-        &ctx.pipelines[PIPELINE_SST]
-    );
+    VkResult res = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create pipeline for screen space triangle");
+        nob_log(NOB_ERROR, "failed to create basic pipline ");
         nob_return_defer(false);
     }
 
@@ -1301,7 +1282,7 @@ void vk_begin_render_pass(Color color)
     VkClearValue clear_values[] = {clear_color, clear_depth};
     begin_rp.clearValueCount = NOB_ARRAY_LEN(clear_values);
     begin_rp.pClearValues = clear_values;
-    vkCmdBeginRenderPass(cmd_man.buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(cmd_man.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
@@ -1313,7 +1294,7 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
         nob_return_defer(false);
     }
 
-    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    VkCommandBuffer cmd_buffer = cmd_man.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pipeline_type]);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
@@ -1353,7 +1334,7 @@ bool vk_draw_sst()
         nob_return_defer(false);
     }
 
-    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    VkCommandBuffer cmd_buffer = cmd_man.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_SST]);
     VkViewport viewport = {
         .width    = (float)ctx.extent.width,
@@ -1463,37 +1444,33 @@ void vk_compute(Descriptor_Type ds_type)
     }
 }
 
-void vk_compute2(VkPipeline pipeline, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t group_x, size_t group_y, size_t group_z)
+void vk_compute2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
 {
-    vkCmdBindPipeline(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdBindPipeline(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
     vkCmdBindDescriptorSets(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl_layout, 0, 1, &ds, 0, NULL);
-    vkCmdDispatch(cmd_man.compute_buff, group_x, group_y, group_z);
+    vkCmdDispatch(cmd_man.compute_buff, x, y, z);
+}
+
+void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
+{
+    vkCmdBindPipeline(cmd_man.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    vkCmdBindDescriptorSets(cmd_man.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);
+
+    VkViewport viewport = {
+        .width = (float)ctx.extent.width,
+        .height =(float)ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd_man.gfx_buff, 0, 1, &viewport);
+    VkRect2D scissor = { .extent = ctx.extent, };
+    vkCmdSetScissor(cmd_man.gfx_buff, 0, 1, &scissor);
+    vkCmdDraw(cmd_man.gfx_buff, 3, 1, 0, 0);
 }
 
 bool vk_rec_compute()
 {
-    VkResult res = vkWaitForFences(
-        ctx.device, 1, &cmd_man.compute_fence, VK_TRUE, UINT64_MAX
-    );
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed waiting for compute fence");
-        return false;
-    }
-        res = vkResetFences(ctx.device, 1, &cmd_man.compute_fence);
-        if (!VK_SUCCEEDED(res)) {
-            nob_log(NOB_ERROR, "failed resetting compute fence");
-            return false;
-        }
-    res = vkResetCommandBuffer(cmd_man.compute_buff, 0);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed resetting compute command buffer");
-        return false;
-    }
-
-    VkCommandBufferBeginInfo begin_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    };
-    res = vkBeginCommandBuffer(cmd_man.compute_buff, &begin_info);
+    VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
+    VkResult res = vkBeginCommandBuffer(cmd_man.compute_buff, &begin_info);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to begin compute command buffer");
         return false;
@@ -1504,23 +1481,9 @@ bool vk_rec_compute()
 
 bool vk_end_rec_compute()
 {
-    VkResult res = vkEndCommandBuffer(cmd_man.compute_buff);
+    VkResult res = vkEndCommandBuffer(cmd_man.compute_buff);                   
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to end compute pass");
-        return false;
-    }
-
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd_man.compute_buff,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &cmd_man.compute_fin_sem,
-    };
-
-    res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit compute queue");
         return false;
     }
 
@@ -1542,8 +1505,6 @@ bool vk_submit_compute()
         nob_log(NOB_ERROR, "failed resetting compute fence");
         return false;
     }
-
-    /* submit compute buffer */
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
@@ -1563,7 +1524,6 @@ bool vk_submit_compute()
 
 void vk_compute_pl_barrier()
 {
-    /* barrier */
     VkMemoryBarrier2KHR barrier = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
@@ -1597,7 +1557,7 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
         pipeline_layout = ctx.pipeline_layouts[PIPELINE_POINT_CLOUD];
     }
 
-    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    VkCommandBuffer cmd_buffer = cmd_man.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkViewport viewport = {0};
     viewport.width = (float)ctx.extent.width;
@@ -1647,7 +1607,7 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
     bool result = true;
     (void) id; (void)vtx_buff; (void)idx_buff, (void)mvp;
 
-    VkCommandBuffer cmd_buffer = cmd_man.buff;
+    VkCommandBuffer cmd_buffer = cmd_man.gfx_buff;
 
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_TEXTURE]);
     VkViewport viewport = {0};
@@ -1696,40 +1656,44 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
 
 bool vk_begin_drawing()
 {
-    bool result = true;
+    VkResult res = vkWaitForFences(ctx.device, 1, &cmd_man.fence, VK_TRUE, UINT64_MAX);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to wait for fences");
+        return false;
+    }
 
-    VkResult vk_result = vkWaitForFences(
-        ctx.device, 1, &cmd_man.fence, VK_TRUE, UINT64_MAX
+    res = vkAcquireNextImageKHR(
+        ctx.device, ctx.swapchain.handle, UINT64_MAX,
+        cmd_man.img_avail_sem, VK_NULL_HANDLE, &img_idx
     );
-    vk_chk(vk_result, "failed to wait for fences");
-
-    vk_result = vkAcquireNextImageKHR(ctx.device,
-        ctx.swapchain.handle,
-        UINT64_MAX,
-        cmd_man.img_avail_sem,
-        VK_NULL_HANDLE,
-        &img_idx
-    );
-
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR) {
-        cvr_chk(vk_swapchain_init(), "failed to recreate swapchain");
-    } else if (!VK_SUCCEEDED(vk_result) && vk_result != VK_SUBOPTIMAL_KHR) {
+    if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+        if (!vk_swapchain_init()) return false;
+    } else if (!VK_SUCCEEDED(res) && res != VK_SUBOPTIMAL_KHR) {
         nob_log(NOB_ERROR, "failed to acquire swapchain image");
-        nob_return_defer(false);
-    } else if (vk_result == VK_SUBOPTIMAL_KHR) {
+        return false;
+    } else if (res == VK_SUBOPTIMAL_KHR) {
         nob_log(NOB_WARNING, "suboptimal swapchain image");
     }
 
-    vk_chk(vkResetFences(ctx.device, 1, &cmd_man.fence), "failed to reset fences");
-    vk_chk(vkResetCommandBuffer(cmd_man.buff, 0), "failed to reset cmd buffer");
+    res = vkResetFences(ctx.device, 1, &cmd_man.fence);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to reset fences");
+        return false;
+    }
+    res = vkResetCommandBuffer(cmd_man.gfx_buff, 0);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR,"failed to reset cmd buffer");
+        return false;
+    }
 
-    VkCommandBufferBeginInfo begin_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    };
-    vk_chk(vkBeginCommandBuffer(cmd_man.buff, &begin_info), "failed to begin command buffer");
+    VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
+    res = vkBeginCommandBuffer(cmd_man.gfx_buff, &begin_info);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR,"failed to begin command buffer");
+        return false;
+    }
 
-defer:
-    return result;
+    return true;
 }
 
 bool vk_begin_compute()
@@ -1797,11 +1761,12 @@ defer:
 
 bool vk_end_drawing()
 {
-    bool result = true;
-
-    VkCommandBuffer cmd_buffer = cmd_man.buff;
-    vkCmdEndRenderPass(cmd_buffer);
-    vk_chk(vkEndCommandBuffer(cmd_buffer), "failed to record command buffer");
+    vkCmdEndRenderPass(cmd_man.gfx_buff);
+    VkResult res = vkEndCommandBuffer(cmd_man.gfx_buff);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to record command buffer");
+        return false;
+    }
 
     VkSemaphore wait_sems[] = {cmd_man.compute_fin_sem, cmd_man.img_avail_sem};
     VkPipelineStageFlags wait_stages[] = {
@@ -1811,11 +1776,12 @@ bool vk_end_drawing()
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
-        .pCommandBuffers = &cmd_man.buff,
+        .pCommandBuffers = &cmd_man.gfx_buff,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
     };
-    if (ctx.pipelines[PIPELINE_COMPUTE]) {
+    // if (ctx.pipelines[PIPELINE_COMPUTE]) {
+    if (true) { // TODO: this breaks all other examples
         submit.waitSemaphoreCount = 2;
         submit.pWaitSemaphores = wait_sems;
         submit.pWaitDstStageMask = wait_stages;
@@ -1825,28 +1791,30 @@ bool vk_end_drawing()
         submit.pWaitDstStageMask = &wait_stages[1];
     }
 
-    vk_chk(vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence), "failed to submit command");
-
-    VkPresentInfoKHR present = {0};
-    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &cmd_man.render_fin_sem;
-    present.swapchainCount = 1;
-    present.pSwapchains = &ctx.swapchain.handle;
-    present.pImageIndices = &img_idx;
-
-    VkResult vk_result = vkQueuePresentKHR(ctx.present_queue, &present);
-    if (vk_result == VK_ERROR_OUT_OF_DATE_KHR || vk_result == VK_SUBOPTIMAL_KHR || ctx.swapchain.buff_resized) {
-        ctx.swapchain.buff_resized = false;
-        cvr_chk(vk_recreate_swapchain(), "failed to recreate swapchain");
-    } else if (!VK_SUCCEEDED(vk_result)) {
-        nob_log(NOB_ERROR, "failed to present queue");
-        nob_return_defer(false);
+    res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to submit to graphics queue");
+        return false;
     }
 
-defer:
-    return result;
+    VkPresentInfoKHR present = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &cmd_man.render_fin_sem,
+        .swapchainCount = 1,
+        .pSwapchains = &ctx.swapchain.handle,
+        .pImageIndices = &img_idx,
+    };
+    res = vkQueuePresentKHR(ctx.present_queue, &present);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || ctx.swapchain.buff_resized) {
+        ctx.swapchain.buff_resized = false;
+        if (!vk_recreate_swapchain()) return false;
+    } else if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to present queue");
+        return false;
+    }
+
+    return true;
 }
 
 bool vk_recreate_swapchain()
@@ -2794,21 +2762,23 @@ defer:
 
 bool vk_vtx_buff_upload(Vk_Buffer *vtx_buff, const void *data)
 {
-    bool result = true;
-
-    result = vk_buff_init(
+    bool result = vk_buff_init(
         vtx_buff,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    cvr_chk(result, "failed to create vertex buffer");
+    if (!result) return false;
 
-    vk_chk(vkMapMemory(ctx.device, vtx_buff->mem, 0, vtx_buff->size, 0, &(vtx_buff->mapped)), "failed to map memory");
+    VkResult res = vkMapMemory(ctx.device, vtx_buff->mem, 0, vtx_buff->size, 0, &(vtx_buff->mapped));
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to map memory");
+        return false;
+    }
+
     memcpy(vtx_buff->mapped, data, vtx_buff->size);
     vkUnmapMemory(ctx.device, vtx_buff->mem);
 
-defer:
-    return result;
+    return true;
 }
 
 bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
@@ -2885,47 +2855,53 @@ defer:
 
 bool vk_idx_buff_upload(Vk_Buffer *idx_buff, const void *data)
 {
-    bool result = true;
-
-    result = vk_buff_init(
+    bool result = vk_buff_init(
         idx_buff,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    cvr_chk(result, "failed to create index buffer");
+    if (!result) return false;
 
-    vk_chk(vkMapMemory(ctx.device, idx_buff->mem, 0, idx_buff->size, 0, &(idx_buff->mapped)), "failed to map memory");
+    VkResult res = vkMapMemory(ctx.device, idx_buff->mem, 0, idx_buff->size, 0, &(idx_buff->mapped));
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to map memory in idx buff upload");
+        return false;
+    }
     memcpy(idx_buff->mapped, data, idx_buff->size);
     vkUnmapMemory(ctx.device, idx_buff->mem);
 
-defer:
-    return result;
+    return true;
 }
 
 
 bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size)
 {
-    bool result = true;
-
     VkCommandBuffer tmp_cmd_buff;
-    cvr_chk(cmd_quick_begin(&tmp_cmd_buff), "failed quick cmd begin");
+    if (!cmd_quick_begin(&tmp_cmd_buff)) return false;
 
     VkBufferCopy copy_region = {0};
     if (size) {
         copy_region.size = size;
-        cvr_chk(size <= dst_buff.size, "Cannot copy buffer, size > dst buffer (won't fit)");
-        cvr_chk(size <= src_buff.size, "Cannot copy buffer, size > src buffer (cannot copy more than what's available)");
+        if (size > dst_buff.size) {
+            nob_log(NOB_ERROR, "Cannot copy buffer, size > dst buffer (won't fit)");
+            return false;
+        }
+        if (size > src_buff.size) {
+            nob_log(NOB_ERROR, "Cannot copy buffer, size > src buffer (cannot copy more than what's available)");
+            return false;
+        }
     } else {
-        cvr_chk(dst_buff.size >= src_buff.size, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
+        if (dst_buff.size < src_buff.size) {
+            nob_log(NOB_ERROR, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
+            return false;
+        }
         copy_region.size = src_buff.size;
     }
 
     vkCmdCopyBuffer(tmp_cmd_buff, src_buff.handle, dst_buff.handle, 1, &copy_region);
+    if (!cmd_quick_end(&tmp_cmd_buff)) return false;
 
-    cvr_chk(cmd_quick_end(&tmp_cmd_buff), "failed quick cmd end");
-
-defer:
-    return result;
+    return true;
 }
 
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
@@ -3016,7 +2992,7 @@ bool cmd_buff_create()
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
-    VkResult res = vkAllocateCommandBuffers(ctx.device, &ci, &cmd_man.buff);
+    VkResult res = vkAllocateCommandBuffers(ctx.device, &ci, &cmd_man.gfx_buff);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed to create graphics command buffer");
         return false;
@@ -3127,83 +3103,6 @@ defer:
     return result;
 }
 
-bool vk_push_cmd_buff()
-{
-    if (cmd_buff_tos < MAX_CMD_BUFF_STACK) {
-        cmd_buff_tos++;
-    } else {
-        nob_log(NOB_ERROR, "command buffer stack overflow");
-        return false;
-    }
-
-    VkCommandBufferAllocateInfo ci = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandPool = cmd_man.pool,
-        .commandBufferCount = 1,
-    };
-    VkResult res = vkAllocateCommandBuffers(ctx.device, &ci, &cmd_buff_stack[cmd_buff_tos - 1]);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create push cmd buffer");
-        return false;
-    }
-    VkCommandBufferBeginInfo cmd_begin = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    res = vkBeginCommandBuffer(cmd_buff_stack[cmd_buff_tos - 1], &cmd_begin);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to begin quick cmd");
-        return false;
-    }
-
-    return true;
-}
-
-bool vk_pop_cmd_buff()
-{
-    bool result = true;
-
-    VkCommandBuffer cmd_buff;
-    if (cmd_buff_tos > 0) {
-        cmd_buff = cmd_buff_stack[cmd_buff_tos - 1];
-        cmd_buff_tos--;
-    } else {
-        nob_log(NOB_ERROR, "command buffer stack underflow");
-        nob_return_defer(false);
-    }
-
-    VkResult res = vkEndCommandBuffer(cmd_buff);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to end cmd buffer");
-        nob_return_defer(false);
-    }
-
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd_buff,
-    };
-
-    res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit quick cmd");
-        nob_return_defer(false);
-    }
-
-    /* TODO: perhaps I should use a fence instead of a queue wait idle */
-
-    res = vkQueueWaitIdle(ctx.gfx_queue);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to wait idle in quick cmd");
-        nob_return_defer(false);
-    }
-
-defer:
-    vkFreeCommandBuffers(ctx.device, cmd_man.pool, 1, &cmd_buff);
-    return result;
-}
-
 bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
 {
     bool result = true;
@@ -3220,7 +3119,8 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
         dst_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT;
         src_stg_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         dst_stg_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+               new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
         src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT;
         dst_access_mask = VK_ACCESS_SHADER_READ_BIT;
         src_stg_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
