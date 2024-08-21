@@ -10,6 +10,8 @@
 #include "ext/nob.h"
 #include "nob_ext.h"
 
+#define VK_FLAGS_NONE 0
+
 #define GLFW_INCLUDE_VULKAN // TODO: would like to move this into cvr.c
 #include <GLFW/glfw3.h>
 
@@ -250,6 +252,7 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 bool vk_create_storage_img(Vk_Texture *texture);
 void vk_unload_texture2(Vk_Texture texture);
+void vk_pl_barrier(VkImageMemoryBarrier barrier);
 
 /* descriptor set macros */
 #define DS_POOL(DS_TYPE, COUNT)             \
@@ -3161,6 +3164,19 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
 
 defer:
     return result;
+}
+
+void vk_pl_barrier(VkImageMemoryBarrier barrier)
+{
+    vkCmdPipelineBarrier(
+        cmd_man.gfx_buff,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_FLAGS_NONE,
+        0, NULL,
+        0, NULL,
+        1, &barrier
+    );
 }
 
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)

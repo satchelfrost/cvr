@@ -282,6 +282,13 @@ void begin_drawing(Color color)
     vk_begin_render_pass(color);
 }
 
+void begin_drawing2()
+{
+    cvr_time.curr   = get_time();
+    cvr_time.update = cvr_time.curr - cvr_time.prev;
+    cvr_time.prev   = cvr_time.curr;
+}
+
 void end_drawing()
 {
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {

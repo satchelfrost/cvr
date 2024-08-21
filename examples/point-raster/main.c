@@ -52,7 +52,7 @@ VkPipeline sst_pl;
 VkDescriptorPool pool;
 Vk_Texture storage_tex = {0};
 
-typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
+typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_TEST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
 float rand_float()
@@ -99,7 +99,8 @@ Frame_Buffer alloc_frame_buff()
     uint64_t *data = malloc(buff_size);
 
     for (size_t i = 0; i < buff_count; i++) {
-        data[i] = 0xffffffffff003030;
+        // data[i] = 0xffffffffff003030;
+        data[i] = 0;
     }
 
     Frame_Buffer frame_buff = {
@@ -217,9 +218,7 @@ bool setup_ds_sets()
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RENDER],  &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &ssbo0_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RENDER],  &ssbo1_info)},
-        /* resolve.comp */ // TODO: test to see if I actually need to duplicate 0, 1, & 2
-                           // TDOO: which may be a problem if points are getting duplicated
-                           // TDOO: actually might not be an issue if ssbo info is the same
+        /* resolve.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RESOLVE], &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo0_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo1_info)},
@@ -259,7 +258,7 @@ int main()
     storage_tex.img.extent.height = 2048;
     if (!vk_create_storage_img(&storage_tex)) return 1;
 
-    /* setup descriptors */
+    // /* setup descriptors */
     if (!setup_ds_layouts()) return 1;
     if (!setup_ds_pool())    return 1;
     if (!setup_ds_sets())    return 1;
@@ -277,7 +276,7 @@ int main()
         size_t group_x = ceil(ssbos.items[0].count / 128);
         vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 0, 0);
         vk_compute_pl_barrier();
-        vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 2048 / 16, 2048 / 16, 0);
+        vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 2048 / 16, 2048 / 16, 1);
     if (!vk_end_rec_compute()) return 1;
 
     /* game loop */
@@ -286,13 +285,41 @@ int main()
 
         vk_submit_compute();
 
-        begin_drawing(BLACK);
+        begin_drawing2(); // used to update time
+        vk_begin_drawing();
+        /* create a barrier to ensure compute shaders are done before sampling */
+        VkImageMemoryBarrier barrier = {
+           .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+           .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+           .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+           .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+           .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+           .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+           .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+           .image = storage_tex.img.handle,
+           .subresourceRange = {
+               .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+               .baseMipLevel = 0,
+               .levelCount = 1,
+               .baseArrayLayer = 0,
+               .layerCount = 1,
+           },
+        };
+        vk_pl_barrier(barrier);
+        vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
             vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
             rotate_y(get_time() * 0.5);
-            if (!update_ubo()) return 1;;
         end_mode_3d();
         end_drawing();
+
+        // begin_drawing(BLACK);
+        // begin_mode_3d(camera);
+        //     vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
+        //     rotate_y(get_time() * 0.5);
+        //     // if (!update_ubo()) return 1;;
+        // end_mode_3d();
+        // end_drawing();
     }
 
     wait_idle();

@@ -198,8 +198,9 @@ static Example examples[] = {
                 "default.frag",
                 "render.comp",
                 "resolve.comp",
+                "test.comp",
             },
-            .count = 4,
+            .count = 5,
         },
         .c_files = {
             .names = default_c_file_names,
