@@ -9,8 +9,8 @@ struct Vertex {
 };
 
 layout(binding = 0) uniform uniform_data {
+    ivec2 img_size;
     mat4 mvp;
-    vec2 img_size;
 } ubo;
 
 layout(std140, binding = 1) buffer vert_data {
@@ -36,10 +36,8 @@ void main()
         return;
 
     ivec2 img_size = ivec2(ubo.img_size);
-    vec2 uv = (ndc.xy * 0.5 + 0.5) * ubo.img_size;
-    //ivec2 pixel_coords = ivec2(uv);
-    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy) / img_size;
-    //int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
+    vec2 img_pos = (ndc.xy * 0.5 + 0.5) * ubo.img_size;
+    ivec2 pixel_coords = ivec2(img_pos);
     int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
     uint64_t depth = floatBitsToUint(pos.w);
     uint64_t old_depth = frame_buff[pixel_id] >> 32;

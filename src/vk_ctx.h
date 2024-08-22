@@ -1512,8 +1512,8 @@ bool vk_submit_compute()
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.compute_buff,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &cmd_man.compute_fin_sem,
+        // .signalSemaphoreCount = 1,
+        // .pSignalSemaphores = &cmd_man.compute_fin_sem,
     };
 
     res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
@@ -1783,8 +1783,8 @@ bool vk_end_drawing()
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
     };
-    // if (ctx.pipelines[PIPELINE_COMPUTE]) {
-    if (true) { // TODO: this breaks all other examples
+    if (ctx.pipelines[PIPELINE_COMPUTE]) {
+    // if (true) { // TODO: this breaks all other examples
         submit.waitSemaphoreCount = 2;
         submit.pWaitSemaphores = wait_sems;
         submit.pWaitDstStageMask = wait_stages;

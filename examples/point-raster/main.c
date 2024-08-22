@@ -6,9 +6,12 @@
 
 #define NUM_POINTS 1000000
 
+typedef unsigned int uint;
 typedef struct {
     float x, y, z;
-    unsigned char r, g, b, a; // TODO: might need to change this to a uint32_t
+    // unsigned char r, g, b, a; // TODO: might need to change this to a uint32_t
+    // unsigned int color;
+    uint color;
 } Point_Vert;
 
 typedef struct {
@@ -28,9 +31,9 @@ typedef struct {
 } Frame_Buffer;
 
 typedef struct {
-    float16 mvp;
     int img_width;
     int img_height;
+    float16 mvp;
 } Point_Cloud_Uniform;
 
 /* state we must manage */
@@ -60,6 +63,13 @@ float rand_float()
     return (float)rand() / RAND_MAX;
 }
 
+uint color_to_uint(Color color)
+{
+    // return (((uint)color.r << 24) | ((uint)color.g << 16) | ((uint)color.b << 8) | (uint)color.a);
+    return (((uint)color.a << 24) | ((uint)color.b << 16) | ((uint)color.g << 8) | (uint)color.r);
+    // return (((uint)color.a << 24) | ((uint)color.r << 16) | ((uint)color.g << 8) | (uint)color.b);
+}
+
 Point_Cloud gen_points()
 {
     Vertices verts = {0};
@@ -67,15 +77,18 @@ Point_Cloud gen_points()
         float theta = PI * rand_float();
         float phi   = 2 * PI * rand_float();
         float r     = 10.0f * rand_float();
-        Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
+        // Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
+        // uint uint_color = color_to_uint(color);
+        uint uint_color = color_to_uint(MAGENTA);
         Point_Vert vert = {
             .x = r * sin(theta) * cos(phi),
             .y = r * sin(theta) * sin(phi),
             .z = r * cos(theta),
-            .r = color.r,
-            .g = color.g,
-            .b = color.b,
-            .a = 255,
+            .color = uint_color,
+            // .r = color.r,
+            // .g = color.g,
+            // .b = color.b,
+            // .a = 255,
         };
 
         nob_da_append(&verts, vert);
@@ -274,7 +287,7 @@ int main()
     /* record one time commands for compute buffer */
     if (!vk_rec_compute()) return 1;
         size_t group_x = ceil(ssbos.items[0].count / 128);
-        vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 0, 0);
+        vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 1, 1);
         vk_compute_pl_barrier();
         vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 2048 / 16, 2048 / 16, 1);
     if (!vk_end_rec_compute()) return 1;
@@ -309,7 +322,8 @@ int main()
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
             vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
-            rotate_y(get_time() * 0.5);
+            // rotate_y(get_time() * 0.5);
+            if (!update_ubo()) return 1;
         end_mode_3d();
         end_drawing();
 
