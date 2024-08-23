@@ -31,8 +31,8 @@ typedef struct {
 } Frame_Buffer;
 
 typedef struct {
-    int img_width;
-    int img_height;
+    // int img_width;
+    // int img_height;
     float16 mvp;
 } Point_Cloud_Uniform;
 
@@ -112,8 +112,8 @@ Frame_Buffer alloc_frame_buff()
     uint64_t *data = malloc(buff_size);
 
     for (size_t i = 0; i < buff_count; i++) {
-        // data[i] = 0xffffffffff003030;
-        data[i] = 0;
+        data[i] = 0xffffffffff003030;
+        // data[i] = 0;
     }
 
     Frame_Buffer frame_buff = {
@@ -127,12 +127,21 @@ Frame_Buffer alloc_frame_buff()
     return frame_buff;
 }
 
-bool update_ubo()
+bool update_ubo(Camera camera)
 {
+    // Matrix model = {0};
+    // if (!get_matrix_tos(&model)) return false;
+    // Matrix view = MatrixLookAt(camera.position, camera.target, camera.up);
+    // Matrix proj = get_proj(camera);
+    // Matrix view_proj = MatrixMultiply(view, proj);
+    // Matrix mvp = MatrixMultiply(model, view_proj);
+    // uniform.mvp = MatrixToFloatV(mvp);
+
+    (void) camera;
     if (!get_mvp_float16(&uniform.mvp)) return false;
-    Window_Size win_size = get_window_size();
-    uniform.img_width = win_size.width;
-    uniform.img_height = win_size.height;
+    // Window_Size win_size = get_window_size();
+    // uniform.img_width = win_size.width;
+    // uniform.img_height = win_size.height;
 
     memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
     return true;
@@ -322,8 +331,8 @@ int main()
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
             vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
-            // rotate_y(get_time() * 0.5);
-            if (!update_ubo()) return 1;
+            rotate_y(get_time() * 0.5);
+            if (!update_ubo(camera)) return 1;
         end_mode_3d();
         end_drawing();
 
