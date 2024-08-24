@@ -8,5 +8,6 @@ layout(location = 0) out vec4 out_color;
 
 void main()
 {
-    out_color = texture(sampler_color, vec2(uv.s, 1.0 - uv.t));
+    //out_color = texture(sampler_color, vec2(uv.s, 1.0 - uv.t));
+    out_color = texture(sampler_color, uv);
 }

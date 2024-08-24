@@ -29,11 +29,9 @@ void main()
     uvec2 id = gl_GlobalInvocationID.xy;
 
     ivec2 img_size  = imageSize(out_img);
-
     if (id.x >= img_size.x) return;
 
-    ivec2 pixel_coords = ivec2(id) / img_size;
-    //ivec2 pixel_coords = ivec2(id);
+    ivec2 pixel_coords = ivec2(id);
     int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
 
     vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
@@ -41,13 +39,7 @@ void main()
     if (tmp_color != 0)
         color = vec4(unpackUnorm4x8(tmp_color));
 
-    /* debug */
-    //vec3 final_color = vec3(1.0, 1.0, 1.0);
-    //imageStore(out_img, ivec2(gl_GlobalInvocationID.xy), vec4(final_color, 1.0));
-
-    imageStore(out_img, ivec2(gl_GlobalInvocationID.xy), color);
-
-    //imageStore(out_img, pixel_coords, color);
-
-    frame_buff[pixel_id] = 0xffffffffffff3030UL;
+    imageStore(out_img, pixel_coords, color);
+    frame_buff[pixel_id] = 0xffffffffff000010UL; // LOL demon color
+    //frame_buff[pixel_id] = 0xffffffffff000000UL;
 }

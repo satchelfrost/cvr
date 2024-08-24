@@ -4,13 +4,11 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define NUM_POINTS 1000000
+#define NUM_POINTS 10000000
 
 typedef unsigned int uint;
 typedef struct {
     float x, y, z;
-    // unsigned char r, g, b, a; // TODO: might need to change this to a uint32_t
-    // unsigned int color;
     uint color;
 } Point_Vert;
 
@@ -77,18 +75,14 @@ Point_Cloud gen_points()
         float theta = PI * rand_float();
         float phi   = 2 * PI * rand_float();
         float r     = 10.0f * rand_float();
-        // Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
-        // uint uint_color = color_to_uint(color);
-        uint uint_color = color_to_uint(MAGENTA);
+        Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
+        uint uint_color = color_to_uint(color);
+        //uint uint_color = color_to_uint(MAGENTA);
         Point_Vert vert = {
             .x = r * sin(theta) * cos(phi),
             .y = r * sin(theta) * sin(phi),
             .z = r * cos(theta),
             .color = uint_color,
-            // .r = color.r,
-            // .g = color.g,
-            // .b = color.b,
-            // .a = 255,
         };
 
         nob_da_append(&verts, vert);
@@ -107,7 +101,7 @@ Point_Cloud gen_points()
 
 Frame_Buffer alloc_frame_buff()
 {
-    size_t buff_count = 2048 * 2048;
+    size_t buff_count = 2 * 2048 * 2048; // Shouldn't have to multiply by two
     size_t buff_size  = sizeof(uint64_t) * buff_count;
     uint64_t *data = malloc(buff_size);
 
@@ -127,17 +121,8 @@ Frame_Buffer alloc_frame_buff()
     return frame_buff;
 }
 
-bool update_ubo(Camera camera)
+bool update_ubo()
 {
-    // Matrix model = {0};
-    // if (!get_matrix_tos(&model)) return false;
-    // Matrix view = MatrixLookAt(camera.position, camera.target, camera.up);
-    // Matrix proj = get_proj(camera);
-    // Matrix view_proj = MatrixMultiply(view, proj);
-    // Matrix mvp = MatrixMultiply(model, view_proj);
-    // uniform.mvp = MatrixToFloatV(mvp);
-
-    (void) camera;
     if (!get_mvp_float16(&uniform.mvp)) return false;
     // Window_Size win_size = get_window_size();
     // uniform.img_width = win_size.width;
@@ -260,10 +245,10 @@ int main()
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "compute based rasterization for a point cloud");
-    set_target_fps(60);
+    // set_target_fps(60);
     Camera camera = {
-        // .position   = {0.0f, 2.0f, 5.0f},
-        .position   = {20.0f, 20.0f, 20.0f},
+        .position   = {0.0f, 2.0f, 5.0f},
+        // .position   = {20.0f, 20.0f, 20.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -295,7 +280,7 @@ int main()
 
     /* record one time commands for compute buffer */
     if (!vk_rec_compute()) return 1;
-        size_t group_x = ceil(ssbos.items[0].count / 128);
+        size_t group_x = ceil(ssbos.items[0].count / 256);
         vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 1, 1);
         vk_compute_pl_barrier();
         vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 2048 / 16, 2048 / 16, 1);
@@ -303,6 +288,7 @@ int main()
 
     /* game loop */
     while (!window_should_close()) {
+        log_fps();
         update_camera_free(&camera);
 
         vk_submit_compute();
@@ -332,7 +318,7 @@ int main()
         begin_mode_3d(camera);
             vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
             rotate_y(get_time() * 0.5);
-            if (!update_ubo(camera)) return 1;
+            if (!update_ubo()) return 1;
         end_mode_3d();
         end_drawing();
 

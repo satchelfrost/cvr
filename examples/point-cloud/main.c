@@ -3,7 +3,7 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define NUM_POINTS 1000000
+#define NUM_POINTS 10000000
 
 typedef struct {
     float x, y, z;
@@ -64,7 +64,7 @@ int main()
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
-    set_target_fps(60);
+    // set_target_fps(60);
     Camera camera = {
         .position   = {0.0f, 2.0f, 5.0f},
         .up         = {0.0f, 1.0f, 0.0f},
