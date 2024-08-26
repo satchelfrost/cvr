@@ -8,7 +8,6 @@ struct Vertex {
 };
 
 layout(binding = 0) uniform uniform_data {
-   // ivec2 img_size;
     mat4 mvp;
 } ubo;
 
@@ -16,7 +15,7 @@ layout(std140, binding = 1) buffer vert_data {
    Vertex vertices[ ];
 };
 
-layout(std140, binding = 2) buffer frame_data {
+layout(std430, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 
@@ -40,6 +39,5 @@ void main()
         color = vec4(unpackUnorm4x8(tmp_color));
 
     imageStore(out_img, pixel_coords, color);
-    frame_buff[pixel_id] = 0xffffffffff000010UL; // LOL demon color
-    //frame_buff[pixel_id] = 0xffffffffff000000UL;
+    frame_buff[pixel_id] = 0xffffffffff000010UL;
 }

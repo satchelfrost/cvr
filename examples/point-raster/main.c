@@ -4,7 +4,7 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define NUM_POINTS 10000000
+#define NUM_POINTS 1000000
 
 typedef unsigned int uint;
 typedef struct {
@@ -29,8 +29,6 @@ typedef struct {
 } Frame_Buffer;
 
 typedef struct {
-    // int img_width;
-    // int img_height;
     float16 mvp;
 } Point_Cloud_Uniform;
 
@@ -63,9 +61,7 @@ float rand_float()
 
 uint color_to_uint(Color color)
 {
-    // return (((uint)color.r << 24) | ((uint)color.g << 16) | ((uint)color.b << 8) | (uint)color.a);
     return (((uint)color.a << 24) | ((uint)color.b << 16) | ((uint)color.g << 8) | (uint)color.r);
-    // return (((uint)color.a << 24) | ((uint)color.r << 16) | ((uint)color.g << 8) | (uint)color.b);
 }
 
 Point_Cloud gen_points()
@@ -101,14 +97,9 @@ Point_Cloud gen_points()
 
 Frame_Buffer alloc_frame_buff()
 {
-    size_t buff_count = 2 * 2048 * 2048; // Shouldn't have to multiply by two
+    size_t buff_count = 1 * 2048 * 2048;
     size_t buff_size  = sizeof(uint64_t) * buff_count;
     uint64_t *data = malloc(buff_size);
-
-    for (size_t i = 0; i < buff_count; i++) {
-        data[i] = 0xffffffffff003030;
-        // data[i] = 0;
-    }
 
     Frame_Buffer frame_buff = {
         .buff = {
@@ -124,10 +115,6 @@ Frame_Buffer alloc_frame_buff()
 bool update_ubo()
 {
     if (!get_mvp_float16(&uniform.mvp)) return false;
-    // Window_Size win_size = get_window_size();
-    // uniform.img_width = win_size.width;
-    // uniform.img_height = win_size.height;
-
     memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
     return true;
 }
@@ -321,14 +308,6 @@ int main()
             if (!update_ubo()) return 1;
         end_mode_3d();
         end_drawing();
-
-        // begin_drawing(BLACK);
-        // begin_mode_3d(camera);
-        //     vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
-        //     rotate_y(get_time() * 0.5);
-        //     // if (!update_ubo()) return 1;;
-        // end_mode_3d();
-        // end_drawing();
     }
 
     wait_idle();
