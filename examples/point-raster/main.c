@@ -235,7 +235,6 @@ int main()
     // set_target_fps(60);
     Camera camera = {
         .position   = {0.0f, 2.0f, 5.0f},
-        // .position   = {20.0f, 20.0f, 20.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -252,7 +251,7 @@ int main()
     storage_tex.img.extent.height = 2048;
     if (!vk_create_storage_img(&storage_tex)) return 1;
 
-    // /* setup descriptors */
+    /* setup descriptors */
     if (!setup_ds_layouts()) return 1;
     if (!setup_ds_pool())    return 1;
     if (!setup_ds_sets())    return 1;

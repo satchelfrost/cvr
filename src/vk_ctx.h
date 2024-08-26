@@ -2894,6 +2894,7 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size)
             return false;
         }
     } else {
+        // size == 0 means copy the entire src to dst
         if (dst_buff.size < src_buff.size) {
             nob_log(NOB_ERROR, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
             return false;
