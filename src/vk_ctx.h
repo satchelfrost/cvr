@@ -202,7 +202,7 @@ bool vk_render_pass_init();
 bool vk_frame_buffs_init();
 bool vk_recreate_swapchain();
 bool vk_depth_init();
-void cleanup_pipeline(VkPipeline pipeline, VkPipelineLayout pl_layout);
+void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout);
 bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 
@@ -1152,7 +1152,7 @@ defer:
     return result;
 }
 
-void cleanup_pipeline(VkPipeline pipeline, VkPipelineLayout pl_layout)
+void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout)
 {
     vkDestroyPipeline(ctx.device, pipeline, NULL);
     vkDestroyPipelineLayout(ctx.device, pl_layout, NULL);

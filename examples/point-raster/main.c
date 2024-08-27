@@ -4,7 +4,10 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define NUM_POINTS 1000000
+#define MAX_POINTS 100000000 // 100 million
+#define MIN_POINTS 100000    // 100 thousand
+#define FRAME_BUFF_SZ 2048
+#define MAX_FPS_REC 1000
 
 typedef unsigned int uint;
 typedef struct {
@@ -16,12 +19,19 @@ typedef struct {
     Point_Vert *items;
     size_t count;
     size_t capacity;
-} Vertices;
+    Vk_Buffer buff;
+    bool pending_change;
+    const size_t max;
+    const size_t min;
+} Point_Cloud;
 
 typedef struct {
-    Vk_Buffer buff;
-    void *data;
-} Point_Cloud;
+    size_t *items;
+    size_t count;
+    size_t capacity;
+    const size_t max;
+    bool collecting;
+} FPS_Record;
 
 typedef struct {
     Vk_Buffer buff;
@@ -32,48 +42,33 @@ typedef struct {
     float16 mvp;
 } Point_Cloud_Uniform;
 
-/* state we must manage */
-Point_Cloud_Uniform uniform = {0};
-UBO ubo = {
-    .buff = {.count = 1, .size = sizeof(uniform)},
-    .data = &uniform,
-};
-SSBO_Set ssbos = {0};
-VkDescriptorSetLayout render_ds_layout;
-VkDescriptorSetLayout resolve_ds_layout;
-VkDescriptorSetLayout sst_ds_layout; // screen space triangle
-VkPipelineLayout render_pl_layout;
-VkPipelineLayout resolve_pl_layout;
-VkPipelineLayout sst_pl_layout;
-VkPipeline render_pl; // compute render
-VkPipeline resolve_pl;
-VkPipeline sst_pl;
+/* Vulkan state */
+VkDescriptorSetLayout cs_render_ds_layout;
+VkDescriptorSetLayout cs_resolve_ds_layout;
+VkDescriptorSetLayout gfx_ds_layout;
+VkPipelineLayout cs_render_pl_layout;
+VkPipelineLayout cs_resolve_pl_layout;
+VkPipelineLayout gfx_pl_layout;
+VkPipeline cs_render_pl;
+VkPipeline cs_resolve_pl;
+VkPipeline gfx_pl;
 VkDescriptorPool pool;
-Vk_Texture storage_tex = {0};
+Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
 
 typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_TEST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
-float rand_float()
+void gen_points(size_t num_points, Point_Cloud *pc)
 {
-    return (float)rand() / RAND_MAX;
-}
+    /* reset the point count to zero, but leave capacity allocated */
+    pc->count = 0;
 
-uint color_to_uint(Color color)
-{
-    return (((uint)color.a << 24) | ((uint)color.b << 16) | ((uint)color.g << 8) | (uint)color.r);
-}
-
-Point_Cloud gen_points()
-{
-    Vertices verts = {0};
-    for (size_t i = 0; i < NUM_POINTS; i++) {
-        float theta = PI * rand_float();
-        float phi   = 2 * PI * rand_float();
-        float r     = 10.0f * rand_float();
+    for (size_t i = 0; i < num_points; i++) {
+        float theta = PI * rand() / RAND_MAX;
+        float phi   = 2.0f * PI * rand() / RAND_MAX;
+        float r     = 10.0f * rand() / RAND_MAX;
         Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
-        uint uint_color = color_to_uint(color);
-        //uint uint_color = color_to_uint(MAGENTA);
+        uint uint_color = (uint)color.a << 24 | (uint)color.b << 16 | (uint)color.g << 8  | (uint)color.r;
         Point_Vert vert = {
             .x = r * sin(theta) * cos(phi),
             .y = r * sin(theta) * sin(phi),
@@ -81,49 +76,20 @@ Point_Cloud gen_points()
             .color = uint_color,
         };
 
-        nob_da_append(&verts, vert);
+        nob_da_append(pc, vert);
     }
 
-    Point_Cloud point_cloud = {
-        .buff = {
-            .count = verts.count,
-            .size  = verts.count * sizeof(*verts.items),
-        },
-        .data = verts.items,
-    };
-
-    return point_cloud;
+    pc->buff.count = pc->count;
+    pc->buff.size  = pc->count * sizeof(*pc->items);
 }
 
 Frame_Buffer alloc_frame_buff()
 {
-    size_t buff_count = 1 * 2048 * 2048;
-    size_t buff_size  = sizeof(uint64_t) * buff_count;
-    uint64_t *data = malloc(buff_size);
-
-    Frame_Buffer frame_buff = {
-        .buff = {
-            .size = buff_size,
-            .count = buff_count,
-        },
-        .data = data,
-    };
-
-    return frame_buff;
-}
-
-bool update_ubo()
-{
-    if (!get_mvp_float16(&uniform.mvp)) return false;
-    memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
-    return true;
-}
-
-bool init_compute_buffs(Vk_Buffer buff, void *data)
-{
-    if (!vk_comp_buff_staged_upload(&buff, data)) return false;
-    nob_da_append(&ssbos, buff);
-    return true;
+    Frame_Buffer frame = {0};
+    frame.buff.count = FRAME_BUFF_SZ * FRAME_BUFF_SZ;
+    frame.buff.size  = sizeof(uint64_t) * frame.buff.count;
+    frame.data = malloc(frame.buff.size);
+    return frame;
 }
 
 bool setup_ds_layouts()
@@ -143,11 +109,11 @@ bool setup_ds_layouts()
     };
 
     /* render.comp shader layout */
-    if (!vk_create_ds_layout(layout_ci, &render_ds_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &cs_render_ds_layout)) return false;
 
     /* resolve.comp shader layout */
     layout_ci.bindingCount = NOB_ARRAY_LEN(bindings);
-    if (!vk_create_ds_layout(layout_ci, &resolve_ds_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &cs_resolve_ds_layout)) return false;
 
     /* texture sampler in fragment shader */
     VkDescriptorSetLayoutBinding binding = {
@@ -155,7 +121,7 @@ bool setup_ds_layouts()
     };
     layout_ci.bindingCount = 1;
     layout_ci.pBindings = &binding;
-    if (!vk_create_ds_layout(layout_ci, &sst_ds_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &gfx_ds_layout)) return false;
 
     return true;
 }
@@ -173,7 +139,7 @@ bool setup_ds_pool()
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
-        .maxSets = 3, // render, resolve, and screen space triangle (sst)
+        .maxSets = 3, // compute shader render, compute shader resolve, and graphics
     };
 
     if (!vk_create_ds_pool(pool_ci, &pool)) return false;
@@ -181,26 +147,26 @@ bool setup_ds_pool()
     return true;
 }
 
-bool setup_ds_sets()
+bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff)
 {
     /* allocate descriptor sets based on layouts */
-    VkDescriptorSetLayout layouts[] = {render_ds_layout, resolve_ds_layout, sst_ds_layout};
+    VkDescriptorSetLayout layouts[] = {cs_render_ds_layout, cs_resolve_ds_layout, gfx_ds_layout};
     size_t count = NOB_ARRAY_LEN(layouts);
     VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, count, pool)};
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
 
     /* update descriptor sets */
     VkDescriptorBufferInfo ubo_info = {
-        .buffer = ubo.buff.handle,
-        .range = ubo.buff.size,
+        .buffer = ubo.handle,
+        .range  = ubo.size,
     };
-    VkDescriptorBufferInfo ssbo0_info = {
-        .buffer = ssbos.items[0].handle,
-        .range = ssbos.items[0].size,
+    VkDescriptorBufferInfo pc_info = {
+        .buffer = point_cloud.handle,
+        .range  = point_cloud.size,
     };
-    VkDescriptorBufferInfo ssbo1_info = {
-        .buffer = ssbos.items[1].handle,
-        .range = ssbos.items[1].size,
+    VkDescriptorBufferInfo frame_buff_info = {
+        .buffer = frame_buff.handle,
+        .range  = frame_buff.size,
     };
     VkDescriptorImageInfo img_info = {
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -210,12 +176,12 @@ bool setup_ds_sets()
     VkWriteDescriptorSet writes[] = {
         /* render.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RENDER],  &ubo_info)},
-        {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &ssbo0_info)},
-        {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RENDER],  &ssbo1_info)},
+        {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)},
+        {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RENDER],  &frame_buff_info)},
         /* resolve.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RESOLVE], &ubo_info)},
-        {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo0_info)},
-        {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &ssbo1_info)},
+        {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &pc_info)},
+        {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &frame_buff_info)},
         {DS_WRITE_IMG (3, STORAGE_IMAGE,  ds_sets[DS_RESOLVE], &img_info)},
         /* default.frag */
         {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SST], &img_info)},
@@ -225,16 +191,39 @@ bool setup_ds_sets()
     return true;
 }
 
+bool build_compute_cmds(size_t point_cloud_count)
+{
+    size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
+    if (!vk_rec_compute()) return false;
+        group_x = ceil(point_cloud_count / 2048);
+        vk_compute2(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], group_x, group_y, group_z);
+        vk_compute_pl_barrier();
+        group_x = group_y = FRAME_BUFF_SZ / 16;
+        vk_compute2(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
+    if (!vk_end_rec_compute()) return false;
+
+    return true;
+}
+
 int main()
 {
-    Point_Cloud point_cloud = gen_points();
-    Frame_Buffer frame_buff = alloc_frame_buff();
+    Point_Cloud pc = {.min = MIN_POINTS, .max = MAX_POINTS};
+    Frame_Buffer frame = alloc_frame_buff();
+    Point_Cloud_Uniform uniform = {0};
+    UBO ubo = {
+        .buff = {.count = 1, .size = sizeof(uniform)},
+        .data = &uniform,
+    };
+    FPS_Record record = {.max = MAX_FPS_REC};
+
+    /* generate initial point cloud */
+    size_t num_points = MIN_POINTS;
+    gen_points(num_points, &pc);
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "compute based rasterization for a point cloud");
-    // set_target_fps(60);
     Camera camera = {
-        .position   = {0.0f, 2.0f, 5.0f},
+        .position   = {10.0f, 10.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -242,45 +231,95 @@ int main()
     };
 
     /* upload resources to GPU */
-    if (!init_compute_buffs(point_cloud.buff, point_cloud.data)) return 1;
-    if (!init_compute_buffs(frame_buff.buff, frame_buff.data)) return 1;
-    free(point_cloud.data);
-    free(frame_buff.data);
+    if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
+    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data)) return 1;
     if (!vk_ubo_init2(&ubo)) return 1;
-    storage_tex.img.extent.width  = 2048;
-    storage_tex.img.extent.height = 2048;
     if (!vk_create_storage_img(&storage_tex)) return 1;
 
     /* setup descriptors */
-    if (!setup_ds_layouts()) return 1;
-    if (!setup_ds_pool())    return 1;
-    if (!setup_ds_sets())    return 1;
+    if (!setup_ds_layouts())                           return 1;
+    if (!setup_ds_pool())                              return 1;
+    if (!setup_ds_sets(ubo.buff, pc.buff, frame.buff)) return 1;
 
     /* create pipelines */
-    if (!vk_pl_layout_init(render_ds_layout, &render_pl_layout))                        return 1;
-    if (!vk_compute_pl_init2("./res/render.comp.spv", render_pl_layout, &render_pl))    return 1;
-    if (!vk_pl_layout_init(resolve_ds_layout, &resolve_pl_layout))                      return 1;
-    if (!vk_compute_pl_init2("./res/resolve.comp.spv", resolve_pl_layout, &resolve_pl)) return 1;
-    if (!vk_pl_layout_init(sst_ds_layout, &sst_pl_layout))                              return 1;
-    if (!vk_basic_pl_init2(sst_pl_layout, &sst_pl))                                     return 1;
+    if (!vk_pl_layout_init(cs_render_ds_layout, &cs_render_pl_layout))                        return 1;
+    if (!vk_compute_pl_init2("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return 1;
+    if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                      return 1;
+    if (!vk_compute_pl_init2("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return 1;
+    if (!vk_pl_layout_init(gfx_ds_layout, &gfx_pl_layout))                                    return 1;
+    if (!vk_basic_pl_init2(gfx_pl_layout, &gfx_pl))                                           return 1;
 
-    /* record one time commands for compute buffer */
-    if (!vk_rec_compute()) return 1;
-        size_t group_x = ceil(ssbos.items[0].count / 256);
-        vk_compute2(render_pl, render_pl_layout, ds_sets[DS_RENDER], group_x, 1, 1);
-        vk_compute_pl_barrier();
-        vk_compute2(resolve_pl, resolve_pl_layout, ds_sets[DS_RESOLVE], 2048 / 16, 2048 / 16, 1);
-    if (!vk_end_rec_compute()) return 1;
+    /* record commands for compute buffer */
+    if (!build_compute_cmds(pc.count)) return 1;
 
     /* game loop */
     while (!window_should_close()) {
-        log_fps();
+        /* input */
         update_camera_free(&camera);
+        if (is_key_pressed(KEY_UP)) {
+            size_t new_count = num_points * 10;
+            if (new_count <= pc.max) {
+                nob_log(NOB_INFO, "pending point cloud change %zu -> %zu", num_points, new_count);
+                pc.pending_change = true;
+                num_points = new_count;
+            } else {
+                nob_log(NOB_INFO, "max point count reached");
+            }
+        }
+        if (is_key_pressed(KEY_DOWN)) {
+            size_t new_count = num_points / 10;
+            if (new_count >= pc.min) {
+                nob_log(NOB_INFO, "pending point cloud change %zu -> %zu", num_points, new_count);
+                pc.pending_change = true;
+                num_points = new_count;
+            } else {
+                nob_log(NOB_INFO, "min point count reached");
+            }
+        }
+        if (is_key_pressed(KEY_R)) record.collecting = true;
 
-        vk_submit_compute();
+        /* re-upload point cloud if we've changed point cloud size */
+        if (pc.pending_change) {
+            /* destroy old point cloud buffer and generate new points */
+            wait_idle();
+            vk_buff_destroy(pc.buff);
+            gen_points(num_points, &pc);
+
+            /* upload new buffer and update descriptor sets*/
+            if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
+            VkDescriptorBufferInfo pc_info = {.buffer = pc.buff.handle, .range = pc.buff.size};
+            VkWriteDescriptorSet writes[] = {
+                {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)},
+                {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &pc_info)},
+            };
+            vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+
+            /* rebuild compute commands */
+            if (!build_compute_cmds(pc.count)) return 1;
+
+            pc.pending_change = false;
+            nob_log(NOB_INFO, "new point count %zu", pc.count);
+        }
+
+        /* collect the frame rate */
+        if (record.collecting) {
+            nob_da_append(&record, get_fps());
+            if (record.count >= record.max) {
+                /* print results and reset */
+                size_t sum = 0;
+                for (size_t i = 0; i < record.count; i++) sum += record.items[i];
+                float ave = (float) sum / record.count;
+                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
+                record.count = 0;
+                record.collecting = false;
+            }
+        }
+
+        /* submit compute commands */
+        if (!vk_submit_compute()) return 1;
 
         begin_drawing2(); // used to update time
-        vk_begin_drawing();
+        if (!vk_begin_drawing()) return 1;
         /* create a barrier to ensure compute shaders are done before sampling */
         VkImageMemoryBarrier barrier = {
            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -302,24 +341,27 @@ int main()
         vk_pl_barrier(barrier);
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
-            vk_gfx(sst_pl, sst_pl_layout, ds_sets[DS_SST]);
+            vk_gfx(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
             rotate_y(get_time() * 0.5);
-            if (!update_ubo()) return 1;
+            if (get_mvp_float16(&uniform.mvp)) memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
+            else return 1;
         end_mode_3d();
         end_drawing();
     }
 
     wait_idle();
-    vk_buff_destroy(ssbos.items[0]);
-    vk_buff_destroy(ssbos.items[1]);
+    free(pc.items);
+    free(frame.data);
+    vk_buff_destroy(pc.buff);
+    vk_buff_destroy(frame.buff);
     vk_buff_destroy(ubo.buff);
     vk_destroy_ds_pool(pool);
-    vk_destroy_ds_layout(render_ds_layout);
-    vk_destroy_ds_layout(resolve_ds_layout);
-    vk_destroy_ds_layout(sst_ds_layout);
-    cleanup_pipeline(render_pl, render_pl_layout); // TODO: maybe vk_destroy_pl_res()?
-    cleanup_pipeline(resolve_pl, resolve_pl_layout);
-    cleanup_pipeline(sst_pl, sst_pl_layout);
+    vk_destroy_ds_layout(cs_render_ds_layout);
+    vk_destroy_ds_layout(cs_resolve_ds_layout);
+    vk_destroy_ds_layout(gfx_ds_layout);
+    vk_destroy_pl_res(cs_render_pl, cs_render_pl_layout);
+    vk_destroy_pl_res(cs_resolve_pl, cs_resolve_pl_layout);
+    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     vk_unload_texture2(storage_tex);
     close_window();
     return 0;
