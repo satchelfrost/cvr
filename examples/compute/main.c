@@ -147,7 +147,6 @@ int main()
     if (!vk_rec_compute()) return 1;
         /* +1 in case PARTICLE_COUNT is not a multiple of 256 */
         size_t group_x = PARTICLE_COUNT / 256 + 1;
-        nob_log(NOB_INFO, "groupX %zu", group_x);
         vk_compute(compute_pl, compute_pl_layout, compute_ds, group_x, 1, 1);
     if (!vk_end_rec_compute()) return 1;
 
