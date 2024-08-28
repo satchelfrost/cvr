@@ -80,16 +80,6 @@ defer:
     return result;
 }
 
-void log_fps()
-{
-    static int fps = -1;
-    int curr_fps = get_fps();
-    if (curr_fps != fps) {
-        nob_log(NOB_INFO, "FPS %d", curr_fps);
-        fps = curr_fps;
-    }
-}
-
 bool load_points(const char *name, Point_Cloud *point_cloud)
 {
     bool result = true;
@@ -248,8 +238,8 @@ bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Po
             four_cameras[i].up
         );
         Matrix proj = get_proj(four_cameras[i]);
-        Matrix viewProj = MatrixMultiply(view, proj);
-        mvps[i] = MatrixMultiply(model, viewProj);
+        Matrix view_proj = MatrixMultiply(view, proj);
+        mvps[i] = MatrixMultiply(model, view_proj);
     }
 
     for (size_t i = 0; i < 4; i++)

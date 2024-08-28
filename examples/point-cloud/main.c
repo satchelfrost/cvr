@@ -3,7 +3,9 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define NUM_POINTS 1000000
+#define MAX_POINTS  100000000 // 100 million
+#define MIN_POINTS  100000    // 100 thousand
+#define MAX_FPS_REC 1000
 
 typedef struct {
     float x, y, z;
@@ -14,36 +16,30 @@ typedef struct {
     Point_Vert *items;
     size_t count;
     size_t capacity;
-} Vertices;
-
-typedef struct {
-    Vertices verts;
     Buffer buff;
     size_t id;
+    bool pending_change;
+    const size_t max;
+    const size_t min;
 } Point_Cloud;
 
-void log_fps()
-{
-    static int fps = -1;
-    int curr_fps = get_fps();
-    if (curr_fps != fps) {
-        nob_log(NOB_INFO, "FPS %d", curr_fps);
-        fps = curr_fps;
-    }
-}
+typedef struct {
+    size_t *items;
+    size_t count;
+    size_t capacity;
+    const size_t max;
+    bool collecting;
+} FPS_Record;
 
-float rand_float()
+void gen_points(size_t num_points, Point_Cloud *pc)
 {
-    return (float)rand() / RAND_MAX;
-}
+    /* reset the point count to zero, but leave capacity allocated */
+    pc->count = 0;
 
-Point_Cloud gen_points()
-{
-    Vertices verts = {0};
-    for (size_t i = 0; i < NUM_POINTS; i++) {
-        float theta = PI * rand_float();
-        float phi   = 2 * PI * rand_float();
-        float r     = 10.0f * rand_float();
+    for (size_t i = 0; i < num_points; i++) {
+        float theta = PI * rand() / RAND_MAX;
+        float phi   = 2.0f * PI * rand() / RAND_MAX;
+        float r     = 10.0f * rand() / RAND_MAX;
         Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
         Point_Vert vert = {
             .x = r * sin(theta) * cos(phi),
@@ -55,28 +51,26 @@ Point_Cloud gen_points()
             .a = 255,
         };
 
-        nob_da_append(&verts, vert);
+        nob_da_append(pc, vert);
     }
 
-    Point_Cloud point_cloud = {
-        .buff.items = verts.items,
-        .buff.count = verts.count,
-        .buff.size  = verts.count * sizeof(*verts.items),
-        .verts = verts,
-    };
-
-    return point_cloud;
+    pc->buff.items = pc->items;
+    pc->buff.count = pc->count;
+    pc->buff.size  = pc->count * sizeof(*pc->items);
 }
 
 int main()
 {
-    Point_Cloud point_cloud = gen_points();
+    /* generate a point cloud */
+    size_t num_points = MIN_POINTS;
+    Point_Cloud pc = {.min = MIN_POINTS, .max = MAX_POINTS};
+    gen_points(num_points, &pc);
+    FPS_Record record = {.max = MAX_FPS_REC};
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "point cloud");
-    set_target_fps(60);
     Camera camera = {
-        .position   = {0.0f, 2.0f, 5.0f},
+        .position   = {10.0f, 10.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .fovy       = 45.0f,
@@ -84,22 +78,54 @@ int main()
     };
 
     /* upload resources to GPU */
-    if (!upload_point_cloud(point_cloud.buff, &point_cloud.id)) return 1;
-    nob_da_free(point_cloud.verts);
+    if (!upload_point_cloud(pc.buff, &pc.id)) return 1;
 
     while (!window_should_close()) {
-        log_fps();
+        /* input */
         update_camera_free(&camera);
+        if (is_key_pressed(KEY_UP)) {
+            num_points = (num_points * 10 > pc.max) ? pc.max : num_points * 10;
+            pc.pending_change = true;
+        }
+        if (is_key_pressed(KEY_DOWN)) {
+            num_points = (num_points / 10 < pc.min) ? pc.min : num_points / 10;
+            pc.pending_change = true;
+        }
+        if (is_key_pressed(KEY_R)) record.collecting = true;
 
+        /* upload point cloud if we've changed points */
+        if (pc.pending_change) {
+            destroy_point_cloud(pc.id);
+            gen_points(num_points, &pc);
+            if (!upload_point_cloud(pc.buff, &pc.id)) return 1;
+            pc.pending_change = false;
+        }
+
+        /* collect the frame rate */
+        if (record.collecting) {
+            nob_da_append(&record, get_fps());
+            if (record.count >= record.max) {
+                /* print results and reset */
+                size_t sum = 0;
+                for (size_t i = 0; i < record.count; i++) sum += record.items[i];
+                float ave = (float) sum / record.count;
+                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
+                record.count = 0;
+                record.collecting = false;
+            }
+        }
+
+        /* drawing */
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
-            if (!draw_points(point_cloud.id, EXAMPLE_POINT_CLOUD)) return 1;
+            if (!draw_points(pc.id, EXAMPLE_POINT_CLOUD)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
-    destroy_point_cloud(point_cloud.id);
+    destroy_point_cloud(pc.id);
+    nob_da_free(pc);
     close_window();
     return 0;
 }
