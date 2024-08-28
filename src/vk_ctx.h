@@ -208,7 +208,7 @@ bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, Vk
 
 /* general ubo initializer */
 bool vk_ubo_init(UBO ubo, Descriptor_Type type);
-bool vk_ubo_init2(UBO *ubo);
+bool vk_ubo_init2(Vk_Buffer *buff);
 bool vk_ubo_descriptor_set_layout_init(VkShaderStageFlags flags, Descriptor_Type ds_type);
 bool vk_ubo_descriptor_pool_init(Descriptor_Type ds_type);
 bool vk_ubo_descriptor_set_init(Descriptor_Type ds_type);
@@ -225,13 +225,10 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 
-void vk_compute(Descriptor_Type ds_type); // TDOD: get rid of this after porting old compute example
-bool vk_begin_compute();                  // TODO: get rid of this after porting old compute example
-bool vk_end_compute();                    // TODO: get rid of this after porting old compute example
 bool vk_rec_compute();
 bool vk_submit_compute();
 bool vk_end_rec_compute();
-void vk_compute2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
+void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void vk_compute_pl_barrier();
 void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
@@ -1360,94 +1357,7 @@ defer:
     return result;
 }
 
-void vk_compute(Descriptor_Type ds_type)
-{
-    Vk_Pipeline_Set pipeline_set = ctx.compute_pl_sets[ds_type];
-    vkCmdBindPipeline(
-        cmd_man.compute_buff,
-        VK_PIPELINE_BIND_POINT_COMPUTE,
-        pipeline_set.items[0]
-    );
-
-    vkCmdBindDescriptorSets(
-        cmd_man.compute_buff,
-        VK_PIPELINE_BIND_POINT_COMPUTE,
-        ctx.compute_pl_layout_sets[ds_type].items[0], 0, 1,
-        &ctx.ubos[ds_type].descriptor_set,
-        0, NULL
-    );
-
-    assert(ctx.ssbo_sets[ds_type].count && "no compute buffers");
-
-    vkCmdBindDescriptorSets(
-        cmd_man.compute_buff,
-        VK_PIPELINE_BIND_POINT_COMPUTE,
-        ctx.compute_pl_layout_sets[ds_type].items[0], 1, 1,
-        &ctx.ssbo_sets[ds_type].descriptor_set,
-        0, NULL
-    );
-
-    float k_size = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? 128 : 256;
-    uint32_t group_x = ceil(ctx.ssbo_sets[ds_type].items[0].count / k_size);
-
-    vkCmdDispatch(cmd_man.compute_buff, group_x, 1, 1);
-
-    /* resolve pipeline */
-    if (ds_type == DS_TYPE_COMPUTE_RASTERIZER) {
-
-        /* barrier */
-        VkMemoryBarrier2KHR barrier = {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
-            .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR,
-            .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR
-        };
-
-        VkDependencyInfo dependency = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .memoryBarrierCount = 1,
-            .pMemoryBarriers = &barrier,
-        };
-
-        vkCmdPipelineBarrier2(cmd_man.compute_buff, &dependency);
-
-        /* bind to resolve pipeline */
-        vkCmdBindPipeline(
-            cmd_man.compute_buff,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            pipeline_set.items[1]
-        );
-
-        /* resolve descriptor sets */
-        vkCmdBindDescriptorSets(
-            cmd_man.compute_buff,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            ctx.compute_pl_layout_sets[ds_type].items[1], 0, 1,
-            &ctx.ubos[ds_type].descriptor_set,
-            0, NULL
-        );
-        vkCmdBindDescriptorSets(
-            cmd_man.compute_buff,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            ctx.compute_pl_layout_sets[ds_type].items[1], 1, 1,
-            &ctx.ssbo_sets[ds_type].descriptor_set,
-            0, NULL
-        );
-        vkCmdBindDescriptorSets(
-            cmd_man.compute_buff,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            ctx.compute_pl_layout_sets[ds_type].items[1], 2, 1,
-            &ctx.texture_sets[ds_type].descriptor_set,
-            0, NULL
-        );
-
-        /* dispatch */
-        vkCmdDispatch(cmd_man.compute_buff, 1600 / 16, 900 / 16, 1);
-    }
-}
-
-void vk_compute2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
+void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
 {
     vkCmdBindPipeline(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
     vkCmdBindDescriptorSets(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl_layout, 0, 1, &ds, 0, NULL);
@@ -1512,8 +1422,6 @@ bool vk_submit_compute()
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.compute_buff,
-        // .signalSemaphoreCount = 1,
-        // .pSignalSemaphores = &cmd_man.compute_fin_sem,
     };
 
     res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
@@ -1699,69 +1607,6 @@ bool vk_begin_drawing()
     return true;
 }
 
-bool vk_begin_compute()
-{
-    bool result = true;
-
-    VkResult res = vkWaitForFences(
-        ctx.device, 1, &cmd_man.compute_fence, VK_TRUE, UINT64_MAX
-    );
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed waiting for compute fence");
-        nob_return_defer(false);
-    }
-    res = vkResetFences(ctx.device, 1, &cmd_man.compute_fence);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed resetting compute fence");
-        nob_return_defer(false);
-    }
-    res = vkResetCommandBuffer(cmd_man.compute_buff, 0);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed resetting compute command buffer");
-        nob_return_defer(false);
-    }
-
-    VkCommandBufferBeginInfo begin_info = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    };
-    res = vkBeginCommandBuffer(cmd_man.compute_buff, &begin_info);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to begin compute command buffer");
-        nob_return_defer(false);
-    }
-
-defer:
-    return result;
-}
-
-bool vk_end_compute()
-{
-    bool result = true;
-
-    VkResult res = vkEndCommandBuffer(cmd_man.compute_buff);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to end compute pass");
-        nob_return_defer(false);
-    }
-
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd_man.compute_buff,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &cmd_man.compute_fin_sem,
-    };
-
-    res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit compute queue");
-        nob_return_defer(false);
-    }
-
-defer:
-    return result;
-}
-
 bool vk_end_drawing()
 {
     vkCmdEndRenderPass(cmd_man.gfx_buff);
@@ -1771,28 +1616,17 @@ bool vk_end_drawing()
         return false;
     }
 
-    VkSemaphore wait_sems[] = {cmd_man.compute_fin_sem, cmd_man.img_avail_sem};
-    VkPipelineStageFlags wait_stages[] = {
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.gfx_buff,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &cmd_man.img_avail_sem,
+        .pWaitDstStageMask = &wait_stage,
     };
-    if (ctx.pipelines[PIPELINE_COMPUTE]) {
-    // if (true) { // TODO: this breaks all other examples
-        submit.waitSemaphoreCount = 2;
-        submit.pWaitSemaphores = wait_sems;
-        submit.pWaitDstStageMask = wait_stages;
-    } else {
-        submit.waitSemaphoreCount = 1;
-        submit.pWaitSemaphores = &wait_sems[1];
-        submit.pWaitDstStageMask = &wait_stages[1];
-    }
 
     res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence);
     if (!VK_SUCCEEDED(res)) {
@@ -1893,9 +1727,8 @@ defer:
     return result;
 }
 
-bool vk_ubo_init2(UBO *ubo)
+bool vk_ubo_init2(Vk_Buffer *buff)
 {
-    Vk_Buffer *buff = &ubo->buff;
     bool result = vk_buff_init(
         buff,
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,

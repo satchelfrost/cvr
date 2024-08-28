@@ -80,17 +80,6 @@ defer:
     return result;
 }
 
-void log_fps()
-{
-    static int fps = -1;
-    int curr_fps = get_fps();
-    // int curr_fps = get_average_fps();
-    if (curr_fps != fps) {
-        nob_log(NOB_INFO, "FPS %d", curr_fps);
-        fps = curr_fps;
-    }
-}
-
 bool load_points(const char *name, Point_Cloud *point_cloud)
 {
     bool result = true;

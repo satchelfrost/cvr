@@ -282,7 +282,7 @@ void begin_drawing(Color color)
     vk_begin_render_pass(color);
 }
 
-void begin_drawing2()
+void start_timer()
 {
     cvr_time.curr   = get_time();
     cvr_time.update = cvr_time.curr - cvr_time.prev;
@@ -315,16 +315,6 @@ void end_drawing()
 
     poll_input_events();
     cvr_time.frame_count++;
-}
-
-void begin_compute()
-{
-    assert(vk_begin_compute() && "failed to begin compute");
-}
-
-void end_compute()
-{
-    assert(vk_end_compute() && "failed to end compute");
 }
 
 void push_matrix()
@@ -894,12 +884,6 @@ bool ssbo_init(Example example)
             nob_log(NOB_ERROR, "one compute buffer was expected for this example");
             return false;
         }
-    } else if (example == EXAMPLE_COMPUTE_RASTERIZER) {
-        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
-        if (ctx.ssbo_sets[ds_type].count != 2) {
-            nob_log(NOB_ERROR, "two compute buffers were expected for this example");
-            return false;
-        }
     } else {
         nob_log(NOB_ERROR, "example %d is not supported for ssbo initialization", example);
         return false;
@@ -984,34 +968,6 @@ void destroy_compute_buff(size_t id, Example example)
 
     if (!found)
         nob_log(NOB_WARNING, "compute buffer %zu does not exist cannot destroy", id);
-}
-
-bool compute(Example example)
-{
-    bool result = true;
-
-    Descriptor_Type ds_type;
-    switch (example) {
-    case EXAMPLE_COMPUTE:
-        ds_type = DS_TYPE_COMPUTE;
-        break;
-    case EXAMPLE_COMPUTE_RASTERIZER:
-        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
-        break;
-    default:
-        nob_log(NOB_ERROR, "unrecognized example %d for compute", example);
-        nob_return_defer(false);
-    }
-
-    if (!ctx.compute_pl_sets[ds_type].items) {
-        if (!vk_compute_pl_init(ds_type))
-            nob_return_defer(false);
-    }
-
-    vk_compute(ds_type);
-
-defer:
-    return result;
 }
 
 bool draw_points(size_t vtx_id, Example example)
