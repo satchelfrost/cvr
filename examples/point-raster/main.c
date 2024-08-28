@@ -7,7 +7,9 @@
 #define MAX_POINTS 100000000 // 100 million
 #define MIN_POINTS 100000    // 100 thousand
 #define FRAME_BUFF_SZ 2048
-#define MAX_FPS_REC 1000
+#define MAX_FPS_REC 100
+#define SUBGROUP_SZ 1024
+#define NUM_BATCHES 4
 
 typedef unsigned int uint;
 typedef struct {
@@ -67,11 +69,29 @@ void gen_points(size_t num_points, Point_Cloud *pc)
     /* reset the point count to zero, but leave capacity allocated */
     pc->count = 0;
 
-    for (size_t i = 0; i < num_points; i++) {
-        float theta = PI * rand() / RAND_MAX;
+    // left hemisphere - multi-color
+    for (size_t i = 0; i < num_points / 2; i++) {
+        float theta = PI * ((float)rand() / RAND_MAX / 2.0f);
         float phi   = 2.0f * PI * rand() / RAND_MAX;
         float r     = 10.0f * rand() / RAND_MAX;
         Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
+        uint uint_color = (uint)color.a << 24 | (uint)color.b << 16 | (uint)color.g << 8  | (uint)color.r;
+        Point_Vert vert = {
+            .x = r * sin(theta) * cos(phi),
+            .y = r * sin(theta) * sin(phi),
+            .z = r * cos(theta),
+            .color = uint_color,
+        };
+
+        nob_da_append(pc, vert);
+    }
+
+    // right hemisphere - magenta
+    for (size_t i = num_points / 2; i < num_points; i++) {
+        float theta = PI * ((float)rand() / RAND_MAX / 2.0f + 0.5f);
+        float phi   = 2.0f * PI * rand() / RAND_MAX;
+        float r     = 10.0f * rand() / RAND_MAX;
+        Color color = MAGENTA;
         uint uint_color = (uint)color.a << 24 | (uint)color.b << 16 | (uint)color.g << 8  | (uint)color.r;
         Point_Vert vert = {
             .x = r * sin(theta) * cos(phi),
@@ -200,13 +220,19 @@ bool build_compute_cmds(size_t point_cloud_count)
 {
     size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
     if (!vk_rec_compute()) return false;
-        group_x = point_cloud_count / 2048;
-        vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], group_x, group_y, group_z);
+        group_x = point_cloud_count / SUBGROUP_SZ + 1;
+        size_t batch_size = group_x / NUM_BATCHES;
+        for (size_t i = 0; i < NUM_BATCHES; i++) {
+            uint32_t offset = i * batch_size;
+            vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+            vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], batch_size, group_y, group_z);
+            nob_log(NOB_INFO, "Command for batch %zu recorded", i);
+        }
+
         vk_compute_pl_barrier();
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
     if (!vk_end_rec_compute()) return false;
-
     return true;
 }
 
@@ -298,18 +324,20 @@ int main()
     if (!setup_ds_sets(ubo.buff, pc.buff, frame.buff, storage_tex)) return 1;
 
     /* create pipelines */
-    if (!vk_pl_layout_init(cs_render_ds_layout, &cs_render_pl_layout))                        return 1;
-    if (!vk_compute_pl_init2("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return 1;
-    if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                      return 1;
-    if (!vk_compute_pl_init2("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return 1;
-    if (!vk_pl_layout_init(gfx_ds_layout, &gfx_pl_layout))                                    return 1;
-    if (!vk_basic_pl_init2(gfx_pl_layout, &gfx_pl))                                           return 1;
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(uint32_t)};
+    if (!vk_pl_layout_init2(cs_render_ds_layout, &cs_render_pl_layout, 1, &pk_range))        return 1;
+    if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return 1;
+    if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                     return 1;
+    if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return 1;
+    if (!vk_pl_layout_init(gfx_ds_layout, &gfx_pl_layout))                                   return 1;
+    if (!vk_basic_pl_init2(gfx_pl_layout, &gfx_pl))                                          return 1;
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(pc.count)) return 1;
 
     /* game loop */
     while (!window_should_close()) {
+        // log_fps();
         /* input */
         update_camera_free(&camera);
         if (is_key_pressed(KEY_UP)) {

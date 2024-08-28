@@ -3,6 +3,11 @@
 #extension GL_ARB_gpu_shader_int64 : enable
 #extension GL_EXT_shader_atomic_int64 : enable
 
+layout(push_constant) uniform constants
+{
+    uint index;
+} push_const;
+
 struct Vertex {
     float x, y, z;
     uint colors;
@@ -24,7 +29,7 @@ layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
 void main()
 {
-    Vertex vert = vertices[gl_GlobalInvocationID.x];
+    Vertex vert = vertices[gl_GlobalInvocationID.x + push_const.index * 1024];
     vec4 pos = ubo.mvp * vec4(vert.x, vert.y, vert.z, 1.0);
     vec3 ndc = pos.xyz / pos.w;
 

@@ -196,7 +196,7 @@ bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
 bool vk_basic_pl_init2(VkPipelineLayout pl_layout, VkPipeline *pl);
-bool vk_compute_pl_init(Descriptor_Type ds_type);
+bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
 bool vk_frame_buffs_init();
@@ -204,6 +204,7 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout);
+bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, size_t range_count, VkPushConstantRange *ranges);
 bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 
 /* general ubo initializer */
@@ -229,6 +230,7 @@ bool vk_rec_compute();
 bool vk_submit_compute();
 bool vk_end_rec_compute();
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
+void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value);
 void vk_compute_pl_barrier();
 void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
@@ -975,137 +977,6 @@ defer:
     return result;
 }
 
-bool vk_compute_pl_init(Descriptor_Type ds_type)
-{
-    bool result = true;
-
-    VkPipelineShaderStageCreateInfo shader_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-        .pName = "main",
-    };
-
-    switch (ds_type) {
-    case DS_TYPE_COMPUTE:
-        if (!vk_shader_mod_init("./res/default.comp.spv", &shader_ci.module))
-            nob_return_defer(false);
-        break;
-    case DS_TYPE_COMPUTE_RASTERIZER:
-        if (!vk_shader_mod_init("./res/render.comp.spv", &shader_ci.module))
-            nob_return_defer(false);
-        break;
-    default:
-        nob_log(NOB_ERROR, "descriptor type %d not supported for compute pipeline", ds_type);
-        nob_return_defer(false);
-    }
-
-    if (!ctx.ubos[ds_type].set_layout || !ctx.ssbo_sets[ds_type].set_layout) {
-        nob_log(NOB_ERROR, "set layouts for compute are null");
-        nob_return_defer(false);
-    }
-
-    Descriptor_Set_Layouts set_layouts = {0};
-    nob_da_append(&set_layouts, ctx.ubos[ds_type].set_layout);
-    nob_da_append(&set_layouts, ctx.ssbo_sets[ds_type].set_layout);
-
-    VkPipelineLayoutCreateInfo pipeline_layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = set_layouts.count,
-        .pSetLayouts = set_layouts.items,
-    };
-    VkPipelineLayout pl_layout;
-    VkResult res = vkCreatePipelineLayout(
-        ctx.device,
-        &pipeline_layout_ci,
-        NULL,
-        &pl_layout
-    );
-    nob_da_append(&ctx.compute_pl_layout_sets[ds_type], pl_layout);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create layout for compute pipeline");
-        nob_return_defer(false);
-    }
-
-    VkComputePipelineCreateInfo pipeline_ci = {
-        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .layout = pl_layout,
-        .stage = shader_ci,
-    };
-
-    VkPipeline pipeline;
-
-    res = vkCreateComputePipelines(
-        ctx.device,
-        VK_NULL_HANDLE,
-        1,
-        &pipeline_ci,
-        NULL,
-        &pipeline
-    );
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create compute pipeline");
-        nob_return_defer(false);
-    }
-    nob_da_append(&ctx.compute_pl_sets[ds_type], pipeline);
-
-    VkPipelineShaderStageCreateInfo resolve_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-        .pName = "main",
-    };
-    if (ds_type == DS_TYPE_COMPUTE_RASTERIZER) {
-        if (!vk_shader_mod_init("./res/resolve.comp.spv", &resolve_ci.module))
-            nob_return_defer(false);
-
-        /* add the storage image to the set layout */
-        if (!ctx.texture_sets[ds_type].count) {
-            nob_log(NOB_ERROR, "no texture sets available for compute rasterizer");
-            nob_return_defer(false);
-        }
-        nob_da_append(&set_layouts, ctx.texture_sets[ds_type].set_layout);
-        VkPipelineLayoutCreateInfo pipeline_layout_ci = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .setLayoutCount = set_layouts.count,
-            .pSetLayouts = set_layouts.items,
-        };
-
-        VkPipelineLayout comp_2_pl_layout;
-        VkResult res = vkCreatePipelineLayout(
-            ctx.device,
-            &pipeline_layout_ci,
-            NULL,
-            &comp_2_pl_layout
-        );
-        nob_da_append(&ctx.compute_pl_layout_sets[ds_type], comp_2_pl_layout);
-
-        VkPipeline comp_2_pl;
-        VkComputePipelineCreateInfo pipeline_ci = {
-            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-            .layout = comp_2_pl_layout,
-            .stage = resolve_ci,
-        };
-        res = vkCreateComputePipelines(
-            ctx.device,
-            VK_NULL_HANDLE,
-            1,
-            &pipeline_ci,
-            NULL,
-            &comp_2_pl
-        );
-        if (!VK_SUCCEEDED(res)) {
-            nob_log(NOB_ERROR, "failed to create compute pipeline");
-            nob_return_defer(false);
-        }
-        nob_da_append(&ctx.compute_pl_sets[ds_type], comp_2_pl);
-    }
-
-defer:
-    vkDestroyShaderModule(ctx.device, shader_ci.module, NULL);
-    if (ds_type == DS_TYPE_COMPUTE_RASTERIZER)
-        vkDestroyShaderModule(ctx.device, resolve_ci.module, NULL);
-    return result;
-}
-
 bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout)
 {
     VkPipelineLayoutCreateInfo ci = {
@@ -1122,7 +993,25 @@ bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout
     return true;
 }
 
-bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
+bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, size_t range_count, VkPushConstantRange *ranges)
+{
+    VkPipelineLayoutCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &layout,
+        .pushConstantRangeCount = range_count,
+        .pPushConstantRanges = ranges,
+    };
+    VkResult res = vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to create pipeline layout");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
 {
     bool result = true;
 
@@ -1362,6 +1251,12 @@ void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, s
     vkCmdBindPipeline(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
     vkCmdBindDescriptorSets(cmd_man.compute_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl_layout, 0, 1, &ds, 0, NULL);
     vkCmdDispatch(cmd_man.compute_buff, x, y, z);
+}
+
+void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value)
+{
+    VkCommandBuffer cmd_buff = (flags == VK_SHADER_STAGE_COMPUTE_BIT) ? cmd_man.compute_buff : cmd_man.gfx_buff;
+    vkCmdPushConstants(cmd_buff, pl_layout, flags, offset, size, value);
 }
 
 void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
