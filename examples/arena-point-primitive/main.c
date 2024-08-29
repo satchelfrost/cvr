@@ -123,10 +123,10 @@ int get_closest_camera(Camera *cameras, size_t count)
     int shortest_idx = -1;
     for (size_t i = 1; i < count; i++) {
         Vector3 cctv_pos = cameras[i].position;
-        float distSqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
-        if (distSqr < shortest) {
+        float dist_sqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        if (dist_sqr < shortest) {
             shortest_idx = i - 1;
-            shortest = distSqr;
+            shortest = dist_sqr;
         }
     }
     if (shortest_idx < 0) nob_log(NOB_ERROR, "Unknown camera index");

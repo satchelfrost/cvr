@@ -61,7 +61,7 @@ VkPipeline cs_resolve_pl;
 VkPipeline gfx_pl;
 VkDescriptorPool pool;
 
-typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_TEST, DS_COUNT} DS_SET;
+typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
 void gen_points(size_t num_points, Point_Cloud *pc)

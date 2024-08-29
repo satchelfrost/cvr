@@ -153,7 +153,7 @@ static Example examples[] = {
         .supported_targets[TARGET_LINUX] = true,
     },
     {
-        .name = "adv-point-cloud",
+        .name = "arena-point-primitive",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert",
@@ -198,9 +198,25 @@ static Example examples[] = {
                 "default.frag",
                 "render.comp",
                 "resolve.comp",
-                "test.comp",
             },
-            .count = 5,
+            .count = 4,
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+        .supported_targets[TARGET_LINUX] = true,
+    },
+    {
+        .name = "arena-point-raster",
+        .shaders = {
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "render.comp",
+                "resolve.comp",
+            },
+            .count = 4,
         },
         .c_files = {
             .names = default_c_file_names,

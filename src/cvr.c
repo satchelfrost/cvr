@@ -1012,11 +1012,8 @@ bool draw_points(size_t vtx_id, Example example)
 
 static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_offset)
 {
-    (void) window;
-    Vector2 offsets = {
-        .x = x_offset,
-        .y = y_offset
-    };
+    (void)window;
+    Vector2 offsets = {.x = x_offset, .y = y_offset};
     mouse.curr_wheel_move = offsets;
 }
 

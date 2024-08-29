@@ -11,6 +11,13 @@
 #define SUBGROUP_SZ 1024     // Subgroup size for render.comp
 #define NUM_BATCHES 8        // Number of batches to dispatch
 
+#define read_attr(attr, sv)                   \
+    do {                                      \
+        memcpy(&attr, sv.data, sizeof(attr)); \
+        sv.data  += sizeof(attr);             \
+        sv.count -= sizeof(attr);             \
+    } while(0)
+
 typedef unsigned int uint;
 typedef struct {
     float x, y, z;
@@ -61,32 +68,55 @@ VkPipeline cs_resolve_pl;
 VkPipeline gfx_pl;
 VkDescriptorPool pool;
 
-typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_TEST, DS_COUNT} DS_SET;
+const char *point_cloud_files[] = {
+    "res/arena_5060224_f32.vtx",
+    "res/arena_50602232_f32.vtx",
+    // "res/arena_101204464_f32.vtx",
+    // "res/arena_506022320_f32.vtx",
+};
+
+typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
-void gen_points(size_t num_points, Point_Cloud *pc)
+bool load_points(const char *file, Point_Cloud *verts)
 {
-    /* reset the point count to zero, but leave capacity allocated */
-    pc->count = 0;
+    bool result = true;
 
-    for (size_t i = 0; i < num_points; i++) {
-        float theta = PI * rand() / RAND_MAX;
-        float phi   = 2.0f * PI * rand() / RAND_MAX;
-        float r     = 10.0f * rand() / RAND_MAX;
-        Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
-        uint uint_color = (uint)color.a << 24 | (uint)color.b << 16 | (uint)color.g << 8 | (uint)color.r;
+    /* reset count to zero in case we are loading a new point cloud */
+    verts->count = 0;
+
+    nob_log(NOB_INFO, "reading vtx file %s", file);
+    Nob_String_Builder sb = {0};
+    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
+
+    Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
+    size_t vtx_count = 0;
+    read_attr(vtx_count, sv);
+
+    for (size_t i = 0; i < vtx_count; i++) {
+        float x, y, z;
+        uint8_t r, g, b;
+        read_attr(x, sv);
+        read_attr(y, sv);
+        read_attr(z, sv);
+        read_attr(r, sv);
+        read_attr(g, sv);
+        read_attr(b, sv);
+
+        uint uint_color = (uint)255 << 24 | (uint)b << 16 | (uint)g << 8 | (uint)r;
         Point_Vert vert = {
-            .x = r * sin(theta) * cos(phi),
-            .y = r * sin(theta) * sin(phi),
-            .z = r * cos(theta),
+            .x = x, .y = y, .z = z,
             .color = uint_color,
         };
-
-        nob_da_append(pc, vert);
+        nob_da_append(verts, vert);
     }
 
-    pc->buff.count = pc->count;
-    pc->buff.size  = pc->count * sizeof(*pc->items);
+    verts->buff.count = vtx_count;
+    verts->buff.size = sizeof(Point_Vert) * vtx_count;
+
+defer:
+    nob_sb_free(sb);
+    return result;
 }
 
 Frame_Buffer alloc_frame_buff()
@@ -220,51 +250,6 @@ bool build_compute_cmds(size_t point_cloud_count)
     return true;
 }
 
-#define read_attr(attr, sv)                   \
-    do {                                      \
-        memcpy(&attr, sv.data, sizeof(attr)); \
-        sv.data  += sizeof(attr);             \
-        sv.count -= sizeof(attr);             \
-    } while(0)
-
-bool read_vtx(const char *file, Point_Cloud *verts)
-{
-    bool result = true;
-
-    nob_log(NOB_INFO, "reading vtx file %s", file);
-    Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
-
-    Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
-    size_t vtx_count = 0;
-    read_attr(vtx_count, sv);
-
-    for (size_t i = 0; i < vtx_count; i++) {
-        float x, y, z;
-        uint8_t r, g, b;
-        read_attr(x, sv);
-        read_attr(y, sv);
-        read_attr(z, sv);
-        read_attr(r, sv);
-        read_attr(g, sv);
-        read_attr(b, sv);
-
-        uint uint_color = (uint)255 << 24 | (uint)b << 16 | (uint)g << 8 | (uint)r;
-        Point_Vert vert = {
-            .x = x, .y = y, .z = z,
-            .color = uint_color,
-        };
-        nob_da_append(verts, vert);
-    }
-
-    verts->buff.count = vtx_count;
-    verts->buff.size = sizeof(Point_Vert) * vtx_count;
-
-defer:
-    nob_sb_free(sb);
-    return result;
-}
-
 int main()
 {
     Point_Cloud pc = {.min = MIN_POINTS, .max = MAX_POINTS};
@@ -272,23 +257,12 @@ int main()
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
-
-    // if (!read_vtx("res/arena_50602232_f32.vtx", &pc)) {
-    // if (!read_vtx("res/arena_63252790_f32.vtx", &pc)) {
-    // if (!read_vtx("res/arena_72288903_f32.vtx", &pc)) {
-    // if (!read_vtx("res/arena_101204464_f32.vtx", &pc)) {
-    // if (!read_vtx("res/arena_506022320_f32.vtx", &pc)) {
-    //     nob_log(NOB_ERROR, "failed to load point cloud");
-    //     nob_log(NOB_ERROR, "this example requires private data");
-    //     return 1;
-    // }
-
-    /* generate initial point cloud */
-    size_t num_points = MIN_POINTS;
-    gen_points(num_points, &pc);
+    int pc_idx = 0;
+    if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
+    if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
 
     /* initialize window and Vulkan */
-    init_window(1600, 900, "compute based rasterization for a point cloud");
+    init_window(1600, 900, "arena point cloud rasterization");
     Camera camera = {
         .position   = {10.0f, 10.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -325,20 +299,12 @@ int main()
         /* input */
         update_camera_free(&camera);
         if (is_key_pressed(KEY_UP)) {
-            if (num_points * 10 <= pc.max) {
-                pc.pending_change = true;
-                num_points = num_points * 10;
-            } else {
-                nob_log(NOB_INFO, "max point count reached");
-            }
+            pc_idx = (pc_idx + 1) % NOB_ARRAY_LEN(point_cloud_files);
+            pc.pending_change = true;
         }
         if (is_key_pressed(KEY_DOWN)) {
-            if (num_points / 10 >= pc.min) {
-                pc.pending_change = true;
-                num_points = num_points / 10;
-            } else {
-                nob_log(NOB_INFO, "min point count reached");
-            }
+            pc_idx = (pc_idx - 1 + NOB_ARRAY_LEN(point_cloud_files)) % NOB_ARRAY_LEN(point_cloud_files);
+            pc.pending_change = true;
         }
         if (is_key_pressed(KEY_R)) record.collecting = true;
 
@@ -347,7 +313,7 @@ int main()
             /* destroy old point cloud buffer and generate new points */
             wait_idle();
             vk_buff_destroy(pc.buff);
-            gen_points(num_points, &pc);
+            if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
 
             /* upload new buffer and update descriptor sets */
             if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
@@ -402,9 +368,8 @@ int main()
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
             vk_gfx(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-            // translate(0.0f, 0.0f, -100.0f);
-            // rotate_x(-PI / 2);
-            rotate_y(get_time() * 0.5);
+            translate(0.0f, 0.0f, -100.0f);
+            rotate_x(-PI / 2);
             if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
             else return 1;
         end_mode_3d();

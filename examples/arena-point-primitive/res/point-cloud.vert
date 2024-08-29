@@ -37,7 +37,8 @@ layout(location = 12) out int cam_order[4];
 
 void main()
 {
-    gl_PointSize = 3.0;
+    //gl_PointSize = 3.0;
+    gl_PointSize = 1.0;
     gl_Position = push_const.mvp * vec4(in_pos, 1.0);
     shader_mode = cameras.shader_mode;
     closest_cam_idx = cameras.idx;
