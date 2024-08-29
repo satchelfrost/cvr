@@ -8,8 +8,8 @@
 #define MIN_POINTS 100000    // 100 thousand
 #define FRAME_BUFF_SZ 2048
 #define MAX_FPS_REC 100
-#define SUBGROUP_SZ 1024
-#define NUM_BATCHES 4
+#define SUBGROUP_SZ 1024     // Subgroup size for render.comp
+#define NUM_BATCHES 8        // Number of batches to dispatch
 
 typedef unsigned int uint;
 typedef struct {
@@ -69,29 +69,11 @@ void gen_points(size_t num_points, Point_Cloud *pc)
     /* reset the point count to zero, but leave capacity allocated */
     pc->count = 0;
 
-    // left hemisphere - multi-color
-    for (size_t i = 0; i < num_points / 2; i++) {
-        float theta = PI * ((float)rand() / RAND_MAX / 2.0f);
+    for (size_t i = 0; i < num_points; i++) {
+        float theta = PI * rand() / RAND_MAX;
         float phi   = 2.0f * PI * rand() / RAND_MAX;
         float r     = 10.0f * rand() / RAND_MAX;
         Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
-        uint uint_color = (uint)color.a << 24 | (uint)color.b << 16 | (uint)color.g << 8  | (uint)color.r;
-        Point_Vert vert = {
-            .x = r * sin(theta) * cos(phi),
-            .y = r * sin(theta) * sin(phi),
-            .z = r * cos(theta),
-            .color = uint_color,
-        };
-
-        nob_da_append(pc, vert);
-    }
-
-    // right hemisphere - magenta
-    for (size_t i = num_points / 2; i < num_points; i++) {
-        float theta = PI * ((float)rand() / RAND_MAX / 2.0f + 0.5f);
-        float phi   = 2.0f * PI * rand() / RAND_MAX;
-        float r     = 10.0f * rand() / RAND_MAX;
-        Color color = MAGENTA;
         uint uint_color = (uint)color.a << 24 | (uint)color.b << 16 | (uint)color.g << 8  | (uint)color.r;
         Point_Vert vert = {
             .x = r * sin(theta) * cos(phi),
@@ -220,16 +202,18 @@ bool build_compute_cmds(size_t point_cloud_count)
 {
     size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
     if (!vk_rec_compute()) return false;
+        /* submit batches of points to render compute shader */
         group_x = point_cloud_count / SUBGROUP_SZ + 1;
         size_t batch_size = group_x / NUM_BATCHES;
         for (size_t i = 0; i < NUM_BATCHES; i++) {
-            uint32_t offset = i * batch_size;
+            uint32_t offset = i * batch_size * SUBGROUP_SZ;
             vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
             vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], batch_size, group_y, group_z);
-            nob_log(NOB_INFO, "Command for batch %zu recorded", i);
         }
 
         vk_compute_pl_barrier();
+
+        /* resolve the frame buffer */
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
     if (!vk_end_rec_compute()) return false;
@@ -293,6 +277,7 @@ int main()
     // if (!read_vtx("res/arena_63252790_f32.vtx", &pc)) {
     // if (!read_vtx("res/arena_72288903_f32.vtx", &pc)) {
     // if (!read_vtx("res/arena_101204464_f32.vtx", &pc)) {
+    // if (!read_vtx("res/arena_506022320_f32.vtx", &pc)) {
     //     nob_log(NOB_ERROR, "failed to load point cloud");
     //     nob_log(NOB_ERROR, "this example requires private data");
     //     return 1;
@@ -337,25 +322,20 @@ int main()
 
     /* game loop */
     while (!window_should_close()) {
-        // log_fps();
         /* input */
         update_camera_free(&camera);
         if (is_key_pressed(KEY_UP)) {
-            size_t new_count = num_points * 10;
-            if (new_count <= pc.max) {
-                nob_log(NOB_INFO, "pending point cloud change %zu -> %zu", num_points, new_count);
+            if (num_points * 10 <= pc.max) {
                 pc.pending_change = true;
-                num_points = new_count;
+                num_points = num_points * 10;
             } else {
                 nob_log(NOB_INFO, "max point count reached");
             }
         }
         if (is_key_pressed(KEY_DOWN)) {
-            size_t new_count = num_points / 10;
-            if (new_count >= pc.min) {
-                nob_log(NOB_INFO, "pending point cloud change %zu -> %zu", num_points, new_count);
+            if (num_points / 10 >= pc.min) {
                 pc.pending_change = true;
-                num_points = new_count;
+                num_points = num_points / 10;
             } else {
                 nob_log(NOB_INFO, "min point count reached");
             }
@@ -369,7 +349,7 @@ int main()
             vk_buff_destroy(pc.buff);
             gen_points(num_points, &pc);
 
-            /* upload new buffer and update descriptor sets*/
+            /* upload new buffer and update descriptor sets */
             if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
             VkDescriptorBufferInfo pc_info = {.buffer = pc.buff.handle, .range = pc.buff.size};
             VkWriteDescriptorSet write = {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)};
@@ -377,9 +357,7 @@ int main()
 
             /* rebuild compute commands */
             if (!build_compute_cmds(pc.count)) return 1;
-
             pc.pending_change = false;
-            nob_log(NOB_INFO, "new point count %zu", pc.count);
         }
 
         /* collect the frame rate */
@@ -424,7 +402,6 @@ int main()
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
             vk_gfx(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-            // rotate_z(PI);
             // translate(0.0f, 0.0f, -100.0f);
             // rotate_x(-PI / 2);
             rotate_y(get_time() * 0.5);

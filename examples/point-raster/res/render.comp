@@ -5,7 +5,7 @@
 
 layout(push_constant) uniform constants
 {
-    uint index;
+    uint offset;
 } push_const;
 
 struct Vertex {
@@ -29,7 +29,7 @@ layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
 void main()
 {
-    Vertex vert = vertices[gl_GlobalInvocationID.x + push_const.index * 1024];
+    Vertex vert = vertices[gl_GlobalInvocationID.x + push_const.offset];
     vec4 pos = ubo.mvp * vec4(vert.x, vert.y, vert.z, 1.0);
     vec3 ndc = pos.xyz / pos.w;
 

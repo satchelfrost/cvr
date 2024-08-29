@@ -84,12 +84,20 @@ int main()
         /* input */
         update_camera_free(&camera);
         if (is_key_pressed(KEY_UP)) {
-            num_points = (num_points * 10 > pc.max) ? pc.max : num_points * 10;
-            pc.pending_change = true;
+            if (num_points * 10 <= pc.max) {
+                pc.pending_change = true;
+                num_points = num_points * 10;
+            } else {
+                nob_log(NOB_INFO, "max point count reached");
+            }
         }
         if (is_key_pressed(KEY_DOWN)) {
-            num_points = (num_points / 10 < pc.min) ? pc.min : num_points / 10;
-            pc.pending_change = true;
+            if (num_points / 10 >= pc.min) {
+                pc.pending_change = true;
+                num_points = num_points / 10;
+            } else {
+                nob_log(NOB_INFO, "min point count reached");
+            }
         }
         if (is_key_pressed(KEY_R)) record.collecting = true;
 
