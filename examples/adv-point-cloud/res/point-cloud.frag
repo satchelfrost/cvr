@@ -18,6 +18,9 @@ vec4 tex_colors[4];
 
 void main()
 {
+    /* discard fragment that falls outside circle */
+    if (length(2 * gl_PointCoord - 1.0) > 1.0) discard;
+
     vec2 uv_0 = (ndcs[0].xy * 0.5) + 0.5;
     vec2 uv_1 = (ndcs[1].xy * 0.5) + 0.5;
     vec2 uv_2 = (ndcs[2].xy * 0.5) + 0.5;

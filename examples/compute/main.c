@@ -139,8 +139,8 @@ int main()
     if (!setup_ds(ubo, comp_buff)) return 1;
 
     /* setup pipelines */
-    if (!vk_pl_layout_init(compute_ds_layout, &compute_pl_layout))                      return 1;
-    if (!vk_compute_pl_init2("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return 1;
+    if (!vk_pl_layout_init(compute_ds_layout, &compute_pl_layout))                     return 1;
+    if (!vk_compute_pl_init("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return 1;
     if (!vk_basic_pl_init(PIPELINE_COMPUTE)) return 1;
 
     /* record compute commands */

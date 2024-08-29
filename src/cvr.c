@@ -272,21 +272,18 @@ static void wait_time(double seconds)
     while (get_time() < destination_time) {}
 }
 
-void begin_drawing(Color color)
-{
-    cvr_time.curr   = get_time();
-    cvr_time.update = cvr_time.curr - cvr_time.prev;
-    cvr_time.prev   = cvr_time.curr;
-
-    vk_begin_drawing();
-    vk_begin_render_pass(color);
-}
-
 void start_timer()
 {
     cvr_time.curr   = get_time();
     cvr_time.update = cvr_time.curr - cvr_time.prev;
     cvr_time.prev   = cvr_time.curr;
+}
+
+void begin_drawing(Color color)
+{
+    start_timer();
+    vk_begin_drawing();
+    vk_begin_render_pass(color);
 }
 
 void end_drawing()
@@ -972,48 +969,30 @@ void destroy_compute_buff(size_t id, Example example)
 
 bool draw_points(size_t vtx_id, Example example)
 {
-    bool result = true;
-
     switch (example) {
     case EXAMPLE_ADV_POINT_CLOUD:
         if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
             pc_sampler_init();
             if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
-                nob_return_defer(false);
+                return false;
         }
         break;
     case EXAMPLE_POINT_CLOUD:
         if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
             if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
-                nob_return_defer(false);
+                return false;
         break; 
-    case EXAMPLE_COMPUTE:
-        if (!ctx.pipelines[PIPELINE_COMPUTE]) {
-            if (!vk_basic_pl_init(PIPELINE_COMPUTE))
-                nob_return_defer(false);
-        }
-        break;
     default:
         nob_log(NOB_ERROR, "no other example supported yet for draw points");
-        nob_return_defer(false);
+        return false;
     }
 
     Vk_Buffer vtx_buff = {0};
-    Descriptor_Type type = DS_TYPE_COMPUTE;
-    if (example == EXAMPLE_COMPUTE) {
-        if (vtx_id < ctx.ssbo_sets[type].count && ctx.ssbo_sets[type].items[vtx_id].handle) {
-            vtx_buff = ctx.ssbo_sets[type].items[vtx_id];
-        } else {
-            nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-            nob_return_defer(false);
-        }
+    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
+        vtx_buff = point_clouds.items[vtx_id];
     } else {
-        if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
-            vtx_buff = point_clouds.items[vtx_id];
-        } else {
-            nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-            nob_return_defer(false);
-        }
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+        return false;
     }
 
     Matrix model = {0};
@@ -1021,15 +1000,14 @@ bool draw_points(size_t vtx_id, Example example)
         model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+        return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     if (!vk_draw_points(vtx_buff, mvp, example))
-        nob_return_defer(false);
+        return false;
 
-defer:
-    return result;
+    return true;
 }
 
 static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_offset)

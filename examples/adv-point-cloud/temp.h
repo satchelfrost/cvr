@@ -201,11 +201,8 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
 bool build_compute_cmds(size_t point_cloud_count)
 {
     size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
-
-    /* begin recording compute commands */
     if (!vk_rec_compute()) return false;
-
-        /* submit batches of points to render-compute shader */
+        /* submit batches of points to render compute shader */
         group_x = point_cloud_count / SUBGROUP_SZ + 1;
         size_t batch_size = group_x / NUM_BATCHES;
         for (size_t i = 0; i < NUM_BATCHES; i++) {
@@ -219,11 +216,53 @@ bool build_compute_cmds(size_t point_cloud_count)
         /* resolve the frame buffer */
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
-
-    /* end recording compute commands */
     if (!vk_end_rec_compute()) return false;
-
     return true;
+}
+
+#define read_attr(attr, sv)                   \
+    do {                                      \
+        memcpy(&attr, sv.data, sizeof(attr)); \
+        sv.data  += sizeof(attr);             \
+        sv.count -= sizeof(attr);             \
+    } while(0)
+
+bool read_vtx(const char *file, Point_Cloud *verts)
+{
+    bool result = true;
+
+    nob_log(NOB_INFO, "reading vtx file %s", file);
+    Nob_String_Builder sb = {0};
+    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
+
+    Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
+    size_t vtx_count = 0;
+    read_attr(vtx_count, sv);
+
+    for (size_t i = 0; i < vtx_count; i++) {
+        float x, y, z;
+        uint8_t r, g, b;
+        read_attr(x, sv);
+        read_attr(y, sv);
+        read_attr(z, sv);
+        read_attr(r, sv);
+        read_attr(g, sv);
+        read_attr(b, sv);
+
+        uint uint_color = (uint)255 << 24 | (uint)b << 16 | (uint)g << 8 | (uint)r;
+        Point_Vert vert = {
+            .x = x, .y = y, .z = z,
+            .color = uint_color,
+        };
+        nob_da_append(verts, vert);
+    }
+
+    verts->buff.count = vtx_count;
+    verts->buff.size = sizeof(Point_Vert) * vtx_count;
+
+defer:
+    nob_sb_free(sb);
+    return result;
 }
 
 int main()
@@ -233,6 +272,16 @@ int main()
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
+
+    // if (!read_vtx("res/arena_50602232_f32.vtx", &pc)) {
+    // if (!read_vtx("res/arena_63252790_f32.vtx", &pc)) {
+    // if (!read_vtx("res/arena_72288903_f32.vtx", &pc)) {
+    // if (!read_vtx("res/arena_101204464_f32.vtx", &pc)) {
+    // if (!read_vtx("res/arena_506022320_f32.vtx", &pc)) {
+    //     nob_log(NOB_ERROR, "failed to load point cloud");
+    //     nob_log(NOB_ERROR, "this example requires private data");
+    //     return 1;
+    // }
 
     /* generate initial point cloud */
     size_t num_points = MIN_POINTS;
@@ -353,6 +402,8 @@ int main()
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
             vk_gfx(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
+            // translate(0.0f, 0.0f, -100.0f);
+            // rotate_x(-PI / 2);
             rotate_y(get_time() * 0.5);
             if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
             else return 1;
