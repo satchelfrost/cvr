@@ -30,8 +30,8 @@ typedef struct {
     size_t capacity;
     Vk_Buffer buff;
     bool pending_change;
-    const size_t max;
-    const size_t min;
+    size_t max;
+    size_t min;
 } Point_Cloud;
 
 typedef struct {
@@ -72,7 +72,7 @@ const char *point_cloud_files[] = {
     "res/arena_5060224_f32.vtx",
     "res/arena_50602232_f32.vtx",
     "res/arena_101204464_f32.vtx",
-    "res/arena_506022320_f32.vtx",
+    // "res/arena_506022320_f32.vtx",
 };
 
 typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
@@ -258,7 +258,7 @@ int main()
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
     int pc_idx = 0;
-    if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
+    int next_pc_idx = 0;
     if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
 
     /* initialize window and Vulkan */
@@ -300,30 +300,38 @@ int main()
         update_camera_free(&camera);
 
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
-            pc_idx = (pc_idx + 1) % NOB_ARRAY_LEN(point_cloud_files);
+            next_pc_idx = (pc_idx + 1) % NOB_ARRAY_LEN(point_cloud_files);
             pc.pending_change = true;
         }
         if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
-            pc_idx = (pc_idx - 1 + NOB_ARRAY_LEN(point_cloud_files)) % NOB_ARRAY_LEN(point_cloud_files);
+            next_pc_idx = (pc_idx - 1 + NOB_ARRAY_LEN(point_cloud_files)) % NOB_ARRAY_LEN(point_cloud_files);
             pc.pending_change = true;
         }
         if (is_key_pressed(KEY_R)) record.collecting = true;
 
         /* re-upload point cloud if we've changed point cloud size */
         if (pc.pending_change) {
-            /* destroy old point cloud buffer and generate new points */
-            wait_idle();
-            vk_buff_destroy(pc.buff);
-            if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
+            Point_Cloud copy = pc;
+            if (load_points(point_cloud_files[next_pc_idx], &pc)) {
+                pc_idx = next_pc_idx;
 
-            /* upload new buffer and update descriptor sets */
-            if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
-            VkDescriptorBufferInfo pc_info = {.buffer = pc.buff.handle, .range = pc.buff.size};
-            VkWriteDescriptorSet write = {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)};
-            vk_update_ds(1, &write);
+                /* destroy old point cloud buffer and generate new points */
+                wait_idle();
+                vk_buff_destroy(pc.buff);
 
-            /* rebuild compute commands */
-            if (!build_compute_cmds(pc.count)) return 1;
+                /* upload new buffer and update descriptor sets */
+                if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
+                VkDescriptorBufferInfo pc_info = {.buffer = pc.buff.handle, .range = pc.buff.size};
+                VkWriteDescriptorSet write = {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)};
+                vk_update_ds(1, &write);
+
+                /* rebuild compute commands */
+                if (!build_compute_cmds(pc.count)) return 1;
+            } else {
+                pc = copy;
+                nob_log(NOB_ERROR, "point cloud changed failed");
+            }
+
             pc.pending_change = false;
         }
 
