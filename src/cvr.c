@@ -19,8 +19,11 @@
 #define MAX_CHAR_PRESSED_QUEUE 16
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
+#define GAMEPAD_ROT_SENSITIVITY 0.0005f
 #define CAMERA_ROTATION_SPEED 1.0f
 #define MAX_MOUSE_BUTTONS 8
+#define MAX_GAMEPAD_BUTTONS 32
+#define MAX_GAMEPAD_AXIS 8
 #define FPS_CAPTURE_FRAMES_COUNT 30
 #define FPS_AVERAGE_TIME_SECONDS 0.5f
 #define FPS_STEP (FPS_AVERAGE_TIME_SECONDS/FPS_CAPTURE_FRAMES_COUNT)
@@ -44,6 +47,12 @@ typedef struct {
     char curr_button_state[MAX_MOUSE_BUTTONS];
     char prev_button_state[MAX_MOUSE_BUTTONS];
 } Mouse;
+
+typedef struct {
+    float axis_state[MAX_GAMEPAD_AXIS];
+    char curr_button_state[MAX_GAMEPAD_BUTTONS];
+    char prev_button_state[MAX_GAMEPAD_BUTTONS];
+} Gamepad;
 
 typedef struct {
     double curr;
@@ -79,6 +88,7 @@ Matrices matrices = {0};
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
 Mouse mouse = {0};
+Gamepad gamepad = {0};
 Time cvr_time = {0};
 #define MAX_MAT_STACK 1024 * 1024
 Matrix mat_stack[MAX_MAT_STACK];
@@ -373,23 +383,104 @@ bool is_key_down(int key)
     return down;
 }
 
+bool is_gamepad_button_pressed(int button)
+{
+    bool pressed = false;
+
+    if (button < MAX_GAMEPAD_BUTTONS) {
+        if (gamepad.prev_button_state[button] == 0 && gamepad.curr_button_state[button] == 1)
+            pressed = true;
+    }
+
+    return pressed;
+}
+
+bool is_gamepad_button_down(int button)
+{
+    bool pressed = false;
+
+    if (button < MAX_GAMEPAD_BUTTONS) {
+        if (gamepad.curr_button_state[button] == 1)
+            pressed = true;
+    }
+
+    return pressed;
+}
+
+float get_gamepad_axis_movement(int axis)
+{
+    float value = 0;
+
+    if (axis < MAX_GAMEPAD_AXIS && fabsf(gamepad.axis_state[axis]) > 0.1f)
+        value = gamepad.axis_state[axis];
+
+    return value;
+}
+
 void poll_input_events()
 {
+    /* keyboard */
     keyboard.key_pressed_queue_count = 0;
     keyboard.char_pressed_queue_count = 0;
-
     for (int i = 0; i < MAX_KEYBOARD_KEYS; i++) {
         keyboard.prev_key_state[i] = keyboard.curr_key_state[i];
         keyboard.key_repeat_in_frame[i] = 0;
     }
 
+    /* mouse */
     mouse.prev_pos = mouse.curr_pos;
     for (int i = 0; i < MAX_MOUSE_BUTTONS; i++)
         mouse.prev_button_state[i] = mouse.curr_button_state[i];
-
     mouse.prev_wheel_move = mouse.curr_wheel_move;
     mouse.curr_wheel_move = (Vector2){ 0.0f, 0.0f };
+
+    /* gamepad */
+    GLFWgamepadstate state = {0};
+    glfwGetGamepadState(0, &state); // 0 means only one controller is supported
+
+    /* gamepad buttons */
+    for (int i = 0; i < MAX_GAMEPAD_BUTTONS; i++)
+        gamepad.prev_button_state[i] = gamepad.curr_button_state[i];
+    const unsigned char *buttons = state.buttons;
+    for (int i = 0; buttons != NULL && i < GLFW_GAMEPAD_BUTTON_DPAD_LEFT + 1 && i < MAX_GAMEPAD_BUTTONS; i++) {
+        int btn = -1;
+
+        switch (i) {
+        case GLFW_GAMEPAD_BUTTON_Y:            btn = GAMEPAD_BUTTON_RIGHT_FACE_UP;    break;
+        case GLFW_GAMEPAD_BUTTON_B:            btn = GAMEPAD_BUTTON_RIGHT_FACE_RIGHT; break;
+        case GLFW_GAMEPAD_BUTTON_A:            btn = GAMEPAD_BUTTON_RIGHT_FACE_DOWN;  break;
+        case GLFW_GAMEPAD_BUTTON_X:            btn = GAMEPAD_BUTTON_RIGHT_FACE_LEFT;  break;
+        case GLFW_GAMEPAD_BUTTON_LEFT_BUMPER:  btn = GAMEPAD_BUTTON_LEFT_TRIGGER_1;   break;
+        case GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER: btn = GAMEPAD_BUTTON_RIGHT_TRIGGER_1;  break;
+        case GLFW_GAMEPAD_BUTTON_BACK:         btn = GAMEPAD_BUTTON_MIDDLE_LEFT;      break;
+        case GLFW_GAMEPAD_BUTTON_GUIDE:        btn = GAMEPAD_BUTTON_MIDDLE;           break;
+        case GLFW_GAMEPAD_BUTTON_START:        btn = GAMEPAD_BUTTON_MIDDLE_RIGHT;     break;
+        case GLFW_GAMEPAD_BUTTON_DPAD_UP:      btn = GAMEPAD_BUTTON_LEFT_FACE_UP;     break;
+        case GLFW_GAMEPAD_BUTTON_DPAD_RIGHT:   btn = GAMEPAD_BUTTON_LEFT_FACE_RIGHT;  break;
+        case GLFW_GAMEPAD_BUTTON_DPAD_DOWN:    btn = GAMEPAD_BUTTON_LEFT_FACE_DOWN;   break;
+        case GLFW_GAMEPAD_BUTTON_DPAD_LEFT:    btn = GAMEPAD_BUTTON_LEFT_FACE_LEFT;   break;
+        case GLFW_GAMEPAD_BUTTON_LEFT_THUMB:   btn = GAMEPAD_BUTTON_LEFT_THUMB;       break;
+        case GLFW_GAMEPAD_BUTTON_RIGHT_THUMB:  btn = GAMEPAD_BUTTON_RIGHT_THUMB;      break;
+        default: break;
+        }
+
+        if (btn != -1) {
+            if (buttons[i] == GLFW_PRESS) gamepad.curr_button_state[btn] = 1;
+            else gamepad.curr_button_state[btn] = 0;
+        }
+    }
+
+    /* gamepad axes */
+    const float *axes = state.axes;
+    for (int i = 0; axes != NULL && i < GLFW_GAMEPAD_AXIS_LAST + 1 && i < MAX_GAMEPAD_AXIS; i++)
+        gamepad.axis_state[i] = axes[i];
+
+    /* if we want to treat trigger buttons as booleans */
+    gamepad.curr_button_state[GAMEPAD_BUTTON_LEFT_TRIGGER_2]  = gamepad.axis_state[GAMEPAD_AXIS_LEFT_TRIGGER] > 0.1f;
+    gamepad.curr_button_state[GAMEPAD_BUTTON_RIGHT_TRIGGER_2] = gamepad.axis_state[GAMEPAD_AXIS_RIGHT_TRIGGER] > 0.1f;
 }
+
+
 
 float get_mouse_wheel_move()
 {
@@ -734,6 +825,7 @@ void camera_move_to_target(Camera *camera, float delta)
 void update_camera_free(Camera *camera)
 {
     Vector2 delta = get_mouse_delta();
+
     if (is_mouse_button_down(MOUSE_BUTTON_RIGHT)) {
         camera_yaw(camera, -delta.x * CAMERA_MOUSE_MOVE_SENSITIVITY);
         camera_pitch(camera, -delta.y * CAMERA_MOUSE_MOVE_SENSITIVITY);
@@ -751,6 +843,17 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_LEFT_SHIFT))
         move_speed *= 10.0f;
 
+    /* gamepad movement */
+    camera_yaw(camera, -get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X)  * GAMEPAD_ROT_SENSITIVITY);
+    camera_pitch(camera,-get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y) * GAMEPAD_ROT_SENSITIVITY);
+    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) <= -0.25f)  camera_move_forward(camera,  move_speed);
+    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) <= -0.25f)  camera_move_right(camera,   -move_speed);
+    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) >=  0.25f)  camera_move_forward(camera, -move_speed);
+    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) >=  0.25f)  camera_move_right(camera,    move_speed);
+    if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed);
+    if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed);
+
+    /* keyboard movement */
     if (is_key_down(KEY_W)) camera_move_forward(camera,  move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera,   -move_speed);
     if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);

@@ -298,6 +298,7 @@ int main()
     while (!window_should_close()) {
         /* input */
         update_camera_free(&camera);
+
         if (is_key_pressed(KEY_UP)) {
             pc_idx = (pc_idx + 1) % NOB_ARRAY_LEN(point_cloud_files);
             pc.pending_change = true;
