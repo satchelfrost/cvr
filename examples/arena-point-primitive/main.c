@@ -363,10 +363,15 @@ int main()
             nob_log(NOB_INFO, "viewing camera %d", cam_view_idx);
             nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
         }
-        if (is_key_pressed(KEY_R)) use_hres = !use_hres;
+        if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_UP))
+            use_hres = !use_hres;
         if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
-        if (is_key_pressed(KEY_M)) {
+        if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
+            log_shader_mode(shader_mode);
+        }
+        if (is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_TRIGGER_1)) {
+            shader_mode = (shader_mode - 1 + SHADER_MODE_COUNT) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
         }
         if (is_key_pressed(KEY_SPACE)) {

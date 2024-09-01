@@ -275,7 +275,7 @@ int main()
     while (!window_should_close()) {
         /* input */
         update_camera_free(&camera);
-        if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
+        if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
             if (num_points * 10 <= pc.max) {
                 pc.pending_change = true;
                 num_points = num_points * 10;
@@ -283,7 +283,7 @@ int main()
                 nob_log(NOB_INFO, "max point count reached");
             }
         }
-        if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_TRIGGER_1)) {
+        if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
             if (num_points / 10 >= pc.min) {
                 pc.pending_change = true;
                 num_points = num_points / 10;

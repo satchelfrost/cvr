@@ -19,7 +19,7 @@
 #define MAX_CHAR_PRESSED_QUEUE 16
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
-#define GAMEPAD_ROT_SENSITIVITY 0.0005f
+#define GAMEPAD_ROT_SENSITIVITY 1.0f
 #define CAMERA_ROTATION_SPEED 1.0f
 #define MAX_MOUSE_BUTTONS 8
 #define MAX_GAMEPAD_BUTTONS 32
@@ -844,8 +844,8 @@ void update_camera_free(Camera *camera)
         move_speed *= 10.0f;
 
     /* gamepad movement */
-    camera_yaw(camera, -get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X)  * GAMEPAD_ROT_SENSITIVITY);
-    camera_pitch(camera,-get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y) * GAMEPAD_ROT_SENSITIVITY);
+    camera_yaw(camera, -get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X)  * ft * GAMEPAD_ROT_SENSITIVITY);
+    camera_pitch(camera,-get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y) * ft * GAMEPAD_ROT_SENSITIVITY);
     if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) <= -0.25f)  camera_move_forward(camera,  move_speed);
     if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) <= -0.25f)  camera_move_right(camera,   -move_speed);
     if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) >=  0.25f)  camera_move_forward(camera, -move_speed);

@@ -71,8 +71,8 @@ VkDescriptorPool pool;
 const char *point_cloud_files[] = {
     "res/arena_5060224_f32.vtx",
     "res/arena_50602232_f32.vtx",
-    // "res/arena_101204464_f32.vtx",
-    // "res/arena_506022320_f32.vtx",
+    "res/arena_101204464_f32.vtx",
+    "res/arena_506022320_f32.vtx",
 };
 
 typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
@@ -299,11 +299,11 @@ int main()
         /* input */
         update_camera_free(&camera);
 
-        if (is_key_pressed(KEY_UP)) {
+        if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
             pc_idx = (pc_idx + 1) % NOB_ARRAY_LEN(point_cloud_files);
             pc.pending_change = true;
         }
-        if (is_key_pressed(KEY_DOWN)) {
+        if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
             pc_idx = (pc_idx - 1 + NOB_ARRAY_LEN(point_cloud_files)) % NOB_ARRAY_LEN(point_cloud_files);
             pc.pending_change = true;
         }
