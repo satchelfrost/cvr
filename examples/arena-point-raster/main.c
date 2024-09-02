@@ -9,7 +9,8 @@
 #define FRAME_BUFF_SZ 2048
 #define MAX_FPS_REC 100
 #define SUBGROUP_SZ 1024     // Subgroup size for render.comp
-#define NUM_BATCHES 8        // Number of batches to dispatch
+#define NUM_BATCHES 4        // Number of batches to dispatch
+#define MAX_LOD 7
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -29,10 +30,10 @@ typedef struct {
     size_t count;
     size_t capacity;
     Vk_Buffer buff;
-    bool pending_change;
-    size_t max;
-    size_t min;
-} Point_Cloud;
+    bool gpu_visible;
+    const char *name;
+    VkDescriptorSet set;
+} Point_Cloud_Layer;
 
 typedef struct {
     size_t *items;
@@ -67,23 +68,28 @@ VkPipeline cs_render_pl;
 VkPipeline cs_resolve_pl;
 VkPipeline gfx_pl;
 VkDescriptorPool pool;
+VkDescriptorSet cs_resolve_ds;
+VkDescriptorSet gfx_sst; // screen space triangle
 
-const char *point_cloud_files[] = {
-    "res/arena_5060224_f32.vtx",
-    "res/arena_50602232_f32.vtx",
-    "res/arena_101204464_f32.vtx",
-    // "res/arena_506022320_f32.vtx",
+Point_Cloud_Layer pc_layers[MAX_LOD] = {
+    {.name = "res/arena_5060224_f32.vtx"},
+    {.name = "res/arena_10120447_f32.vtx"},
+    {.name = "res/arena_20240893_f32.vtx"},
+    {.name = "res/arena_38795045_f32.vtx"},
+    {.name = "res/arena_79276830_f32.vtx"},
+    {.name = "res/arena_156866918_f32.vtx"},
+    {.name = "res/arena_195661963_f32.vtx"},
 };
 
-typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
+typedef enum {DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
-bool load_points(const char *file, Point_Cloud *verts)
+bool load_points(const char *file, Point_Cloud_Layer *pc)
 {
     bool result = true;
 
     /* reset count to zero in case we are loading a new point cloud */
-    verts->count = 0;
+    pc->count = 0;
 
     nob_log(NOB_INFO, "reading vtx file %s", file);
     Nob_String_Builder sb = {0};
@@ -108,11 +114,11 @@ bool load_points(const char *file, Point_Cloud *verts)
             .x = x, .y = y, .z = z,
             .color = uint_color,
         };
-        nob_da_append(verts, vert);
+        nob_da_append(pc, vert);
     }
 
-    verts->buff.count = vtx_count;
-    verts->buff.size = sizeof(Point_Vert) * vtx_count;
+    pc->buff.count = vtx_count;
+    pc->buff.size = sizeof(Point_Vert) * vtx_count;
 
 defer:
     nob_sb_free(sb);
@@ -168,7 +174,7 @@ bool setup_ds_pool()
 {
     VkDescriptorPoolSize pool_sizes[] = {
         {DS_POOL(UNIFORM_BUFFER, 2)},
-        {DS_POOL(STORAGE_BUFFER, 3)},
+        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},
         {DS_POOL(COMBINED_IMAGE_SAMPLER, 1)},
         {DS_POOL(STORAGE_IMAGE, 1)},
     };
@@ -177,7 +183,7 @@ bool setup_ds_pool()
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
-        .maxSets = 3, // compute shader render, compute shader resolve, and graphics
+        .maxSets = 2 + MAX_LOD, // compute shader resolve, graphics sst, compute shader render (x MAX_LOD)
     };
 
     if (!vk_create_ds_pool(pool_ci, &pool)) return false;
@@ -185,10 +191,10 @@ bool setup_ds_pool()
     return true;
 }
 
-bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, Vk_Texture storage_tex)
+bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, Vk_Texture storage_tex)
 {
     /* allocate descriptor sets based on layouts */
-    VkDescriptorSetLayout layouts[] = {cs_render_ds_layout, cs_resolve_ds_layout, gfx_ds_layout};
+    VkDescriptorSetLayout layouts[] = {cs_resolve_ds_layout, gfx_ds_layout};
     size_t count = NOB_ARRAY_LEN(layouts);
     VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, count, pool)};
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
@@ -197,10 +203,6 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
     VkDescriptorBufferInfo ubo_info = {
         .buffer = ubo.handle,
         .range  = ubo.size,
-    };
-    VkDescriptorBufferInfo pc_info = {
-        .buffer = point_cloud.handle,
-        .range  = point_cloud.size,
     };
     VkDescriptorBufferInfo frame_buff_info = {
         .buffer = frame_buff.handle,
@@ -212,10 +214,6 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
         .sampler     = storage_tex.sampler,
     };
     VkWriteDescriptorSet writes[] = {
-        /* render.comp */
-        {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RENDER],  &ubo_info)},
-        {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)},
-        {DS_WRITE_BUFF(2, STORAGE_BUFFER, ds_sets[DS_RENDER],  &frame_buff_info)},
         /* resolve.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RESOLVE], &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &frame_buff_info)},
@@ -228,17 +226,46 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
     return true;
 }
 
-bool build_compute_cmds(size_t point_cloud_count)
+bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
+{
+    /* update descriptor sets */
+    VkDescriptorBufferInfo ubo_info = {
+        .buffer = ubo.handle,
+        .range  = ubo.size,
+    };
+    VkDescriptorBufferInfo pc_info = {
+        .buffer = pc_layers[lod].buff.handle,
+        .range  = pc_layers[lod].buff.size,
+    };
+    VkDescriptorBufferInfo frame_buff_info = {
+        .buffer = frame_buff.handle,
+        .range  = frame_buff.size,
+    };
+    VkWriteDescriptorSet writes[] = {
+        /* render.comp */
+        {DS_WRITE_BUFF(0, UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
+        {DS_WRITE_BUFF(1, STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
+        {DS_WRITE_BUFF(2, STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
+    };
+    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+
+    return true;
+}
+
+bool build_compute_cmds(size_t highest_lod)
 {
     size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
     if (!vk_rec_compute()) return false;
-        /* submit batches of points to render compute shader */
-        group_x = point_cloud_count / SUBGROUP_SZ + 1;
-        size_t batch_size = group_x / NUM_BATCHES;
-        for (size_t i = 0; i < NUM_BATCHES; i++) {
-            uint32_t offset = i * batch_size * SUBGROUP_SZ;
-            vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
-            vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], batch_size, group_y, group_z);
+        /* loop through the lod layers of the point cloud */
+        for (size_t lod = 0; lod <= highest_lod; lod++) {
+            /* submit batches of points to render compute shader */
+            group_x = pc_layers[lod].count / SUBGROUP_SZ + 1;
+            size_t batch_size = group_x / NUM_BATCHES;
+            for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
+                uint32_t offset = batch * batch_size * SUBGROUP_SZ;
+                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+                vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
+            }
         }
 
         vk_compute_pl_barrier();
@@ -252,14 +279,12 @@ bool build_compute_cmds(size_t point_cloud_count)
 
 int main()
 {
-    Point_Cloud pc = {.min = MIN_POINTS, .max = MAX_POINTS};
     Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
-    int pc_idx = 0;
-    int next_pc_idx = 0;
-    if (!load_points(point_cloud_files[pc_idx], &pc)) return 1;
+    size_t lod = 0;
+    if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
 
     /* initialize window and Vulkan */
     init_window(1600, 900, "arena point cloud rasterization");
@@ -272,15 +297,22 @@ int main()
     };
 
     /* upload resources to GPU */
-    if (!vk_comp_buff_staged_upload(&pc.buff, pc.items))      return 1;
-    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data)) return 1;
-    if (!vk_ubo_init2(&ubo.buff))                             return 1;
-    if (!vk_create_storage_img(&storage_tex))                 return 1;
+    if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
+    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
+    if (!vk_ubo_init2(&ubo.buff))                                                return 1;
+    if (!vk_create_storage_img(&storage_tex))                                    return 1;
 
     /* setup descriptors */
-    if (!setup_ds_layouts())                                        return 1;
-    if (!setup_ds_pool())                                           return 1;
-    if (!setup_ds_sets(ubo.buff, pc.buff, frame.buff, storage_tex)) return 1;
+    if (!setup_ds_layouts())                               return 1;
+    if (!setup_ds_pool())                                  return 1;
+    if (!setup_ds_sets(ubo.buff, frame.buff, storage_tex)) return 1;
+
+    /* allocate descriptor sets based on layouts */
+    for (size_t i = 0; i < MAX_LOD; i++) {
+        VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&cs_render_ds_layout, 1, pool)};
+        if (!vk_alloc_ds(alloc, &pc_layers[i].set)) return false;
+    }
+    if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
 
     /* create pipelines */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(uint32_t)};
@@ -292,7 +324,7 @@ int main()
     if (!vk_basic_pl_init2(gfx_pl_layout, &gfx_pl))                                          return 1;
 
     /* record commands for compute buffer */
-    if (!build_compute_cmds(pc.count)) return 1;
+    if (!build_compute_cmds(lod)) return 1;
 
     /* game loop */
     while (!window_should_close()) {
@@ -300,40 +332,46 @@ int main()
         update_camera_free(&camera);
 
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
-            next_pc_idx = (pc_idx + 1) % NOB_ARRAY_LEN(point_cloud_files);
-            pc.pending_change = true;
-        }
-        if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
-            next_pc_idx = (pc_idx - 1 + NOB_ARRAY_LEN(point_cloud_files)) % NOB_ARRAY_LEN(point_cloud_files);
-            pc.pending_change = true;
-        }
-        if (is_key_pressed(KEY_R)) record.collecting = true;
-
-        /* re-upload point cloud if we've changed point cloud size */
-        if (pc.pending_change) {
-            Point_Cloud copy = pc;
-            if (load_points(point_cloud_files[next_pc_idx], &pc)) {
-                pc_idx = next_pc_idx;
-
-                /* destroy old point cloud buffer and generate new points */
-                wait_idle();
-                vk_buff_destroy(pc.buff);
+            if (++lod < MAX_LOD) {
+                nob_log(NOB_INFO, "switching to lod %zu", lod);
+                if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
+                size_t point_count = 0;
+                for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
+                nob_log(NOB_INFO, "total points %zu", point_count);
 
                 /* upload new buffer and update descriptor sets */
-                if (!vk_comp_buff_staged_upload(&pc.buff, pc.items)) return 1;
-                VkDescriptorBufferInfo pc_info = {.buffer = pc.buff.handle, .range = pc.buff.size};
-                VkWriteDescriptorSet write = {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RENDER],  &pc_info)};
-                vk_update_ds(1, &write);
+                wait_idle();
+                if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
+                if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
 
                 /* rebuild compute commands */
-                if (!build_compute_cmds(pc.count)) return 1;
+                if (!build_compute_cmds(lod)) return 1;
             } else {
-                pc = copy;
-                nob_log(NOB_ERROR, "point cloud changed failed");
+                nob_log(NOB_INFO, "max lod %zu reached", --lod);
             }
-
-            pc.pending_change = false;
         }
+        if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
+            if (lod != 0) {
+                size_t point_count = 0;
+                for (size_t layer = 0; layer <= lod - 1; layer++) point_count += pc_layers[layer].count;
+                nob_log(NOB_INFO, "switching to lod %zu (%zu points)", lod - 1, point_count);
+                /* destroy old point cloud buffer and generate new points */
+                wait_idle();
+                vk_buff_destroy(pc_layers[lod].buff);
+                pc_layers[lod].buff.handle = NULL;
+                pc_layers[lod].buff.mem = NULL;
+
+                --lod;
+
+                /* rebuild compute commands */
+                if (!build_compute_cmds(lod)) return 1;
+            } else {
+                nob_log(NOB_INFO, "min lod %zu reached", lod);
+            }
+        }
+        if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) log_fps();
+        if (is_key_pressed(KEY_R)) record.collecting = true;
+
 
         /* collect the frame rate */
         if (record.collecting) {
@@ -343,7 +381,7 @@ int main()
                 size_t sum = 0;
                 for (size_t i = 0; i < record.count; i++) sum += record.items[i];
                 float ave = (float) sum / record.count;
-                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
+                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f", record.count, ave);
                 record.count = 0;
                 record.collecting = false;
             }
@@ -386,9 +424,11 @@ int main()
     }
 
     wait_idle();
-    free(pc.items);
     free(frame.data);
-    vk_buff_destroy(pc.buff);
+    for (size_t i = 0; i < MAX_LOD; i++) {
+        vk_buff_destroy(pc_layers[i].buff);
+        free(pc_layers[i].items);
+    }
     vk_buff_destroy(frame.buff);
     vk_buff_destroy(ubo.buff);
     vk_destroy_ds_pool(pool);
