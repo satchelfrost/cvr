@@ -356,6 +356,7 @@ void unload_pc_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
+int get_last_btn_pressed();
 
 bool upload_point_cloud(Buffer buff, size_t *id);
 bool upload_compute_points(Buffer buff, size_t *id, Example example);

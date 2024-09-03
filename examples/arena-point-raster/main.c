@@ -334,15 +334,17 @@ int main()
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
             if (++lod < MAX_LOD) {
                 nob_log(NOB_INFO, "switching to lod %zu", lod);
-                if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
-                size_t point_count = 0;
-                for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
-                nob_log(NOB_INFO, "total points %zu", point_count);
-
-                /* upload new buffer and update descriptor sets */
                 wait_idle();
-                if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
-                if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
+                if (!pc_layers[lod].buff.handle) {
+                    if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
+                    size_t point_count = 0;
+                    for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
+                    nob_log(NOB_INFO, "total points %zu", point_count);
+
+                    /* upload new buffer and update descriptor sets */
+                    if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
+                    if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
+                }
 
                 /* rebuild compute commands */
                 if (!build_compute_cmds(lod)) return 1;
@@ -355,15 +357,10 @@ int main()
                 size_t point_count = 0;
                 for (size_t layer = 0; layer <= lod - 1; layer++) point_count += pc_layers[layer].count;
                 nob_log(NOB_INFO, "switching to lod %zu (%zu points)", lod - 1, point_count);
-                /* destroy old point cloud buffer and generate new points */
-                wait_idle();
-                vk_buff_destroy(pc_layers[lod].buff);
-                pc_layers[lod].buff.handle = NULL;
-                pc_layers[lod].buff.mem = NULL;
-
                 --lod;
 
                 /* rebuild compute commands */
+                wait_idle();
                 if (!build_compute_cmds(lod)) return 1;
             } else {
                 nob_log(NOB_INFO, "min lod %zu reached", lod);
@@ -371,7 +368,6 @@ int main()
         }
         if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) log_fps();
         if (is_key_pressed(KEY_R)) record.collecting = true;
-
 
         /* collect the frame rate */
         if (record.collecting) {

@@ -52,6 +52,7 @@ typedef struct {
     float axis_state[MAX_GAMEPAD_AXIS];
     char curr_button_state[MAX_GAMEPAD_BUTTONS];
     char prev_button_state[MAX_GAMEPAD_BUTTONS];
+    int last_button_pressed;
 } Gamepad;
 
 typedef struct {
@@ -100,6 +101,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_offset);
+static void joystick_callback(int jid, int event);
 void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
@@ -131,6 +133,10 @@ bool init_window(int width, int height, const char *title)
     glfwSetMouseButtonCallback(ctx.window, mouse_button_callback);
     glfwSetCursorPosCallback(ctx.window, mouse_cursor_pos_callback);
     glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
+    glfwSetJoystickCallback(joystick_callback);
+
+    nob_log(NOB_INFO, "joystick name %s", glfwGetJoystickName(0));
+    nob_log(NOB_INFO, "joystick present %d", glfwJoystickPresent(0));
 
     cvr_chk(vk_init(), "failed to initialize Vulkan context");
 
@@ -465,8 +471,12 @@ void poll_input_events()
         }
 
         if (btn != -1) {
-            if (buttons[i] == GLFW_PRESS) gamepad.curr_button_state[btn] = 1;
-            else gamepad.curr_button_state[btn] = 0;
+            if (buttons[i] == GLFW_PRESS) {
+                gamepad.curr_button_state[btn] = 1;
+                gamepad.last_button_pressed = btn;
+            } else {
+                gamepad.curr_button_state[btn] = 0;
+            }
         }
     }
 
@@ -480,7 +490,10 @@ void poll_input_events()
     gamepad.curr_button_state[GAMEPAD_BUTTON_RIGHT_TRIGGER_2] = gamepad.axis_state[GAMEPAD_AXIS_RIGHT_TRIGGER] > 0.1f;
 }
 
-
+int get_last_btn_pressed()
+{
+    return gamepad.last_button_pressed;
+}
 
 float get_mouse_wheel_move()
 {
@@ -1252,5 +1265,15 @@ void log_fps()
     if (curr_fps != fps) {
         nob_log(NOB_INFO, "FPS %d", curr_fps);
         fps = curr_fps;
+    }
+}
+
+void joystick_callback(int jid, int event)
+{
+    if (event == GLFW_CONNECTED) {
+        nob_log(NOB_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+    }
+    else if (event == GLFW_DISCONNECTED) {
+        nob_log(NOB_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
 }
