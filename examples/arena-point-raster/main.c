@@ -333,18 +333,19 @@ int main()
 
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
             if (++lod < MAX_LOD) {
-                nob_log(NOB_INFO, "switching to lod %zu", lod);
                 wait_idle();
                 if (!pc_layers[lod].buff.handle) {
                     if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
-                    size_t point_count = 0;
-                    for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
-                    nob_log(NOB_INFO, "total points %zu", point_count);
 
                     /* upload new buffer and update descriptor sets */
                     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
                     if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
                 }
+
+                /* log point count */
+                size_t point_count = 0;
+                for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
+                nob_log(NOB_INFO, "lod %zu (%zu points)", lod, point_count);
 
                 /* rebuild compute commands */
                 if (!build_compute_cmds(lod)) return 1;
@@ -356,7 +357,7 @@ int main()
             if (lod != 0) {
                 size_t point_count = 0;
                 for (size_t layer = 0; layer <= lod - 1; layer++) point_count += pc_layers[layer].count;
-                nob_log(NOB_INFO, "switching to lod %zu (%zu points)", lod - 1, point_count);
+                nob_log(NOB_INFO, "lod %zu (%zu points)", lod - 1, point_count);
                 --lod;
 
                 /* rebuild compute commands */
@@ -367,7 +368,8 @@ int main()
             }
         }
         if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) log_fps();
-        if (is_key_pressed(KEY_R)) record.collecting = true;
+        if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
+            record.collecting = true;
 
         /* collect the frame rate */
         if (record.collecting) {
