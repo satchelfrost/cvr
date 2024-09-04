@@ -59,6 +59,7 @@ static Example examples[] = {
         },
         .supported_targets[TARGET_QUEST] = true,
         .supported_targets[TARGET_LINUX] = true,
+        // .supported_targets[TARGET_WINDOWS] = true,
     },
     {
         .name = "orthographic",
@@ -355,8 +356,10 @@ bool build_cvr(Config config, const char *platform_path)
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, "cc");
+            if (config.target == TARGET_LINUX) nob_cmd_append(&cmd, "cc");
+            else if (config.target == TARGET_WINDOWS) nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
+            nob_cmd_append(&cmd, "-I.");
             nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
@@ -367,14 +370,21 @@ bool build_cvr(Config config, const char *platform_path)
 
     if (!nob_procs_wait(procs)) nob_return_defer(false);
 
-    const char *libcvr_path = nob_temp_sprintf("%s/libcvr.a", build_path);
+    const char *libcvr_path = nob_temp_sprintf("%s/libcvr.%s", build_path, (config.target == TARGET_LINUX) ? "a" : "dll");
     if (nob_needs_rebuild(libcvr_path, obj_files.items, obj_files.count)) {
         cmd.count = 0;
-        nob_cmd_append(&cmd, "ar", "-crs", libcvr_path);
+        if (config.target == TARGET_LINUX) {
+            nob_cmd_append(&cmd, "ar", "-crs", libcvr_path);
+        } else if (config.target == TARGET_WINDOWS) {
+            nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc", "-shared", "-o", libcvr_path);
+            // nob_cmd_append(&cmd, "-L./");
+        }
+
         for (size_t i = 0; i < obj_files.count; i++) {
             const char *input_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
             nob_cmd_append(&cmd, input_path);
         }
+        nob_cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lvulkan-1");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
 
@@ -437,7 +447,8 @@ bool build_example(const char *build_path, Config config)
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, "cc");
+            if (config.target == TARGET_LINUX) nob_cmd_append(&cmd, "cc");
+            else if (config.target == TARGET_WINDOWS) nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src");
             nob_cmd_append(&cmd, "-c", input_path);
