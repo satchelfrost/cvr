@@ -135,9 +135,6 @@ bool init_window(int width, int height, const char *title)
     glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
     glfwSetJoystickCallback(joystick_callback);
 
-    nob_log(NOB_INFO, "joystick name %s", glfwGetJoystickName(0));
-    nob_log(NOB_INFO, "joystick present %d", glfwJoystickPresent(0));
-
     cvr_chk(vk_init(), "failed to initialize Vulkan context");
 
 defer:
