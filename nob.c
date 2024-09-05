@@ -384,7 +384,7 @@ bool build_cvr(Config config, const char *platform_path)
             const char *input_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
             nob_cmd_append(&cmd, input_path);
         }
-        nob_cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lvulkan-1");
+        if (config.target == TARGET_WINDOWS) nob_cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lvulkan-1");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
 
