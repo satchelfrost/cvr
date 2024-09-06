@@ -279,7 +279,11 @@ static void wait_time(double seconds)
     req.tv_sec = sec;
     req.tv_nsec = nsec;
 
+#if defined(__linux__)
     while (nanosleep(&req, &req) == -1) continue;
+#else
+    (void) req;
+#endif
 
     /* partial busy wait loop */
     while (get_time() < destination_time) {}
