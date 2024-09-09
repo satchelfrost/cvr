@@ -2080,6 +2080,8 @@ Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:   return NOB_ERROR;
     default: assert(0 && "this message severity is not handled");
     }
+
+    return NOB_ERROR; // unreachable
 }
 
 bool setup_debug_msgr()

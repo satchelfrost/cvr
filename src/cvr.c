@@ -272,18 +272,21 @@ static void wait_time(double seconds)
     double destination_time = get_time() + seconds;
     double sleep_secs = seconds - seconds * 0.05;
 
-    /* for now wait time only supports linux */ // TODO: Windows
+    /* for now wait time only supports linux */
+#if defined(__linux__)
     struct timespec req = {0};
     time_t sec = sleep_secs;
     long nsec = (sleep_secs - sec) * 1000000000L;
     req.tv_sec = sec;
     req.tv_nsec = nsec;
 
-#if defined(__linux__)
     while (nanosleep(&req, &req) == -1) continue;
-#else
-    (void) req;
 #endif
+
+#if defined(_WIN32)
+    Sleep((unsigned long)(sleep_secs * 1000.0));
+#endif
+
 
     /* partial busy wait loop */
     while (get_time() < destination_time) {}
