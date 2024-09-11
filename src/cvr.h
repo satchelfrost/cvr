@@ -295,6 +295,9 @@ void update_camera_free(Camera *camera);                    /* Updates camera ba
 void begin_compute();
 void end_compute();
 bool compute(Example example);
+void set_window_size(int width, int height);
+void set_window_pos(int x, int y);
+void set_window_monitor();
 
 bool is_key_pressed(int key);
 bool is_key_down(int key);

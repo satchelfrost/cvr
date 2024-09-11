@@ -295,7 +295,7 @@ Camera cameras[] = {
 
 Camera camera_defaults[4] = {0};
 
-int main()
+int main(int argc, char **argv)
 {
     /* load resources into main memory */
     Point_Cloud hres = {0};
@@ -313,7 +313,12 @@ int main()
     }
 
     /* initialize window and Vulkan */
-    init_window(1600, 900, "point cloud");
+    if (argc > 4) {
+        init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
+        set_window_pos(atoi(argv[1]), atoi(argv[2]));
+    } else {
+        init_window(1600, 900, "point cloud");
+    }
 
     /* upload resources to GPU */
     Texture texs[NUM_IMGS] = {0};

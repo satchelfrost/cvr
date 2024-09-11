@@ -277,7 +277,7 @@ bool build_compute_cmds(size_t highest_lod)
     return true;
 }
 
-int main()
+int main(int argc, char **argv)
 {
     Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
     Frame_Buffer frame = alloc_frame_buff();
@@ -287,7 +287,12 @@ int main()
     if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
 
     /* initialize window and Vulkan */
-    init_window(1600, 900, "arena point cloud rasterization");
+    if (argc > 4) {
+        init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
+        set_window_pos(atoi(argv[1]), atoi(argv[2]));
+    } else {
+        init_window(1600, 900, "arena point cloud rasterization");
+    }
     Camera camera = {
         .position   = {10.0f, 10.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},

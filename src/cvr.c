@@ -116,7 +116,7 @@ bool init_window(int width, int height, const char *title)
     /* Initialize glfw stuff */
     glfwInit();
 
-    // /* Interesting option for full screen */
+    /* Interesting option for full screen */
     // int num_monitors;
     // GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
     // const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
@@ -127,6 +127,13 @@ bool init_window(int width, int height, const char *title)
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
+
+    // glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+    // glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+    // glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+    // glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+    // ctx.window = glfwCreateWindow(width, height, title, monitors[0], NULL);
+
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
     glfwSetKeyCallback(ctx.window, key_callback);
@@ -1280,4 +1287,25 @@ void joystick_callback(int jid, int event)
     else if (event == GLFW_DISCONNECTED) {
         nob_log(NOB_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
+}
+
+void set_window_size(int width, int height)
+{
+    win_size.width = width;
+    win_size.height = height;
+    glfwSetWindowSize(ctx.window, width, height);
+}
+
+void set_window_pos(int x, int y)
+{
+    glfwSetWindowPos(ctx.window, x, y);
+}
+
+void set_window_monitor()
+{
+    int num_monitors;
+    GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
+    const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
+    // glfwSetWindowMonitor(ctx.window, monitors[0], 0, 0, mode->width / 2, mode->height / 2, mode->refreshRate);
+    glfwSetWindowMonitor(ctx.window, monitors[0], 0, 0, mode->width, mode->height / 2, mode->refreshRate);
 }

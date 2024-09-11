@@ -641,7 +641,6 @@ bool build_example_win(Config config, const char *build_path)
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-        nob_cmd_append(&cmd, "-mwindows");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
         for (size_t i = 0; i < obj_files.count; i++) {
