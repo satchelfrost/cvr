@@ -61,7 +61,7 @@ VkPipeline cs_resolve_pl;
 VkPipeline gfx_pl;
 VkDescriptorPool pool;
 
-typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_TEST, DS_COUNT} DS_SET;
+typedef enum {DS_RENDER = 0, DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
 void gen_points(size_t num_points, Point_Cloud *pc)
@@ -275,7 +275,7 @@ int main()
     while (!window_should_close()) {
         /* input */
         update_camera_free(&camera);
-        if (is_key_pressed(KEY_UP)) {
+        if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
             if (num_points * 10 <= pc.max) {
                 pc.pending_change = true;
                 num_points = num_points * 10;
@@ -283,7 +283,7 @@ int main()
                 nob_log(NOB_INFO, "max point count reached");
             }
         }
-        if (is_key_pressed(KEY_DOWN)) {
+        if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
             if (num_points / 10 >= pc.min) {
                 pc.pending_change = true;
                 num_points = num_points / 10;

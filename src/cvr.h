@@ -178,6 +178,36 @@ typedef enum {
 } Mouse_Button;
 
 typedef enum {
+    GAMEPAD_BUTTON_UNKNOWN = 0,
+    GAMEPAD_BUTTON_LEFT_FACE_UP,
+    GAMEPAD_BUTTON_LEFT_FACE_RIGHT,
+    GAMEPAD_BUTTON_LEFT_FACE_DOWN,
+    GAMEPAD_BUTTON_LEFT_FACE_LEFT,
+    GAMEPAD_BUTTON_RIGHT_FACE_UP,
+    GAMEPAD_BUTTON_RIGHT_FACE_RIGHT,
+    GAMEPAD_BUTTON_RIGHT_FACE_DOWN,
+    GAMEPAD_BUTTON_RIGHT_FACE_LEFT,
+    GAMEPAD_BUTTON_LEFT_TRIGGER_1,
+    GAMEPAD_BUTTON_LEFT_TRIGGER_2,
+    GAMEPAD_BUTTON_RIGHT_TRIGGER_1,
+    GAMEPAD_BUTTON_RIGHT_TRIGGER_2,
+    GAMEPAD_BUTTON_MIDDLE_LEFT,
+    GAMEPAD_BUTTON_MIDDLE,
+    GAMEPAD_BUTTON_MIDDLE_RIGHT,
+    GAMEPAD_BUTTON_LEFT_THUMB,
+    GAMEPAD_BUTTON_RIGHT_THUMB
+} Gamepad_Button;
+
+typedef enum {
+    GAMEPAD_AXIS_LEFT_X        = 0,
+    GAMEPAD_AXIS_LEFT_Y        = 1,
+    GAMEPAD_AXIS_RIGHT_X       = 2,
+    GAMEPAD_AXIS_RIGHT_Y       = 3,
+    GAMEPAD_AXIS_LEFT_TRIGGER  = 4,
+    GAMEPAD_AXIS_RIGHT_TRIGGER = 5
+} Gamepad_Axis;
+
+typedef enum {
     PERSPECTIVE,
     ORTHOGRAPHIC
 } Camera_Projection;
@@ -265,11 +295,17 @@ void update_camera_free(Camera *camera);                    /* Updates camera ba
 void begin_compute();
 void end_compute();
 bool compute(Example example);
+void set_window_size(int width, int height);
+void set_window_pos(int x, int y);
+void set_window_monitor();
 
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 int get_mouse_x();
 int get_mouse_y();
+bool is_gamepad_button_pressed(int button);
+bool is_gamepad_button_down(int button);
+float get_gamepad_axis_movement(int axis);
 
 double get_frame_time();
 double get_time();
@@ -323,6 +359,7 @@ void unload_pc_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
+int get_last_btn_pressed();
 
 bool upload_point_cloud(Buffer buff, size_t *id);
 bool upload_compute_points(Buffer buff, size_t *id, Example example);
