@@ -16,7 +16,7 @@ layout(push_constant) uniform constants
 layout(binding = 0) uniform CameraMVPs
 {
     mat4 mvps[4];
-    int idx;
+    int idx; // TODO: unused variable
     int shader_mode;
     int cam_0;
     int cam_1;
@@ -30,7 +30,7 @@ layout(location = 1) in uvec3 in_color;
 layout(location = 0) out vec3 model_color;
 layout(location = 1) out vec3 debug_color;
 layout(location = 2) out int shader_mode;
-layout(location = 3) out int closest_cam_idx;
+layout(location = 3) out int unused_variable; // TODO: unused variable
 layout(location = 4) out int cam_sees[4];
 layout(location = 8) out vec3 ndcs[4];
 layout(location = 12) out int cam_order[4];
@@ -40,7 +40,6 @@ void main()
     gl_PointSize = 3.0;
     gl_Position = push_const.mvp * vec4(in_pos, 1.0);
     shader_mode = cameras.shader_mode;
-    closest_cam_idx = cameras.idx;
     cam_order[0] = cameras.cam_0;
     cam_order[1] = cameras.cam_1;
     cam_order[2] = cameras.cam_2;

@@ -3,7 +3,7 @@
 layout(location = 0) in vec3 model_color;
 layout(location = 1) in vec3 debug_color;
 layout(location = 2) flat in int shader_mode;
-layout(location = 3) flat in int closest_cam_idx;
+layout(location = 3) flat in int unused_variable; // TODO: remove
 layout(location = 4) flat in int cam_sees[4];
 layout(location = 8) in vec3 ndcs[4];
 layout(location = 12) flat in int cam_order[4];

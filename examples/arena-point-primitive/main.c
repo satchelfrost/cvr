@@ -36,7 +36,7 @@ typedef struct {
 
 typedef struct {
     float16 camera_mvps[4];
-    int idx;
+    int idx; // TODO: unused in shader
     int shader_mode;
     int cam_0;
     int cam_1;
@@ -150,7 +150,7 @@ int dist_sqr_compare(const void *d1, const void *d2)
 }
 
 /* returns the camera indices in distance sorted order */
-void get_cam_order(Camera *cameras, size_t count, int *cam_order, size_t cam_order_count)
+void get_cam_order(const Camera *cameras, size_t count, int *cam_order, size_t cam_order_count)
 {
     Vector3 main_cam_pos = cameras[0].position;
     Distance_Sqr_Idx sqr_distances[4] = {0};
@@ -396,9 +396,9 @@ int main(int argc, char **argv)
                     look_at(cameras[i]);
                     if (!draw_shape_wireframe(SHAPE_CAM)) return 1;
 
-                    rotate_z(PI);
-                    translate(0.0f, 0.0f, 0.5f);
-                    scale(1.0f * 1.333f * 0.75, 1.0f * 0.75, 1.0f * 0.75);
+                    // rotate_z(PI);
+                    // translate(0.0f, 0.0f, 0.5f);
+                    // scale(1.0f * 1.333f * 0.75, 1.0f * 0.75, 1.0f * 0.75);
                 pop_matrix();
             }
             translate(0.0f, 0.0f, -100.0f);
