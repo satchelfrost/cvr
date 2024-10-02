@@ -315,6 +315,7 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
+    // TODO: I really need to get rid of this
     for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
         UBO ubo = ctx.ubos[i];
         if (ubo.buff.handle)

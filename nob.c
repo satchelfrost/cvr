@@ -227,6 +227,24 @@ static Example examples[] = {
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
     },
+    {
+        .name = "video",
+        .shaders = {
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "texture.vert",
+                "texture.frag",
+            },
+            .count = 4,
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+        .supported_targets[TARGET_LINUX] = true,
+        .supported_targets[TARGET_WINDOWS] = true,
+    },
 };
 
 typedef struct {
