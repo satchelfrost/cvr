@@ -321,12 +321,12 @@ int main(int argc, char **argv)
 
     /* create pipelines */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(uint32_t)};
-    if (!vk_pl_layout_init2(cs_render_ds_layout, &cs_render_pl_layout, 1, &pk_range))        return 1;
+    if (!vk_pl_layout_init2(cs_render_ds_layout, &cs_render_pl_layout, &pk_range, 1))        return 1;
     if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return 1;
     if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                     return 1;
     if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return 1;
     if (!vk_pl_layout_init(gfx_ds_layout, &gfx_pl_layout))                                   return 1;
-    if (!vk_basic_pl_init2(gfx_pl_layout, &gfx_pl))                                          return 1;
+    if (!vk_basic_pl_init2(gfx_pl_layout, "./res/default.vert.spv", "./res/default.frag.spv", &gfx_pl)) return 1;
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(lod)) return 1;

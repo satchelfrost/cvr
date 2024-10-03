@@ -1,9 +1,18 @@
 #version 450
 
-layout(location = 0) out vec2 uv;
+layout(push_constant) uniform constants
+{
+    mat4 mvp;
+} push_const;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inColor;
+layout(location = 2) in vec2 inUv;
+
+layout(location = 0) out vec3 fragColor;
 
 void main()
 {
-    uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
-    gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+    gl_Position = push_const.mvp * vec4(inPosition, 1.0);
+    fragColor = inColor;
 }

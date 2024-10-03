@@ -198,10 +198,12 @@ static Example examples[] = {
             .names = (const char *[]) {
                 "default.vert",
                 "default.frag",
+                "sst.vert",
+                "sst.frag",
                 "render.comp",
                 "resolve.comp",
             },
-            .count = 4,
+            .count = 6,
         },
         .c_files = {
             .names = default_c_file_names,

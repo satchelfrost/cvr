@@ -89,7 +89,7 @@ typedef struct {
     Vk_Image img;
     size_t id;
     bool active; // TODO: I don't like this
-    VkDescriptorSet descriptor_set;
+    VkDescriptorSet descriptor_set; // TODO: I don't like this either
 } Vk_Texture;
 
 typedef struct {
@@ -195,7 +195,7 @@ bool vk_swapchain_init();
 bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
-bool vk_basic_pl_init2(VkPipelineLayout pl_layout, VkPipeline *pl);
+bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert_name, const char *frag_name, VkPipeline *pl);
 bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
@@ -204,7 +204,7 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout);
-bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, size_t range_count, VkPushConstantRange *ranges);
+bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, VkPushConstantRange *ranges, size_t range_count);
 bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 
 /* general ubo initializer */
@@ -259,6 +259,16 @@ void vk_pl_barrier(VkImageMemoryBarrier barrier);
     .type = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
     .descriptorCount = COUNT,
 
+/* You may wonder "why bother putting a binding int this macro if your bindings are
+ * just going to increment anyway with each additional one?". The reason is because
+ * sometimes you may want to have two or more descriptor set layouts that have the same
+ * bindings but are in different descriptor sets, e.g.: 
+ *
+ *     set = 0, bindings = 0 & 1,
+ *     set = 1, bindings = 0,
+ *
+ * At least, I think this is possible, so for now I'm leaving it this way.
+ * */
 #define DS_BINDING(BINDING, DS_TYPE, BIT_FLAGS)       \
     .binding = BINDING,                               \
     .descriptorCount = 1,                             \
@@ -886,7 +896,7 @@ defer:
     return result;
 }
 
-bool vk_basic_pl_init2(VkPipelineLayout pl_layout, VkPipeline *pl)
+bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert_name, const char *frag_name, VkPipeline *pl)
 {
     bool result = true;
 
@@ -903,8 +913,8 @@ bool vk_basic_pl_init2(VkPipelineLayout pl_layout, VkPipeline *pl)
             .pName = "main",
         },
     };
-    if (!vk_shader_mod_init("./res/default.vert.spv", &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init("./res/default.frag.spv", &stages[1].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(vert_name, &stages[0].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(frag_name, &stages[1].module)) nob_return_defer(false);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -997,17 +1007,16 @@ bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout
     return true;
 }
 
-bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, size_t range_count, VkPushConstantRange *ranges)
+bool vk_pl_layout_init2(VkDescriptorSetLayout ds_layout, VkPipelineLayout *pl_layout, VkPushConstantRange *ranges, size_t range_count)
 {
     VkPipelineLayoutCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
-        .pSetLayouts = &layout,
+        .pSetLayouts = &ds_layout,
         .pushConstantRangeCount = range_count,
         .pPushConstantRanges = ranges,
     };
-    VkResult res = vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout);
-    if (!VK_SUCCEEDED(res)) {
+    if (!VK_SUCCEEDED(vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout))) {
         nob_log(NOB_ERROR, "failed to create pipeline layout");
         return false;
     }
@@ -1031,8 +1040,7 @@ bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkP
         .layout = pl_layout,
         .stage = shader_ci,
     };
-    VkResult res = vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pipeline);
-    if (!VK_SUCCEEDED(res)) {
+    if (!VK_SUCCEEDED(vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pipeline))) {
         nob_log(NOB_ERROR, "failed to create compute pipeline");
         nob_return_defer(false);
     }
@@ -1758,7 +1766,7 @@ bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type, VkShaderStag
     }
 
     VkDescriptorType vk_ds_type;
-    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER;
     for (size_t i = 0; i < tex_count; i++) {
@@ -1802,7 +1810,7 @@ bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type)
     }
 
     VkDescriptorType vk_ds_type;
-    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     VkDescriptorPoolSize pool_size = {
         .type = vk_ds_type,
@@ -1840,7 +1848,7 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
         .pSetLayouts = &texture_set->set_layout,
     };
 
-    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER;
+    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER; // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
     if (grouped_bindings) {
         VkDescriptorSet *set = &texture_set->descriptor_set;
         VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
@@ -1860,7 +1868,7 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
     }
 
     VkDescriptorType vk_ds_type;
-    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     /* update texture descriptor sets */
     VkWriteDescriptorSet write = {
@@ -1872,7 +1880,7 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
     };
 
     VkImageLayout vk_img_layout;
-    vk_img_layout = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ?
+    vk_img_layout = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
         VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     for (size_t tex = 0; tex < texture_set->count; tex++) {
         VkDescriptorImageInfo img_info = {

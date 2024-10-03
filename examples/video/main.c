@@ -10,11 +10,11 @@
 #define HEIGHT (9 * FACTOR)
 
 typedef enum {
-    VIDEO_TEX_TYPE_Y,
-    VIDEO_TEX_TYPE_CB,
-    VIDEO_TEX_TYPE_CR,
-    VIDEO_TEX_COUNT,
-} Video_Tex_Type;
+    VIDEO_PLANE_Y,
+    VIDEO_PLANE_CB,
+    VIDEO_PLANE_CR,
+    VIDEO_PLANE_COUNT,
+} Video_Plane_Type;
 
 typedef enum {
     VIDEO_IDX_SUITE_E,
@@ -32,26 +32,69 @@ const char *video_names[] = {
 };
 
 typedef struct {
-    Vk_Texture textures[VIDEO_TEX_COUNT];
-    Vk_Buffer stg_buffs[VIDEO_TEX_COUNT];
-    VkDescriptorSetLayout set_layout;
-    VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_set;
-} Video_Texture;
+    Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    Vk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    VkDescriptorSet ds_sets[VIDEO_IDX_COUNT];
+    VkDescriptorPool ds_pool;
+    VkDescriptorSetLayout ds_layout;
+    VkPipelineLayout pl_layout;
+} Video_Textures;
 
-Video_Texture video_textures[VIDEO_IDX_COUNT] = {0};
+Video_Textures video_textures = {0};
+ 
+bool setup_ds_layout()
+{
+    VkDescriptorSetLayoutBinding tex_frag_binding = {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)};
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &tex_frag_binding,
+    };
+    if (!vk_create_ds_layout(layout_ci, &video_textures.ds_layout)) return false;
 
-bool init_video_texture(Image img, Video_Tex_Type vid_tex_type, Video_Idx vid_idx)
+    return true;
+}
+
+bool setup_ds_pool()
+{
+    VkDescriptorPoolSize pool_sizes = {DS_POOL(COMBINED_IMAGE_SAMPLER, 1)};
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_sizes,
+        // .maxSets = VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT,
+        .maxSets = 1, // TODO: here for testing only
+    };
+
+    if (!vk_create_ds_pool(pool_ci, &video_textures.ds_pool)) return false;
+
+    return true;
+}
+
+bool setup_ds_sets()
+{
+    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&video_textures.ds_layout, 1, video_textures.ds_pool)};
+    if (!vk_alloc_ds(alloc, video_textures.ds_sets)) return false;
+
+    VkDescriptorImageInfo img_info = {
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .imageView   = video_textures.planes[0].view,
+        .sampler     = video_textures.planes[0].sampler,
+    };
+    VkWriteDescriptorSet writes[] = {
+        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[VIDEO_IDX_SUITE_E], &img_info)},
+    };
+    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+
+    return true;
+}
+
+bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
 {
     bool result = true;
 
-    if (vid_tex_type < 0 || vid_tex_type >= VIDEO_TEX_COUNT) {
-        nob_log(NOB_ERROR, "only three textures are required for ycbcr");
-        return false;
-    }
-
     /* create staging buffer for image */
-    Vk_Buffer *stg_buff = &video_textures[vid_idx].stg_buffs[vid_tex_type];
+    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
     stg_buff->size  = img.width * img.height * format_to_size(img.format);
     stg_buff->count = img.width * img.height;
 
@@ -92,14 +135,14 @@ bool init_video_texture(Image img, Video_Tex_Type vid_tex_type, Video_Idx vid_id
     VkSampler sampler;
     if (!vk_sampler_init(&sampler)) nob_return_defer(false);
 
-    Vk_Texture texture = {
+    Vk_Texture plane = {
         .view = img_view,
         .sampler = sampler,
         .img = vk_img,
-        .id = vid_tex_type + vid_idx * VIDEO_TEX_COUNT,
+        .id = vid_plane_type + vid_idx * VIDEO_PLANE_COUNT,
         .active = true,
     };
-    video_textures[vid_idx].textures[vid_tex_type] = texture;
+    video_textures.planes[plane.id] = plane;
 
 defer:
     vk_buff_destroy(*stg_buff);
@@ -118,14 +161,6 @@ int main()
 
     init_window(WIDTH, HEIGHT, "video");
     // set_target_fps(60);
-
-    float time = 0.0f;
-    Buffer buff = {
-        .size  = sizeof(float),
-        .count = 1,
-        .items = &time,
-    };
-    if (!ubo_init(buff, EXAMPLE_TEX)) return 1;
 
     /* create a texture from video */
     const char *file_name = "res/suite_e_snippet.mpg";
@@ -149,8 +184,19 @@ int main()
     /* decode one frame and use the luminance to create a texture */
     plm_frame_t *frame =  plm_decode_video(plm);
     img.data = frame->y.data;
-    if (!init_video_texture(img, VIDEO_TEX_TYPE_Y, VIDEO_IDX_SUITE_E)) return 1;
+    if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_Y)) return 1;
     unload_image(img);
+
+    /* setup descriptors */
+    if (!setup_ds_layout()) return 1;
+    if (!setup_ds_pool())   return 1;
+    if (!setup_ds_sets())   return 1;
+
+    /* setup the graphics pipeline */
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(uint32_t)};
+    if (!vk_pl_layout_init2(video_textures.ds_layout, &video_textures.pl_layout, &pk_range, 1)) return 1;
+    const char *shaders[] = {"./res/default.vert.spv", "./res/default.frag.spv"};
+    if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &gfx_pl))          return 1;
 
     return 1;
 
@@ -166,8 +212,8 @@ int main()
     /* cleanup */
     plm_destroy(plm);
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        for (size_t j = 0; j < VIDEO_TEX_COUNT; j++) {
-            vk_unload_texture2(video_textures[i].textures[j]);
+        for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
+            vk_unload_texture2(video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
     close_window();
