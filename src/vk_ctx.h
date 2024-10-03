@@ -236,6 +236,7 @@ void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
+bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data);
 
 /* A staged upload to the GPU requires a copy from a host (CPU) visible buffer
  * to a device (GPU) visible buffer. It's slower to upload, because of the copy
@@ -342,6 +343,14 @@ typedef struct Color {
 
 void vk_begin_render_pass(Color color);
 
+int format_to_size(VkFormat fmt);
+bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
+bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type);
+bool vk_unload_texture(size_t id, Descriptor_Type ds_type);
+bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
+bool vk_sampler_init(VkSampler *sampler);
+
 #endif // VK_CTX_H_
 
 /***********************************************************************************
@@ -408,11 +417,6 @@ void destroy_ext_manager();
 bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
-
-bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
-bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
-bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type);
-bool vk_unload_texture(size_t id, Descriptor_Type ds_type);
 
 /* Add various static extensions & validation layers here */
 static const char *validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
@@ -1411,7 +1415,6 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example)
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
     bool result = true;
-    (void) id; (void)vtx_buff; (void)idx_buff, (void)mvp;
 
     VkCommandBuffer cmd_buffer = cmd_man.gfx_buff;
 
@@ -2425,30 +2428,63 @@ void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type)
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
 {
-    bool result = true;
+    if (buffer->size == 0) {
+        nob_log(NOB_ERROR, "Vk_Buffer must be set with size before calling vk_buff_init");
+        return false;
+    }
 
-    VkBufferCreateInfo buffer_ci = {0};
-    buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    cvr_chk(buffer->size, "Vk_Buffer must be set with size before calling vk_buff_init");
-    buffer_ci.size = (VkDeviceSize) buffer->size;
-    buffer_ci.usage = usage;
-    buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vk_chk(vkCreateBuffer(ctx.device, &buffer_ci, NULL, &buffer->handle), "failed to create buffer");
+    VkBufferCreateInfo buffer_ci = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = (VkDeviceSize) buffer->size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    if (!VK_SUCCEEDED(vkCreateBuffer(ctx.device, &buffer_ci, NULL, &buffer->handle))) {
+        nob_log(NOB_ERROR, "failed to create buffer");
+        return false;
+    }
 
     VkMemoryRequirements mem_reqs = {0};
     vkGetBufferMemoryRequirements(ctx.device, buffer->handle, &mem_reqs);
+    VkMemoryAllocateInfo alloc_ci = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_reqs.size,
+    };
+    if (!find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex)) {
+        nob_log(NOB_ERROR, "while initializing buffer, memory not suitable based on memory requirements");
+        return false;
+    }
+    if (!VK_SUCCEEDED(vkAllocateMemory(ctx.device, &alloc_ci, NULL, &buffer->mem))) {
+        nob_log(NOB_ERROR, "failed to allocate buffer memory!");
+        return false;
+    }
+    if (!VK_SUCCEEDED(vkBindBufferMemory(ctx.device, buffer->handle, buffer->mem, 0))) {
+        nob_log(NOB_ERROR, "failed to bind buffer memory");
+        return false;
+    }
 
-    VkMemoryAllocateInfo alloc_ci = {0};
-    alloc_ci.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_ci.allocationSize = mem_reqs.size;
-    result = find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex);
-    cvr_chk(result, "Memory not suitable based on memory requirements");
-    VkResult vk_result = vkAllocateMemory(ctx.device, &alloc_ci, NULL, &buffer->mem);
-    vk_chk(vk_result, "failed to allocate buffer memory!");
-    vk_chk(vkBindBufferMemory(ctx.device, buffer->handle, buffer->mem, 0), "failed to bind buffer memory");
+    return true;
+}
 
-defer:
-    return result;
+bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data)
+{
+    bool result = vk_buff_init(
+        stg_buff,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    if(!result) {
+        nob_log(NOB_ERROR, "failed to create staging buffer");
+        return false;
+    }
+    if (!VK_SUCCEEDED(vkMapMemory(ctx.device, stg_buff->mem, 0, stg_buff->size, 0, &stg_buff->mapped))) {
+        nob_log(NOB_ERROR, "unable to map memory for staging buffer");
+        return false;
+    }
+    memcpy(stg_buff->mapped, data, stg_buff->size);
+    vkUnmapMemory(ctx.device, stg_buff->mem);
+
+    return true;
 }
 
 void vk_buff_destroy(Vk_Buffer buffer)
@@ -2940,7 +2976,7 @@ defer:
     return result;
 }
 
-static inline int format_to_size(VkFormat fmt)
+int format_to_size(VkFormat fmt)
 {
     if (fmt == VK_FORMAT_R8G8B8A8_SRGB) {
         return 4;
@@ -2948,6 +2984,31 @@ static inline int format_to_size(VkFormat fmt)
         nob_log(NOB_WARNING, "unrecognized format %d, returning 4 instead", fmt);
         return 4;
     }
+}
+
+bool vk_sampler_init(VkSampler *sampler)
+{
+    VkPhysicalDeviceProperties props = {0};
+    vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
+    VkSamplerCreateInfo sampler_ci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = props.limits.maxSamplerAnisotropy,
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+    };
+    if (!VK_SUCCEEDED(vkCreateSampler(ctx.device, &sampler_ci, NULL, sampler))) {
+        nob_log(NOB_ERROR, "failed to create sampler");
+        return false;
+    }
+
+    return true;
 }
 
 bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type)
@@ -3003,22 +3064,26 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
     cvr_chk(result, "failed to create image view");
 
     /* create sampler */
-    VkSamplerCreateInfo sampler_ci = {0};
-    sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_ci.magFilter = VK_FILTER_LINEAR;
-    sampler_ci.minFilter = VK_FILTER_LINEAR;
-    sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_ci.anisotropyEnable = VK_TRUE;
     VkPhysicalDeviceProperties props = {0};
     vkGetPhysicalDeviceProperties(ctx.phys_device, &props);
-    sampler_ci.maxAnisotropy = props.limits.maxSamplerAnisotropy;
-    sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
-    sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    VkSamplerCreateInfo sampler_ci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .anisotropyEnable = VK_TRUE,
+        .maxAnisotropy = props.limits.maxSamplerAnisotropy,
+        .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+        .compareOp = VK_COMPARE_OP_ALWAYS,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+    };
     VkSampler sampler;
-    vk_chk(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler), "failed to create sampler");
+    if (!VK_SUCCEEDED(vkCreateSampler(ctx.device, &sampler_ci, NULL, &sampler))) {
+        nob_log(NOB_ERROR, "failed to create sampler");
+        nob_return_defer(false);
+    }
 
     Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
     Vk_Texture texture = {
