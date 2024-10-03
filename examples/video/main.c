@@ -153,10 +153,10 @@ defer:
 int main()
 {
     Camera camera = {
-        .position = {0.0f, 0.0f, 2.0f},
-        .target = {0.0f, 0.0f, 0.0f},
-        .up = {0.0f, 1.0f, 0.0f},
-        .fovy = 45,
+        .position   = {0.0f, 0.0f, 2.0f},
+        .target     = {0.0f, 0.0f, 0.0f},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .fovy       = 45,
         .projection = PERSPECTIVE,
     };
 
@@ -198,12 +198,13 @@ int main()
     if (!vk_pl_layout_init2(video_textures.ds_layout, &video_textures.pl_layout, &pk_range, 1)) return 1;
     const char *shaders[] = {"./res/default.vert.spv", "./res/default.frag.spv"};
     if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return 1;
-    return 1;
 
     while(!window_should_close()) {
         begin_drawing(BLUE);
             begin_mode_3d(camera);
                 scale(aspect, 1.0f, 1.0f);
+                if (!draw(gfx_pl, video_textures.pl_layout, video_textures.ds_sets[0], SHAPE_QUAD))
+                    return 1;
                 // if (!draw_texture(tex, SHAPE_QUAD)) return 1;
             end_mode_3d();
         end_drawing();

@@ -111,29 +111,12 @@ bool tex_sampler_init();
 
 bool init_window(int width, int height, const char *title)
 {
-    bool result = true;
-
     /* Initialize glfw stuff */
     glfwInit();
-
-    /* Interesting option for full screen */
-    // int num_monitors;
-    // GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
-    // const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
-    // width = mode->width;
-    // height = mode->height;
     win_size.width = width;
     win_size.height = height;
-
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
-
-    // glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-    // glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-    // glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-    // glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-    // ctx.window = glfwCreateWindow(width, height, title, monitors[0], NULL);
-
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
     glfwSetKeyCallback(ctx.window, key_callback);
@@ -142,10 +125,9 @@ bool init_window(int width, int height, const char *title)
     glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
     glfwSetJoystickCallback(joystick_callback);
 
-    cvr_chk(vk_init(), "failed to initialize Vulkan context");
-
-defer:
-    return result;
+    /* initialize vulkan */
+    if (!vk_init()) return false;
+    else return true;
 }
 
 bool window_should_close()
@@ -157,29 +139,43 @@ bool window_should_close()
 
 bool draw_shape(Shape_Type shape_type)
 {
-    bool result = true;
-
     if (!ctx.pipelines[PIPELINE_DEFAULT])
         if (!vk_basic_pl_init(PIPELINE_DEFAULT))
-            nob_return_defer(false);
+            return false;
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix model = {0};
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+        return false;
+    }
+
+    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    return vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
+}
+
+
+bool draw(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
+{
+    if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    result = vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
-
-defer:
-    return result;
+    Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape].idx_buff;
+    return vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, mvp);
 }
 
 bool draw_shape_wireframe(Shape_Type shape_type)

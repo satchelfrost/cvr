@@ -34,7 +34,6 @@ int main()
     };
 
     init_window(500, 500, "Load texture");
-    set_target_fps(60);
 
     /* initialize and map the uniform data */
     float time = 0.0f;
@@ -56,7 +55,6 @@ int main()
         time = get_time();
         begin_drawing(BLACK);
         begin_mode_3d(camera);
-            rotate_z(3.14259f);
             rotate_y(time);
             push_matrix();
                 scale(matrix_aspect, 1.0f, 1.0f);

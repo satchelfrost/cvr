@@ -122,7 +122,6 @@ typedef enum {
     PIPELINE_POINT_CLOUD_ADV,
     PIPELINE_TEXTURE,
     PIPELINE_COMPUTE,
-    PIPELINE_SST,
     PIPELINE_COUNT,
 } Pipeline_Type;
 
@@ -195,7 +194,8 @@ bool vk_swapchain_init();
 bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
-bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert_name, const char *frag_name, VkPipeline *pl);
+bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl);
+bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
 bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
@@ -223,8 +223,10 @@ bool vk_ssbo_descriptor_set_init(Descriptor_Type ds_type);
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_rec_compute();
 bool vk_submit_compute();
@@ -232,7 +234,6 @@ bool vk_end_rec_compute();
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value);
 void vk_compute_pl_barrier();
-void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
@@ -387,14 +388,10 @@ typedef struct {
     VkSemaphore img_avail_sem;
     VkSemaphore render_fin_sem;
     VkSemaphore compute_fin_sem;
-    VkFence fence;
+    VkFence fence; // TODO: gfx_fence
     VkFence compute_fence;
 } Vk_Cmd_Man;
-static Vk_Cmd_Man cmd_man = {0};
-
-#define MAX_CMD_BUFF_STACK 5
-VkCommandBuffer cmd_buff_stack[MAX_CMD_BUFF_STACK];
-size_t cmd_buff_tos = 0;
+static Vk_Cmd_Man cmd_man = {0}; // should this just be in ctx?
 
 bool cmd_man_init();
 bool cmd_buff_create();
@@ -896,7 +893,123 @@ defer:
     return result;
 }
 
-bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert_name, const char *frag_name, VkPipeline *pl)
+bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl)
+{
+    bool result = true;
+
+    VkPipelineShaderStageCreateInfo stages[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pName = "main",
+        },
+    };
+
+    if (!vk_shader_mod_init(vert, &stages[0].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(frag, &stages[1].module)) nob_return_defer(false);
+
+    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
+        .pDynamicStates = dynamic_states,
+    };
+
+    VtxAttrDescs vert_attrs = {0};
+    get_attr_descs(&vert_attrs, PIPELINE_DEFAULT);
+    VkVertexInputBindingDescription binding_desc = get_binding_desc(PIPELINE_DEFAULT);
+    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &binding_desc,
+        .vertexAttributeDescriptionCount = vert_attrs.count,
+        .pVertexAttributeDescriptions = vert_attrs.items,
+    };
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkViewport viewport = {
+        .width    = (float) ctx.extent.width,
+        .height   = (float) ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D scissor = {.extent = ctx.extent,};
+    VkPipelineViewportStateCreateInfo viewport_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .lineWidth = 1.0f,
+        .cullMode = VK_CULL_MODE_NONE,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineColorBlendAttachmentState color_blend = {
+        .colorWriteMask = 0xf, // rgba
+        .blendEnable = VK_TRUE,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    };
+    VkPipelineColorBlendStateCreateInfo color_blend_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend,
+        .logicOp = VK_LOGIC_OP_COPY,
+    };
+    VkPipelineDepthStencilStateCreateInfo depth_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .maxDepthBounds = 1.0f,
+    };
+    VkGraphicsPipelineCreateInfo pipeline_ci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = NOB_ARRAY_LEN(stages),
+        .pStages = stages,
+        .pVertexInputState = &vertex_input_ci,
+        .pInputAssemblyState = &input_assembly_ci,
+        .pViewportState = &viewport_state_ci,
+        .pRasterizationState = &rasterizer_ci,
+        .pMultisampleState = &multisampling_ci,
+        .pColorBlendState = &color_blend_ci,
+        .pDynamicState = &dynamic_state_ci,
+        .pDepthStencilState = &depth_ci,
+        .layout = pl_layout,
+        .renderPass = ctx.render_pass,
+        .subpass = 0,
+    };
+
+    if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
+        nob_log(NOB_INFO, "failed to create pipeline");
+        nob_return_defer(false);
+    }
+
+defer:
+    vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
+    vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
+    nob_da_free(vert_attrs);
+    return result;
+}
+
+bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
 {
     bool result = true;
 
@@ -913,8 +1026,8 @@ bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert_name, const 
             .pName = "main",
         },
     };
-    if (!vk_shader_mod_init(vert_name, &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init(frag_name, &stages[1].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.vert.spv", &stages[0].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.frag.spv", &stages[1].module)) nob_return_defer(false);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1226,36 +1339,29 @@ defer:
     return result;
 }
 
-bool vk_draw_sst()
+bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
-    bool result = true;
-
-    if (!ctx.pipelines[PIPELINE_SST] || ctx.texture_sets[DS_TYPE_COMPUTE_RASTERIZER].descriptor_set) {
-        nob_log(NOB_ERROR, "pipeline or texture set not setup");
-        nob_return_defer(false);
-    }
-
     VkCommandBuffer cmd_buffer = cmd_man.gfx_buff;
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_SST]);
+
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    vkCmdBindDescriptorSets(cmd_man.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);
     VkViewport viewport = {
-        .width    = (float)ctx.extent.width,
-        .height   = (float)ctx.extent.height,
+        .width    = ctx.extent.width,
+        .height   = ctx.extent.height,
         .maxDepth = 1.0f,
     };
     vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
-    VkRect2D scissor = { .extent = ctx.extent, };
+    VkRect2D scissor = {0};
+    scissor.extent = ctx.extent;
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    float16 mat = MatrixToFloatV(mvp);
+    vkCmdPushConstants( cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float16), &mat);
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 
-    vkCmdBindDescriptorSets(
-        cmd_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[PIPELINE_POINT_CLOUD_ADV], 0, 1,
-        &ctx.texture_sets[DS_TYPE_COMPUTE_RASTERIZER].descriptor_set, 0, NULL
-    );
-    vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
-
-defer:
-    return result;
+    return true; // TODO: do I want to do this?
 }
 
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
@@ -1271,7 +1377,7 @@ void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_
     vkCmdPushConstants(cmd_buff, pl_layout, flags, offset, size, value);
 }
 
-void vk_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
+void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
 {
     vkCmdBindPipeline(cmd_man.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     vkCmdBindDescriptorSets(cmd_man.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);

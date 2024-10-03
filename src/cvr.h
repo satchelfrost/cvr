@@ -285,6 +285,7 @@ void close_window();                                        /* Close window and 
 bool window_should_close();                                 /* Check if window should close and poll events */
 Window_Size get_window_size();
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
+bool draw(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
 void start_timer();

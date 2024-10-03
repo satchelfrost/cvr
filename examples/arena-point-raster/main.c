@@ -324,7 +324,7 @@ int main(int argc, char **argv)
     if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                     return 1;
     if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return 1;
     if (!vk_pl_layout_init(gfx_ds_layout, &gfx_pl_layout))                                   return 1;
-    if (!vk_basic_pl_init2(gfx_pl_layout, "./res/default.vert.spv", "./res/default.frag.spv", &gfx_pl)) return 1;
+    if (!vk_sst_pl_init(gfx_pl_layout, &gfx_pl))                                             return 1;
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(lod)) return 1;
@@ -415,7 +415,7 @@ int main(int argc, char **argv)
         vk_pl_barrier(barrier);
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
-            vk_gfx(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
+            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
