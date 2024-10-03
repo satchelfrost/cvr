@@ -38,6 +38,7 @@ typedef struct {
     VkDescriptorPool ds_pool;
     VkDescriptorSetLayout ds_layout;
     VkPipelineLayout pl_layout;
+    VkPipeline gfx_pl;
 } Video_Textures;
 
 Video_Textures video_textures = {0};
@@ -193,11 +194,10 @@ int main()
     if (!setup_ds_sets())   return 1;
 
     /* setup the graphics pipeline */
-    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(uint32_t)};
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
     if (!vk_pl_layout_init2(video_textures.ds_layout, &video_textures.pl_layout, &pk_range, 1)) return 1;
     const char *shaders[] = {"./res/default.vert.spv", "./res/default.frag.spv"};
-    if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &gfx_pl))          return 1;
-
+    if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return 1;
     return 1;
 
     while(!window_should_close()) {

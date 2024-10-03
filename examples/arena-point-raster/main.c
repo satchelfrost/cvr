@@ -4,12 +4,10 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define MAX_POINTS 100000000 // 100 million
-#define MIN_POINTS 100000    // 100 thousand
 #define FRAME_BUFF_SZ 2048
 #define MAX_FPS_REC 100
-#define SUBGROUP_SZ 1024     // Subgroup size for render.comp
-#define NUM_BATCHES 4        // Number of batches to dispatch
+#define SUBGROUP_SZ 1024    // Subgroup size for render.comp
+#define NUM_BATCHES 4       // Number of batches to dispatch
 #define MAX_LOD 7
 
 #define read_attr(attr, sv)                   \
