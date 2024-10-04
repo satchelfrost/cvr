@@ -28,7 +28,6 @@ typedef struct {
     size_t count;
     size_t capacity;
     Vk_Buffer buff;
-    bool gpu_visible;
     const char *name;
     VkDescriptorSet set;
 } Point_Cloud_Layer;
@@ -252,7 +251,7 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
 
 bool build_compute_cmds(size_t highest_lod)
 {
-    size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
+    size_t group_x = 1, group_y = 1, group_z = 1;
     if (!vk_rec_compute()) return false;
         /* loop through the lod layers of the point cloud */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
@@ -261,12 +260,15 @@ bool build_compute_cmds(size_t highest_lod)
             size_t batch_size = group_x / NUM_BATCHES;
             for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
                 uint32_t offset = batch * batch_size * SUBGROUP_SZ;
+                uint32_t count = pc_layers[lod].count;
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
+                vk_compute_pl_barrier(); // TODO: this makes things flicker less, but problem persists
             }
         }
 
-        vk_compute_pl_barrier();
+        // vk_compute_pl_barrier();
 
         /* resolve the frame buffer */
         group_x = group_y = FRAME_BUFF_SZ / 16;
@@ -318,7 +320,7 @@ int main(int argc, char **argv)
     if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
 
     /* create pipelines */
-    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(uint32_t)};
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 2 * sizeof(uint32_t)};
     if (!vk_pl_layout_init2(cs_render_ds_layout, &cs_render_pl_layout, &pk_range, 1))        return 1;
     if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return 1;
     if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                     return 1;

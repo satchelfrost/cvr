@@ -1435,6 +1435,8 @@ bool vk_submit_compute()
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.compute_buff,
+        .pSignalSemaphores = &cmd_man.compute_fin_sem,
+        .signalSemaphoreCount = 1,
     };
 
     res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
@@ -1628,16 +1630,24 @@ bool vk_end_drawing()
         return false;
     }
 
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags wait_stages[] = {
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
+    VkSemaphore wait_sems[] = {cmd_man.compute_fin_sem, cmd_man.img_avail_sem};
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.gfx_buff,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &cmd_man.img_avail_sem,
-        .pWaitDstStageMask = &wait_stage,
+        // .waitSemaphoreCount = 1,
+        .waitSemaphoreCount = 2,
+        // .pWaitSemaphores = &cmd_man.img_avail_sem,
+        .pWaitSemaphores = wait_sems,
+        // .pWaitDstStageMask = &wait_stage,
+        .pWaitDstStageMask = wait_stages,
     };
 
     res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence);
