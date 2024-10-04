@@ -237,7 +237,7 @@ void vk_compute_pl_barrier();
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
-bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data);
+bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data, bool leave_mapped);
 
 /* A staged upload to the GPU requires a copy from a host (CPU) visible buffer
  * to a device (GPU) visible buffer. It's slower to upload, because of the copy
@@ -1643,11 +1643,16 @@ bool vk_end_drawing()
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &cmd_man.render_fin_sem,
         // .waitSemaphoreCount = 1,
-        .waitSemaphoreCount = 2,
         // .pWaitSemaphores = &cmd_man.img_avail_sem,
-        .pWaitSemaphores = wait_sems,
         // .pWaitDstStageMask = &wait_stage,
-        .pWaitDstStageMask = wait_stages,
+
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &wait_sems[1],
+        .pWaitDstStageMask = &wait_stages[1],
+
+        // .waitSemaphoreCount = 2,
+        // .pWaitSemaphores = wait_sems,
+        // .pWaitDstStageMask = wait_stages,
     };
 
     res = vkQueueSubmit(ctx.gfx_queue, 1, &submit, cmd_man.fence);
@@ -2590,7 +2595,7 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
     return true;
 }
 
-bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data)
+bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data, bool leave_mapped)
 {
     bool result = vk_buff_init(
         stg_buff,
@@ -2606,7 +2611,8 @@ bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data)
         return false;
     }
     memcpy(stg_buff->mapped, data, stg_buff->size);
-    vkUnmapMemory(ctx.device, stg_buff->mem);
+
+    if (!leave_mapped) vkUnmapMemory(ctx.device, stg_buff->mem);
 
     return true;
 }
@@ -3104,6 +3110,8 @@ int format_to_size(VkFormat fmt)
 {
     if (fmt == VK_FORMAT_R8G8B8A8_SRGB) {
         return 4;
+    } else if (fmt == VK_FORMAT_R8_UNORM) {
+        return 1;
     } else {
         nob_log(NOB_WARNING, "unrecognized format %d, returning 4 instead", fmt);
         return 4;

@@ -98,8 +98,7 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
     Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
     stg_buff->size  = img.width * img.height * format_to_size(img.format);
     stg_buff->count = img.width * img.height;
-
-    if (!vk_stg_buff_init(stg_buff, img.data)) return false;
+    if (!vk_stg_buff_init(stg_buff, img.data, true)) return false;
 
     /* create the image */
     Vk_Image vk_img = {
@@ -112,7 +111,7 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    if (!result) nob_return_defer(false);
+    if (!result) return false;
 
     transition_img_layout(
         vk_img.handle,
@@ -130,11 +129,11 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
     VkImageView img_view;
     if (!vk_img_view_init(vk_img, &img_view)) {
         nob_log(NOB_ERROR, "failed to create image view");
-        nob_return_defer(false);
+        return false;
     };
 
     VkSampler sampler;
-    if (!vk_sampler_init(&sampler)) nob_return_defer(false);
+    if (!vk_sampler_init(&sampler)) return false;
 
     Vk_Texture plane = {
         .view = img_view,
@@ -145,9 +144,31 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
     };
     video_textures.planes[plane.id] = plane;
 
-defer:
-    vk_buff_destroy(*stg_buff);
     return true;
+}
+
+bool update_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+{
+    bool result = true;
+
+    /* create staging buffer for image */
+    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
+    memcpy(stg_buff->mapped, img.data, stg_buff->size);
+
+    Vk_Image vk_img = video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT].img;
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    return result;
 }
 
 int main()
@@ -161,10 +182,13 @@ int main()
     };
 
     init_window(WIDTH, HEIGHT, "video");
-    // set_target_fps(60);
+    set_target_fps(60);
 
     /* create a texture from video */
-    const char *file_name = "res/suite_e_snippet.mpg";
+    // const char *file_name = "res/suite_e_snippet.mpg";
+    // const char *file_name = "res/suite_e_snippet_2.mpg";
+    const char *file_name = "res/suite_e_snippet_3.mpg";
+    // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
 	plm_t *plm = plm_create_with_filename(file_name);
 	if (!plm) {
 		nob_log(NOB_ERROR, "could not open file %s", file_name);
@@ -172,7 +196,7 @@ int main()
 	}
     plm_set_audio_enabled(plm, FALSE);
     Image img = {
-        .format = VK_FORMAT_R8G8B8A8_SRGB,
+        .format = VK_FORMAT_R8_UNORM,
         .width  = plm_get_width(plm),
         .height = plm_get_height(plm),
     };
@@ -183,10 +207,12 @@ int main()
     nob_log(NOB_INFO, "    image size in memory = %d bytes", img.height * img.width * 4);
 
     /* decode one frame and use the luminance to create a texture */
-    plm_frame_t *frame =  plm_decode_video(plm);
-    img.data = frame->y.data;
+    plm_frame_t *frame = plm_decode_video(plm);
+    img.data   = frame->y.data;
+    img.width  = frame->y.width;
+    img.height = frame->y.height;
+    nob_log(NOB_INFO, "width %zu height %zu", frame->y.width, frame->y.height);
     if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_Y)) return 1;
-    unload_image(img);
 
     /* setup descriptors */
     if (!setup_ds_layout()) return 1;
@@ -196,27 +222,54 @@ int main()
     /* setup the graphics pipeline */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
     if (!vk_pl_layout_init2(video_textures.ds_layout, &video_textures.pl_layout, &pk_range, 1)) return 1;
-    const char *shaders[] = {"./res/default.vert.spv", "./res/default.frag.spv"};
+    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
     if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return 1;
 
+    float vid_update_time = 0.0f;
+
     while(!window_should_close()) {
+        log_fps();
+
+        vid_update_time += get_frame_time();
+        /* update */
+        update_camera_free(&camera);
+
+        /* decode the next frame */
+        if (vid_update_time > 1.0f / 30.0f) {
+            plm_frame_t *frame = plm_decode_video(plm);
+            img.data   = frame->y.data;
+            img.width  = frame->y.width;
+            img.height = frame->y.height;
+            if (!update_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_Y)) return 1;
+
+            vid_update_time = 0.0f;
+        }
+
+        /* drawing */
         begin_drawing(BLUE);
             begin_mode_3d(camera);
                 scale(aspect, 1.0f, 1.0f);
-                if (!draw(gfx_pl, video_textures.pl_layout, video_textures.ds_sets[0], SHAPE_QUAD))
+                if (!draw(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[0], SHAPE_QUAD))
                     return 1;
-                // if (!draw_texture(tex, SHAPE_QUAD)) return 1;
             end_mode_3d();
         end_drawing();
     }
 
-    /* cleanup */
+    /* cleanup host */
     plm_destroy(plm);
+
+    /* cleanup device */
+    wait_idle();
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
+            vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
             vk_unload_texture2(video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
+    vk_destroy_ds_layout(video_textures.ds_layout);
+    vk_destroy_ds_pool(video_textures.ds_pool);
+    vk_destroy_pl_res(video_textures.gfx_pl, video_textures.pl_layout);
+
     close_window();
     return 0;
 }
