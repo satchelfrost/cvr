@@ -45,11 +45,15 @@ Video_Textures video_textures = {0};
  
 bool setup_ds_layout()
 {
-    VkDescriptorSetLayoutBinding tex_frag_binding = {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)};
+    VkDescriptorSetLayoutBinding tex_frag_bindings[] = {
+        {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+        {DS_BINDING(1, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+        {DS_BINDING(2, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+    };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &tex_frag_binding,
+        .bindingCount = NOB_ARRAY_LEN(tex_frag_bindings),
+        .pBindings = tex_frag_bindings,
     };
     if (!vk_create_ds_layout(layout_ci, &video_textures.ds_layout)) return false;
 
@@ -58,13 +62,14 @@ bool setup_ds_layout()
 
 bool setup_ds_pool()
 {
-    VkDescriptorPoolSize pool_sizes = {DS_POOL(COMBINED_IMAGE_SAMPLER, 1)};
+    VkDescriptorPoolSize pool_sizes = {
+        DS_POOL(COMBINED_IMAGE_SAMPLER, VIDEO_PLANE_COUNT * VIDEO_IDX_COUNT)
+    };
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = 1,
         .pPoolSizes = &pool_sizes,
-        // .maxSets = VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT,
-        .maxSets = 1, // TODO: here for testing only
+        .maxSets = VIDEO_IDX_COUNT,
     };
 
     if (!vk_create_ds_pool(pool_ci, &video_textures.ds_pool)) return false;
@@ -74,17 +79,37 @@ bool setup_ds_pool()
 
 bool setup_ds_sets()
 {
-    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&video_textures.ds_layout, 1, video_textures.ds_pool)};
-    if (!vk_alloc_ds(alloc, video_textures.ds_sets)) return false;
+    VkWriteDescriptorSet writes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT] = {0};
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        VkDescriptorSetAllocateInfo alloc = {
+            DS_ALLOC(&video_textures.ds_layout, 1, video_textures.ds_pool)
+        };
+        if (!vk_alloc_ds(alloc, &video_textures.ds_sets[i])) return false;
 
-    VkDescriptorImageInfo img_info = {
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .imageView   = video_textures.planes[0].view,
-        .sampler     = video_textures.planes[0].sampler,
-    };
-    VkWriteDescriptorSet writes[] = {
-        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[VIDEO_IDX_SUITE_E], &img_info)},
-    };
+        VkDescriptorImageInfo y_img_info = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView   = video_textures.planes[VIDEO_PLANE_Y + i * VIDEO_IDX_COUNT].view,
+            .sampler     = video_textures.planes[VIDEO_PLANE_Y + i * VIDEO_IDX_COUNT].sampler,
+        };
+        VkDescriptorImageInfo cb_img_info = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView   = video_textures.planes[VIDEO_PLANE_CB + i * VIDEO_IDX_COUNT].view,
+            .sampler     = video_textures.planes[VIDEO_PLANE_CB + i * VIDEO_IDX_COUNT].sampler,
+        };
+        VkDescriptorImageInfo cr_img_info = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView   = video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_IDX_COUNT].view,
+            .sampler     = video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_IDX_COUNT].sampler,
+        };
+        VkWriteDescriptorSet write_set[] = {
+            {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &y_img_info)},
+            {DS_WRITE_IMG(1, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cb_img_info)},
+            {DS_WRITE_IMG(2, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cr_img_info)},
+        };
+        writes[i * VIDEO_PLANE_COUNT + VIDEO_PLANE_Y ] = write_set[VIDEO_PLANE_Y];
+        writes[i * VIDEO_PLANE_COUNT + VIDEO_PLANE_CB] = write_set[VIDEO_PLANE_CB];
+        writes[i * VIDEO_PLANE_COUNT + VIDEO_PLANE_CR] = write_set[VIDEO_PLANE_CR];
+    }
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
     return true;
@@ -213,6 +238,14 @@ int main()
     img.height = frame->y.height;
     nob_log(NOB_INFO, "width %zu height %zu", frame->y.width, frame->y.height);
     if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_Y)) return 1;
+    img.data   = frame->cb.data;
+    img.width  = frame->cb.width;
+    img.height = frame->cb.height;
+    if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_CB)) return 1;
+    img.data   = frame->cr.data;
+    img.width  = frame->cr.width;
+    img.height = frame->cr.height;
+    if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_CR)) return 1;
 
     /* setup descriptors */
     if (!setup_ds_layout()) return 1;
@@ -241,6 +274,14 @@ int main()
             img.width  = frame->y.width;
             img.height = frame->y.height;
             if (!update_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_Y)) return 1;
+            img.data   = frame->cb.data;
+            img.width  = frame->cb.width;
+            img.height = frame->cb.height;
+            if (!update_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_CB)) return 1;
+            img.data   = frame->cr.data;
+            img.width  = frame->cr.width;
+            img.height = frame->cr.height;
+            if (!update_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_CR)) return 1;
 
             vid_update_time = 0.0f;
         }
