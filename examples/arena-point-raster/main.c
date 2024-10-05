@@ -264,7 +264,7 @@ bool build_compute_cmds(size_t highest_lod)
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
-                // vk_compute_pl_barrier(); // TODO: this makes things flicker less, but problem persists
+                vk_compute_pl_barrier(); // TODO: this makes things flicker less, but problem persists
             }
         }
 
@@ -274,7 +274,7 @@ bool build_compute_cmds(size_t highest_lod)
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
 
-        // vk_compute_pl_barrier(); // TODO: maybe this will help as well?
+        vk_compute_pl_barrier(); // TODO: maybe this will help as well?
 
     if (!vk_end_rec_compute()) return false;
     return true;

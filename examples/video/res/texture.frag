@@ -7,7 +7,7 @@ layout(binding = 0) uniform sampler2D y_sampler;
 layout(binding = 1) uniform sampler2D cb_sampler;
 layout(binding = 2) uniform sampler2D cr_sampler;
 
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out vec4 out_color;
 
 mat4 rec601 = mat4(
     1.16438,  0.00000,  1.59603, -0.87079,
@@ -18,10 +18,8 @@ mat4 rec601 = mat4(
 
 void main()
 {
-    //outColor = vec4(texture(texSampler, fragTexCoord).rrr, 1.0);
-
     float y  = texture(y_sampler,  tex_coord).r;
     float cb = texture(cb_sampler, tex_coord).r;
     float cr = texture(cr_sampler, tex_coord).r;
-    outColor = vec4(y, cb, cr, 1.0) * rec601;
+    out_color = vec4(y, cb, cr, 1.0) * rec601;
 }

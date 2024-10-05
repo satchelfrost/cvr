@@ -935,8 +935,8 @@ bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert, const char 
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
     };
     VkViewport viewport = {
-        .width    = (float) ctx.extent.width,
-        .height   = (float) ctx.extent.height,
+        .width    = (float)ctx.extent.width,
+        .height   = (float)ctx.extent.height,
         .maxDepth = 1.0f,
     };
     VkRect2D scissor = {.extent = ctx.extent,};
@@ -2309,7 +2309,8 @@ VkSurfaceFormatKHR choose_swapchain_fmt()
     VkSurfaceFormatKHR fmts[surface_fmt_count];
     vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.phys_device, ctx.surface, &surface_fmt_count, fmts);
     for (size_t i = 0; i < surface_fmt_count; i++) {
-        if (fmts[i].format == VK_FORMAT_B8G8R8A8_SRGB && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) // WOW
+        // if (fmts[i].format == VK_FORMAT_B8G8R8A8_SRGB && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
             return fmts[i];
     }
 

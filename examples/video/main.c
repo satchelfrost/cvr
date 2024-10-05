@@ -79,8 +79,8 @@ bool setup_ds_pool()
 
 bool setup_ds_sets()
 {
-    VkWriteDescriptorSet writes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT] = {0};
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+    // for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+    for (size_t i = 0; i < 1; i++) {
         VkDescriptorSetAllocateInfo alloc = {
             DS_ALLOC(&video_textures.ds_layout, 1, video_textures.ds_pool)
         };
@@ -101,16 +101,13 @@ bool setup_ds_sets()
             .imageView   = video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_IDX_COUNT].view,
             .sampler     = video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_IDX_COUNT].sampler,
         };
-        VkWriteDescriptorSet write_set[] = {
+        VkWriteDescriptorSet writes[] = {
             {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &y_img_info)},
             {DS_WRITE_IMG(1, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cb_img_info)},
             {DS_WRITE_IMG(2, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cr_img_info)},
         };
-        writes[i * VIDEO_PLANE_COUNT + VIDEO_PLANE_Y ] = write_set[VIDEO_PLANE_Y];
-        writes[i * VIDEO_PLANE_COUNT + VIDEO_PLANE_CB] = write_set[VIDEO_PLANE_CB];
-        writes[i * VIDEO_PLANE_COUNT + VIDEO_PLANE_CR] = write_set[VIDEO_PLANE_CR];
+        vk_update_ds(NOB_ARRAY_LEN(writes), writes);
     }
-    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
     return true;
 }
@@ -207,14 +204,16 @@ int main()
     };
 
     init_window(WIDTH, HEIGHT, "video");
-    set_target_fps(60);
+    // set_target_fps(60);
 
     /* create a texture from video */
     // const char *file_name = "res/suite_e_snippet.mpg";
     // const char *file_name = "res/suite_e_snippet_2.mpg";
-    const char *file_name = "res/suite_e_snippet_3.mpg";
+    // const char *file_name = "res/suite_e_snippet_3.mpg";
     // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
+    const char *file_name = "res/test_3.mpg";
 	plm_t *plm = plm_create_with_filename(file_name);
+    plm_set_loop(plm, TRUE);
 	if (!plm) {
 		nob_log(NOB_ERROR, "could not open file %s", file_name);
 		return 1;
@@ -236,15 +235,17 @@ int main()
     img.data   = frame->y.data;
     img.width  = frame->y.width;
     img.height = frame->y.height;
-    nob_log(NOB_INFO, "width %zu height %zu", frame->y.width, frame->y.height);
+    nob_log(NOB_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
     if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_Y)) return 1;
     img.data   = frame->cb.data;
     img.width  = frame->cb.width;
     img.height = frame->cb.height;
+    nob_log(NOB_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
     if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_CB)) return 1;
     img.data   = frame->cr.data;
     img.width  = frame->cr.width;
     img.height = frame->cr.height;
+    nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
     if (!init_video_texture(img, VIDEO_IDX_SUITE_E, VIDEO_PLANE_CR)) return 1;
 
     /* setup descriptors */
@@ -259,17 +260,22 @@ int main()
     if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return 1;
 
     float vid_update_time = 0.0f;
+    bool playback_finished = false;
 
-    while(!window_should_close()) {
-        log_fps();
-
-        vid_update_time += get_frame_time();
+    while(!window_should_close() && !playback_finished) {
         /* update */
+        log_fps();
         update_camera_free(&camera);
+        vid_update_time += get_frame_time();
 
         /* decode the next frame */
         if (vid_update_time > 1.0f / 30.0f) {
             plm_frame_t *frame = plm_decode_video(plm);
+            if (!frame) {
+                playback_finished = true;
+                nob_log(NOB_INFO, "playback finished!");
+                continue;
+            }
             img.data   = frame->y.data;
             img.width  = frame->y.width;
             img.height = frame->y.height;
