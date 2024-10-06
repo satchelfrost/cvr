@@ -352,7 +352,6 @@ int main()
         vk_pl_barrier(barrier);
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
-        draw_shape(SHAPE_CUBE);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
             rotate_y(get_time() * 0.5);
             if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);

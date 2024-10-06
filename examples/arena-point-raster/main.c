@@ -264,8 +264,25 @@ bool build_compute_cmds(size_t highest_lod)
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
-                vk_compute_pl_barrier(); // TODO: this makes things flicker less, but problem persists
+                // vk_compute_pl_barrier(); // TODO: this makes things flicker less, but problem persists
             }
+
+            // size_t points_per_batch = SUBGROUP_SZ * 25000;
+            // size_t points_rendered = 0;
+            // size_t points_remaining = pc_layers[lod].count;
+            // while (points_remaining > 0) {
+            //     size_t points_in_batch = (points_remaining < points_per_batch) ? points_remaining : points_per_batch;
+            //     size_t start = 16ul * points_rendered;
+            //     // size_t size = 16ul * points_in_batch;
+            //     size_t num_batches = ceil(points_in_batch / SUBGROUP_SZ);
+            //     uint32_t offset = start * SUBGROUP_SZ;
+            //     uint32_t count = pc_layers[lod].count;
+            //     vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+            //     vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
+            //     vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, num_batches, group_y, group_z);
+            //     points_rendered += points_in_batch;
+            //     points_remaining -= points_in_batch;
+            // }
         }
 
         vk_compute_pl_barrier();

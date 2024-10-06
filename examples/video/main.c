@@ -264,7 +264,7 @@ int main()
 
     while(!window_should_close() && !playback_finished) {
         /* update */
-        log_fps();
+        // log_fps();
         update_camera_free(&camera);
         vid_update_time += get_frame_time();
 
@@ -295,9 +295,15 @@ int main()
         /* drawing */
         begin_drawing(BLUE);
             begin_mode_3d(camera);
+                push_matrix();
                 scale(aspect, 1.0f, 1.0f);
                 if (!draw(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[0], SHAPE_QUAD))
                     return 1;
+                pop_matrix();
+                translate(0.0f, 1.0f, 0.0f);
+                scale(0.2f, 0.2f, 0.2f);
+                rotate_y(get_time());
+                draw_shape(SHAPE_CUBE);
             end_mode_3d();
         end_drawing();
     }

@@ -1435,8 +1435,8 @@ bool vk_submit_compute()
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd_man.compute_buff,
-        .pSignalSemaphores = &cmd_man.compute_fin_sem,
-        .signalSemaphoreCount = 1,
+        // .pSignalSemaphores = &cmd_man.compute_fin_sem,
+        // .signalSemaphoreCount = 1,
     };
 
     res = vkQueueSubmit(ctx.compute_queue, 1, &submit, cmd_man.compute_fence);
