@@ -207,17 +207,14 @@ int main()
     // set_target_fps(60);
 
     /* create a texture from video */
-    // const char *file_name = "res/suite_e_snippet.mpg";
-    // const char *file_name = "res/suite_e_snippet_2.mpg";
-    // const char *file_name = "res/suite_e_snippet_3.mpg";
+    const char *file_name = "res/suite_e_snippet.mpg";
     // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
-    const char *file_name = "res/test_3.mpg";
 	plm_t *plm = plm_create_with_filename(file_name);
-    plm_set_loop(plm, TRUE);
 	if (!plm) {
 		nob_log(NOB_ERROR, "could not open file %s", file_name);
 		return 1;
 	}
+    // plm_set_loop(plm, TRUE);
     plm_set_audio_enabled(plm, FALSE);
     Image img = {
         .format = VK_FORMAT_R8_UNORM,
@@ -272,6 +269,10 @@ int main()
         if (vid_update_time > 1.0f / 30.0f) {
             plm_frame_t *frame = plm_decode_video(plm);
             if (!frame) {
+                nob_log(NOB_INFO, "frame missing");
+                return 1;
+            }
+            if (!frame) {
                 playback_finished = true;
                 nob_log(NOB_INFO, "playback finished!");
                 continue;
@@ -296,9 +297,9 @@ int main()
         begin_drawing(BLUE);
             begin_mode_3d(camera);
                 push_matrix();
-                scale(aspect, 1.0f, 1.0f);
-                if (!draw(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[0], SHAPE_QUAD))
-                    return 1;
+                    scale(aspect, 1.0f, 1.0f);
+                    if (!draw(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[0], SHAPE_QUAD))
+                        return 1;
                 pop_matrix();
                 translate(0.0f, 1.0f, 0.0f);
                 scale(0.2f, 0.2f, 0.2f);

@@ -16,10 +16,16 @@ mat4 rec601 = mat4(
     0, 0, 0, 1
 );
 
+vec3 srgb_to_linear(vec3 srgb)
+{
+    return mix(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, srgb));
+}
+
 void main()
 {
     float y  = texture(y_sampler,  tex_coord).r;
     float cb = texture(cb_sampler, tex_coord).r;
     float cr = texture(cr_sampler, tex_coord).r;
     out_color = vec4(y, cb, cr, 1.0) * rec601;
+    out_color.rgb = srgb_to_linear(out_color.rgb);
 }

@@ -2309,8 +2309,7 @@ VkSurfaceFormatKHR choose_swapchain_fmt()
     VkSurfaceFormatKHR fmts[surface_fmt_count];
     vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.phys_device, ctx.surface, &surface_fmt_count, fmts);
     for (size_t i = 0; i < surface_fmt_count; i++) {
-        if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) // WOW
-        // if (fmts[i].format == VK_FORMAT_B8G8R8A8_SRGB && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        if (fmts[i].format == VK_FORMAT_B8G8R8A8_SRGB && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
             return fmts[i];
     }
 
@@ -3109,9 +3108,11 @@ defer:
 
 int format_to_size(VkFormat fmt)
 {
-    if (fmt == VK_FORMAT_R8G8B8A8_SRGB) {
+    if (VK_FORMAT_R8G8B8A8_UNORM <= fmt && fmt <= VK_FORMAT_B8G8R8A8_SRGB) {
+    // if (fmt == VK_FORMAT_R8G8B8A8_SRGB) {
         return 4;
-    } else if (fmt == VK_FORMAT_R8_UNORM) {
+    } else if (VK_FORMAT_R8_UNORM <= fmt && fmt <= VK_FORMAT_R8_SRGB) {
+    // } else if (fmt == VK_FORMAT_R8_UNORM) {
         return 1;
     } else {
         nob_log(NOB_WARNING, "unrecognized format %d, returning 4 instead", fmt);
