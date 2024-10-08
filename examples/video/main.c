@@ -207,10 +207,9 @@ int main()
     // set_target_fps(60);
 
     /* create a texture from video */
-    // const char *file_name = "res/suite_e_snippet.mpg";
-    // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
+        // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
             nob_log(NOB_ERROR, "could not open file %s", file_name);
