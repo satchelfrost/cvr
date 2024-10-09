@@ -112,6 +112,7 @@ bool setup_ds_sets()
     return true;
 }
 
+// TODO: I should be working with plm_frame_t instead of Image because image is meant to be used with cvr.h API
 bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
 {
     bool result = true;
@@ -162,7 +163,6 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
         .sampler = sampler,
         .img = vk_img,
         .id = vid_plane_type + vid_idx * VIDEO_PLANE_COUNT,
-        .active = true,
     };
     video_textures.planes[plane.id] = plane;
 

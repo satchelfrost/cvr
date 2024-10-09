@@ -17,6 +17,10 @@
  * [*] - find queue families should return a boolean, and then indices should be stored in ctx
  * [*] - I don't like ext_manager
  * [ ] - texture set probably shouldn't be in vk_ctx.h
+ * [ ] - grouped textures (i.e. multiple samplers) are unique so they shouldnt be allowed as default behavior
+ * [ ] - get rid of ubos in context
+ * [ ] - switch to using only vk_ubo_init2, then once switched, rename to vk_ubo_init again
+ * [ ] - eventually replace functions ending with "2" with the main one, once those can be removed
  * [ ] - enable a method for choosing extensions in user space
  * [ ] - get rid of nob_da_resize
  * [ ] - remove dependency of glfw
@@ -120,7 +124,7 @@ typedef enum {
     PIPELINE_TEXTURE,
     PIPELINE_COMPUTE,
     PIPELINE_COUNT,
-} Pipeline_Type;
+} Pipeline_Type; // TODO: these should be called default pipelines
 
 typedef enum {
     DS_TYPE_TEX,
@@ -211,6 +215,10 @@ bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout);
 bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, VkPushConstantRange *ranges, size_t range_count);
+
+ // TODO: I want everything (init1/2) to converge into this function, but temporarily don't want everything to break
+bool vk_pl_layout_init3(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
+
 bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 
 /* general ubo initializer */
@@ -227,6 +235,8 @@ bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+// TODO: this should probably be passed in as a structure
+bool vk_draw_w_ds_sets(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t ds_set_count, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Example example);
 bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
@@ -240,6 +250,8 @@ void vk_compute_pl_barrier();
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 void vk_buff_destroy(Vk_Buffer buffer);
+
+/* leave mapped should be true if we are consantly going to be using this same staging buffer */
 bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data, bool leave_mapped);
 
 /* A staged upload to the GPU requires a copy from a host (CPU) visible buffer
@@ -264,16 +276,6 @@ void vk_pl_barrier(VkImageMemoryBarrier barrier);
     .type = VK_DESCRIPTOR_TYPE_ ## DS_TYPE, \
     .descriptorCount = COUNT,
 
-/* You may wonder "why bother putting a binding int this macro if your bindings are
- * just going to increment anyway with each additional one?". The reason is because
- * sometimes you may want to have two or more descriptor set layouts that have the same
- * bindings but are in different descriptor sets, e.g.: 
- *
- *     set = 0, bindings = 0 & 1,
- *     set = 1, bindings = 0,
- *
- * At least, I think this is possible, so for now I'm leaving it this way.
- * */
 #define DS_BINDING(BINDING, DS_TYPE, BIT_FLAGS)       \
     .binding = BINDING,                               \
     .descriptorCount = 1,                             \
@@ -822,7 +824,6 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
     if (pl_type == PIPELINE_TEXTURE) {
-        // nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_TEX].set_layout);
         nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_TEX].set_layout);
     } else if (pl_type == PIPELINE_POINT_CLOUD_ADV) {
         nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_ADV_POINT_CLOUD].set_layout);
@@ -1130,6 +1131,16 @@ bool vk_pl_layout_init2(VkDescriptorSetLayout ds_layout, VkPipelineLayout *pl_la
     return true;
 }
 
+bool vk_pl_layout_init3(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
+{
+    if (!VK_SUCCEEDED(vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout))) {
+        nob_log(NOB_ERROR, "failed to create pipeline layout");
+        return false;
+    }
+
+    return true;
+}
+
 bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
 {
     bool result = true;
@@ -1357,7 +1368,34 @@ bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
     float16 mat = MatrixToFloatV(mvp);
-    vkCmdPushConstants( cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float16), &mat);
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float16), &mat);
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+
+    return true; // TODO: do I want to do this?
+}
+
+bool vk_draw_w_ds_sets(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t ds_set_count, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
+{
+    VkCommandBuffer cmd_buffer = ctx.gfx_buff;
+
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    for (size_t i = 0; i < ds_set_count; i++) {
+        vkCmdBindDescriptorSets(ctx.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, i, 1, &ds, 0, NULL);
+    }
+    VkViewport viewport = {
+        .width    = ctx.extent.width,
+        .height   = ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {0};
+    scissor.extent = ctx.extent;
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    float16 mat = MatrixToFloatV(mvp);
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float16), &mat);
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 
     return true; // TODO: do I want to do this?
@@ -1418,9 +1456,7 @@ bool vk_end_rec_compute()
 bool vk_submit_compute()
 {
     /* first wait for compute fence */
-    VkResult res = vkWaitForFences(
-        ctx.device, 1, &ctx.compute_fence, VK_TRUE, UINT64_MAX
-    );
+    VkResult res = vkWaitForFences(ctx.device, 1, &ctx.compute_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed waiting for compute fence");
         return false;

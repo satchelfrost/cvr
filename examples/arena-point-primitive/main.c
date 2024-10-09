@@ -2,6 +2,7 @@
 #include "ext/nob.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <float.h>
+#include "vk_ctx.h"
 
 /* point cloud sizes */
 #define S  "5060224"
@@ -35,16 +36,167 @@ typedef struct {
 } Point_Cloud;
 
 typedef struct {
-    float16 camera_mvps[4];
+    float16 camera_mvps[NUM_IMGS];
     int idx; // TODO: unused in shader
     int shader_mode;
     int cam_0;
     int cam_1;
     int cam_2;
     int cam_3;
-} Point_Cloud_Uniform;
+} UBO_Data;
 
-Point_Cloud_Uniform uniform = {0};
+typedef struct {
+    Vk_Buffer buff;
+    UBO_Data data;
+} Point_Cloud_UBO;
+
+typedef enum {
+    DS_SET_VERT,
+    DS_SET_FRAG,
+    DS_SET_COUNT,
+} Ds_Set_Idx;
+
+typedef enum {
+    DS_LAYOUT_UNIFORM,
+    DS_LAYOUT_SAMPLERS,
+    DS_LAYOUT_COUNT,
+} Ds_Layout_Idx;
+
+VkDescriptorSetLayout ds_layouts[DS_LAYOUT_COUNT];
+VkDescriptorSet ds_sets[DS_SET_COUNT];
+VkDescriptorPool pool;
+Vk_Texture textures[NUM_IMGS];
+VkPipelineLayout pl_layout;
+VkPipeline gfx_pl;
+
+bool setup_ds_layouts()
+{
+    VkDescriptorSetLayoutBinding bindings[] = {
+        /* point-cloud.vert */
+        {DS_BINDING(0, UNIFORM_BUFFER, VERTEX_BIT)},
+        /* point-cloud.frag */
+        {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+        {DS_BINDING(1, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+        {DS_BINDING(2, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+        {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+    };
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = bindings,
+    };
+    if (!vk_create_ds_layout(layout_ci, &ds_layouts[DS_LAYOUT_UNIFORM])) return false;
+
+    layout_ci.bindingCount = 4;
+    layout_ci.pBindings = &bindings[1];
+    if (!vk_create_ds_layout(layout_ci, &ds_layouts[DS_LAYOUT_SAMPLERS])) return false;
+
+    return true;
+}
+
+bool setup_ds_pool()
+{
+    VkDescriptorPoolSize pool_sizes[] = {
+        {DS_POOL(UNIFORM_BUFFER, 1)},
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, 4)},
+    };
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
+        .pPoolSizes = pool_sizes,
+        .maxSets = 2,
+    };
+    return vk_create_ds_pool(pool_ci, &pool);
+}
+
+bool setup_ds_sets(Vk_Buffer buff)
+{
+    /* allocate descriptor sets based on layouts */
+    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(ds_layouts, DS_LAYOUT_COUNT, pool)};
+    if (!vk_alloc_ds(alloc, ds_sets)) return false;
+
+    /* update descriptor sets */
+    VkDescriptorBufferInfo ubo_info = {
+        .buffer = buff.handle,
+        .range  = buff.size,
+    };
+    VkDescriptorImageInfo img_infos[NUM_IMGS] = {0};
+    for (size_t i = 0; i < NUM_IMGS; i++) {
+        img_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_infos[i].imageView   = textures[i].view;
+        img_infos[i].sampler     = textures[i].sampler;
+    }
+    VkWriteDescriptorSet writes[] = {
+        /* point-cloud.vert */
+        {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_SET_VERT], &ubo_info)},
+        /* point-cloud.frag */
+        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SET_FRAG], &img_infos[0])},
+        {DS_WRITE_IMG(1, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SET_FRAG], &img_infos[1])},
+        {DS_WRITE_IMG(2, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SET_FRAG], &img_infos[2])},
+        {DS_WRITE_IMG(3, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SET_FRAG], &img_infos[3])},
+    };
+    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+
+    return true;
+}
+
+bool load_texture(Image img, size_t img_idx)
+{
+    bool result = true;
+
+    /* create staging buffer for image */
+    Vk_Buffer stg_buff;
+    stg_buff.size  = img.width * img.height * format_to_size(img.format);
+    stg_buff.count = img.width * img.height;
+    if (!vk_stg_buff_init(&stg_buff, img.data, false)) return false;
+
+    /* create the image */
+    Vk_Image vk_img = {
+        .extent  = {img.width, img.height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = img.format,
+    };
+    result = vk_img_init(
+        &vk_img,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (!result) nob_return_defer(false);
+    result = transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    if (!result) nob_return_defer(false);
+    if (!vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent)) nob_return_defer(false);
+    result = transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+    if (!result) nob_return_defer(false);
+
+    /* create image view */
+    VkImageView img_view;
+    if (!vk_img_view_init(vk_img, &img_view)) nob_return_defer(false);
+
+    /* create sampler */
+    VkSampler sampler;
+    if (!vk_sampler_init(&sampler)) return false;
+
+    Vk_Texture texture = {
+        .view = img_view,
+        .sampler = sampler,
+        .img = vk_img,
+        .id = img_idx,
+    };
+    textures[img_idx] = texture;
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+
+}
 
 bool read_vtx(const char *file, Vertices *verts)
 {
@@ -173,25 +325,40 @@ void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
-    nob_log(NOB_INFO, "| Movement |");
+    nob_log(NOB_INFO, "| Keyboard |");
     nob_log(NOB_INFO, "------------");
-    nob_log(NOB_INFO, "    [W] - Forward");
-    nob_log(NOB_INFO, "    [A] - Left");
-    nob_log(NOB_INFO, "    [S] - Back");
-    nob_log(NOB_INFO, "    [D] - Right");
-    nob_log(NOB_INFO, "    [E] - Up");
-    nob_log(NOB_INFO, "    [Q] - Down");
-    nob_log(NOB_INFO, "    [Shift] - Fast movement");
-    nob_log(NOB_INFO, "    Right Click + Mouse Movement = Rotation");
-    nob_log(NOB_INFO, "------------");
-    nob_log(NOB_INFO, "| Hot keys |");
-    nob_log(NOB_INFO, "------------");
-    nob_log(NOB_INFO, "    [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
-    nob_log(NOB_INFO, "    [C] - Change piloted camera");
-    nob_log(NOB_INFO, "    [R] - Resolution toggle");
-    nob_log(NOB_INFO, "    [V] - View change (also pilots current view)");
-    nob_log(NOB_INFO, "    [P] - Print camera info");
-    nob_log(NOB_INFO, "    [Space] - Reset cameras to default position");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "    | Movement |");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "        [W] - Forward");
+    nob_log(NOB_INFO, "        [A] - Left");
+    nob_log(NOB_INFO, "        [S] - Back");
+    nob_log(NOB_INFO, "        [D] - Right");
+    nob_log(NOB_INFO, "        [E] - Up");
+    nob_log(NOB_INFO, "        [Q] - Down");
+    nob_log(NOB_INFO, "        [Shift] - Fast movement");
+    nob_log(NOB_INFO, "        Right Click + Mouse Movement = Rotation");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "    | Hot keys |");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "        [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
+    nob_log(NOB_INFO, "        [C] - Change piloted camera");
+    nob_log(NOB_INFO, "        [R] - Resolution toggle");
+    nob_log(NOB_INFO, "        [V] - View change (also pilots current view)");
+    nob_log(NOB_INFO, "        [P] - Print camera info");
+    nob_log(NOB_INFO, "        [Space] - Reset cameras to default position");
+    nob_log(NOB_INFO, "-----------");
+    nob_log(NOB_INFO, "| Gamepad |");
+    nob_log(NOB_INFO, "-----------");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "    | Movement |");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "        [Left Analog] - Translation");
+    nob_log(NOB_INFO, "        [Right Analog] - Rotation");
+    nob_log(NOB_INFO, "    ---------");
+    nob_log(NOB_INFO, "    | Other |");
+    nob_log(NOB_INFO, "    ---------");
+    nob_log(NOB_INFO, "        [Right Trigger] - shader mode");
 }
 
 typedef enum {
@@ -223,14 +390,11 @@ void log_shader_mode(Shader_Mode mode)
     }
 }
 
-bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_Uniform *uniform)
+bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_UBO *ubo)
 {
-    bool result = true;
-
+    /* calculate mvps for cctvs */
     Matrix model = {0};
-    if (!get_matrix_tos(&model)) nob_return_defer(false);
-
-    Matrix mvps[4] = {0};
+    if (!get_matrix_tos(&model)) return false;
     for (size_t i = 0; i < 4; i++) {
         Matrix view = MatrixLookAt(
             four_cameras[i].position,
@@ -239,20 +403,20 @@ bool update_pc_uniform(Camera *four_cameras, int shader_mode, int *cam_order, Po
         );
         Matrix proj = get_proj(four_cameras[i]);
         Matrix view_proj = MatrixMultiply(view, proj);
-        mvps[i] = MatrixMultiply(model, view_proj);
+        Matrix mvp = MatrixMultiply(model, view_proj);
+        ubo->data.camera_mvps[i] = MatrixToFloatV(mvp);
     }
 
-    for (size_t i = 0; i < 4; i++)
-        uniform->camera_mvps[i] = MatrixToFloatV(mvps[i]);
-    uniform->cam_0 = cam_order[0];
-    uniform->cam_1 = cam_order[1];
-    uniform->cam_2 = cam_order[2];
-    uniform->cam_3 = cam_order[3];
-    uniform->shader_mode = shader_mode;
-    uniform->idx = cam_order[3]; // farthest away camera
+    ubo->data.cam_0 = cam_order[0];
+    ubo->data.cam_1 = cam_order[1];
+    ubo->data.cam_2 = cam_order[2];
+    ubo->data.cam_3 = cam_order[3];
+    ubo->data.shader_mode = shader_mode;
+    ubo->data.idx = cam_order[3]; // TODO: unused in shader
 
-defer:
-    return result;
+    memcpy(&ubo->buff.mapped, &ubo->data, ubo->buff.size);
+
+    return true;
 }
 
 Camera cameras[] = {
@@ -314,16 +478,15 @@ int main(int argc, char **argv)
 
     /* initialize window and Vulkan */
     if (argc > 4) {
-        init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
+        init_window(atoi(argv[3]), atoi(argv[4]), "arena point primitive");
         set_window_pos(atoi(argv[1]), atoi(argv[2]));
     } else {
-        init_window(1600, 900, "point cloud");
+        init_window(1600, 900, "arena point primitive");
     }
 
     /* upload resources to GPU */
-    Texture texs[NUM_IMGS] = {0};
     for (size_t i = 0; i < NUM_IMGS; i++) {
-        texs[i] = load_pc_texture_from_image(imgs[i]);
+        if (!load_texture(imgs[i], i)) return 1;
         free(imgs[i].data);
     }
     if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
@@ -331,13 +494,26 @@ int main(int argc, char **argv)
     nob_da_free(hres.verts);
     nob_da_free(lres.verts);
 
-    /* initialize and map the uniform data */
-    Buffer buff = {
-        .size  = sizeof(uniform),
-        .count = 1,
-        .items = &uniform,
+    /* initialize shader resources */
+    Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
+    if (!vk_ubo_init2(&ubo.buff)) return 1;
+    if (!setup_ds_layouts())      return 1;
+    if (!setup_ds_pool())         return 1;
+    if (!setup_ds_sets(ubo.buff))  return 1;
+
+    /* setup the graphics pipeline */
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = DS_LAYOUT_COUNT,
+        .pSetLayouts = ds_layouts,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
     };
-    if (!ubo_init(buff, EXAMPLE_ADV_POINT_CLOUD)) return 1;
+    if (!vk_pl_layout_init3(layout_ci, &pl_layout)) return 1;
+    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
+    if (!vk_basic_pl_init2(pl_layout, shaders[0], shaders[1], &gfx_pl)) return 1;
+    return 1;
 
     /* settings & logging*/
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
@@ -395,10 +571,6 @@ int main(int argc, char **argv)
                 push_matrix();
                     look_at(cameras[i]);
                     if (!draw_shape_wireframe(SHAPE_CAM)) return 1;
-
-                    // rotate_z(PI);
-                    // translate(0.0f, 0.0f, 0.5f);
-                    // scale(1.0f * 1.333f * 0.75, 1.0f * 0.75, 1.0f * 0.75);
                 pop_matrix();
             }
             translate(0.0f, 0.0f, -100.0f);
@@ -408,14 +580,13 @@ int main(int argc, char **argv)
 
             /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
-            if (!update_pc_uniform(&cameras[1], shader_mode, cam_order, &uniform)) return 1;
-
+            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
         end_mode_3d();
         end_drawing();
     }
 
     /* cleanup */
-    for (size_t i = 0; i < NUM_IMGS; i++) unload_pc_texture(texs[i]);
+    for (size_t i = 0; i < NUM_IMGS; i++) vk_unload_texture2(textures[i]);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
     close_window();

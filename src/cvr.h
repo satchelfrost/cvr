@@ -360,7 +360,6 @@ typedef enum {
     EXAMPLE_COUNT,
 } Example;
 bool ubo_init(Buffer buff, Example example);
-bool compute(Example example);
 bool draw_points(size_t vtx_id, Example example);
 
 #endif // CVR_H_
