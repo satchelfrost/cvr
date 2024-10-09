@@ -16,6 +16,7 @@
  * [*] - get rid of cvr_chk macro
  * [*] - find queue families should return a boolean, and then indices should be stored in ctx
  * [*] - I don't like ext_manager
+ * [ ] - texture set probably shouldn't be in vk_ctx.h
  * [ ] - enable a method for choosing extensions in user space
  * [ ] - get rid of nob_da_resize
  * [ ] - remove dependency of glfw
@@ -85,7 +86,6 @@ typedef struct {
     VkSampler sampler;
     Vk_Image img;
     size_t id;
-    bool active; // TODO: I don't like this
     VkDescriptorSet descriptor_set; // TODO: I don't like this either
 } Vk_Texture;
 
@@ -95,7 +95,7 @@ typedef struct {
     size_t capacity;
     VkDescriptorSetLayout set_layout;
     VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_set;
+    VkDescriptorSet descriptor_set; // TODO: once I make the arena point primitive a special case I want to have an array here
 } Vk_Texture_Set;
 
 typedef struct {
@@ -126,7 +126,6 @@ typedef enum {
     DS_TYPE_TEX,
     DS_TYPE_ADV_POINT_CLOUD,
     DS_TYPE_COMPUTE,
-    DS_TYPE_COMPUTE_RASTERIZER,
     DS_TYPE_COUNT,
 } Descriptor_Type;
 
@@ -190,7 +189,6 @@ typedef struct {
     Vk_Pipeline_Layout_Set compute_pl_layout_sets[DS_TYPE_COUNT];
     Vk_Texture_Set texture_sets[DS_TYPE_COUNT];
     UBO ubos[DS_TYPE_COUNT];
-    SSBO_Set ssbo_sets[DS_TYPE_COUNT];
 } Vk_Context;
 
 bool vk_init();
@@ -224,9 +222,6 @@ bool vk_ubo_descriptor_set_init(Descriptor_Type ds_type);
 bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type, VkShaderStageFlags flags);
 bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type);
 bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type);
-bool vk_ssbo_descriptor_set_layout_init(Descriptor_Type ds_type);
-bool vk_ssbo_descriptor_pool_init(Descriptor_Type ds_type);
-bool vk_ssbo_descriptor_set_init(Descriptor_Type ds_type);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
@@ -827,7 +822,7 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
     pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     Descriptor_Set_Layouts set_layouts = {0};
     if (pl_type == PIPELINE_TEXTURE) {
-        nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_TEX].set_layout);
+        // nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_TEX].set_layout);
         nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_TEX].set_layout);
     } else if (pl_type == PIPELINE_POINT_CLOUD_ADV) {
         nob_da_append(&set_layouts, ctx.ubos[DS_TYPE_ADV_POINT_CLOUD].set_layout);
@@ -1551,19 +1546,19 @@ bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix m
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdBindDescriptorSets(
-        cmd_buffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1,
-        &ctx.ubos[DS_TYPE_TEX].descriptor_set, 0, NULL
-    );
+    // vkCmdBindDescriptorSets(
+    //     cmd_buffer,
+    //     VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //     ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1,
+    //     &ctx.ubos[DS_TYPE_TEX].descriptor_set, 0, NULL
+    // );
 
     Vk_Texture_Set texture_set = ctx.texture_sets[DS_TYPE_TEX];
-    if (id < texture_set.count && texture_set.items[id].active) {
+    if (id < texture_set.count && texture_set.items[id].img.handle) {
         vkCmdBindDescriptorSets(
             cmd_buffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[PIPELINE_TEXTURE], 1, 1,
+            ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1,
             &texture_set.items[id].descriptor_set, 0, NULL
         );
     }
@@ -1889,17 +1884,14 @@ bool vk_sampler_descriptor_set_layout_init(Descriptor_Type ds_type, VkShaderStag
         nob_return_defer(false);
     }
 
-    VkDescriptorType vk_ds_type;
-    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER;
+    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD;
     for (size_t i = 0; i < tex_count; i++) {
         if (!grouped_bindings && i > 0)
             break;
 
         VkDescriptorSetLayoutBinding binding = {
             .binding = i,
-            .descriptorType = vk_ds_type,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = 1,
             .stageFlags = flags,
         };
@@ -1925,44 +1917,32 @@ defer:
 
 bool vk_sampler_descriptor_pool_init(Descriptor_Type ds_type)
 {
-    bool result = true;
-
     Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
     if (!texture_set->count) {
         nob_log(NOB_ERROR, "descriptor pool cannot be created for texture set count zero");
-        nob_return_defer(false);
+        return false;
     }
-
-    VkDescriptorType vk_ds_type;
-    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     VkDescriptorPoolSize pool_size = {
-        .type = vk_ds_type,
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = texture_set->count,
     };
-
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = 1,
         .pPoolSizes = &pool_size,
         .maxSets = texture_set->count,
     };
-
     VkDescriptorPool *pool = &texture_set->descriptor_pool;
-    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
-    if(!VK_SUCCEEDED(res)) {
+    if(!VK_SUCCEEDED(vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool))) {
         nob_log(NOB_ERROR, "failed to create descriptor pool");
-        nob_return_defer(false);
+        return false;
     }
 
-defer:
-    return result;
+    return true;
 }
 
 bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
 {
-    bool result = true;
-
     /* allocate texture descriptor sets */
     Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
     VkDescriptorSetAllocateInfo alloc = {
@@ -1971,14 +1951,13 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
         .descriptorSetCount = 1,
         .pSetLayouts = &texture_set->set_layout,
     };
-
-    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD || ds_type == DS_TYPE_COMPUTE_RASTERIZER; // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
+    bool grouped_bindings = ds_type == DS_TYPE_ADV_POINT_CLOUD;
     if (grouped_bindings) {
         VkDescriptorSet *set = &texture_set->descriptor_set;
         VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
         if (!VK_SUCCEEDED(res)) {
             nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
-            nob_return_defer(false);
+            return false;
         }
     } else {
         for (size_t i = 0; i < texture_set->count; i++) {
@@ -1986,29 +1965,22 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
             VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, set);
             if (!VK_SUCCEEDED(res)) {
                 nob_log(NOB_ERROR, "failed to allocate texture descriptor set");
-                nob_return_defer(false);
+                return false;
             }
         }
     }
 
-    VkDescriptorType vk_ds_type;
-    vk_ds_type = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     /* update texture descriptor sets */
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstBinding = 0,
         .dstArrayElement = 0,
-        .descriptorType = vk_ds_type,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
     };
-
-    VkImageLayout vk_img_layout;
-    vk_img_layout = (ds_type == DS_TYPE_COMPUTE_RASTERIZER) ? // TODO: DS_TYPE_COMPUTE_RASTERIZER is not used by this anymore
-        VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     for (size_t tex = 0; tex < texture_set->count; tex++) {
         VkDescriptorImageInfo img_info = {
-            .imageLayout = vk_img_layout,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .imageView   = texture_set->items[tex].view,
             .sampler     = texture_set->items[tex].sampler,
         };
@@ -2022,143 +1994,7 @@ bool vk_sampler_descriptor_set_init(Descriptor_Type ds_type)
         vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
     }
 
-defer:
-    return result;
-}
-
-bool vk_ssbo_descriptor_set_layout_init(Descriptor_Type ds_type)
-{
-    bool result = true;
-
-    Descriptor_Set_Layout_Bindings bindings = {0};
-    size_t ssbo_count = ctx.ssbo_sets[ds_type].count;
-    if (!ssbo_count) {
-        nob_log(NOB_ERROR, "no ssbos were loaded for descriptor type %d", ds_type);
-        nob_return_defer(false);
-    }
-
-    bool grouped_bindings = ds_type == DS_TYPE_COMPUTE_RASTERIZER;
-    for (size_t i = 0; i < ssbo_count; i++) {
-        if (!grouped_bindings && i > 0)
-            break;
-
-        VkDescriptorSetLayoutBinding binding = {
-            .binding = i,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-        };
-        nob_da_append(&bindings, binding);
-    }
-
-    VkDescriptorSetLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = bindings.count,
-        .pBindings = bindings.items,
-    };
-
-    VkDescriptorSetLayout *layout = &ctx.ssbo_sets[ds_type].set_layout;
-    VkResult res = vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor set layout for shader storage buffer");
-        nob_return_defer(false);
-    }
-
-defer:
-    nob_da_free(bindings);
-    return result;
-}
-
-bool vk_ssbo_descriptor_pool_init(Descriptor_Type ds_type)
-{
-    bool result = true;
-
-    size_t ssbo_count = ctx.ssbo_sets[ds_type].count;
-    if (!ssbo_count) {
-        nob_log(NOB_ERROR, "no ssbos were loaded for descriptor type %d", ds_type);
-        nob_return_defer(false);
-    }
-
-    VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = ssbo_count,
-    };
-
-    VkDescriptorPoolCreateInfo pool_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_size,
-        .maxSets = ssbo_count,
-    };
-
-    VkDescriptorPool *pool = &ctx.ssbo_sets[ds_type].descriptor_pool;
-    VkResult res = vkCreateDescriptorPool(ctx.device, &pool_ci, NULL, pool);
-    if(!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor pool for storage buffer");
-        nob_return_defer(false);
-    }
-
-defer:
-    return result;
-}
-
-bool vk_ssbo_descriptor_set_init(Descriptor_Type ds_type)
-{
-    bool result = true;
-
-    /* allocate uniform buffer descriptor sets */
-    SSBO_Set *ssbo = &ctx.ssbo_sets[ds_type];
-    VkDescriptorSetAllocateInfo alloc = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = ssbo->descriptor_pool,
-        .descriptorSetCount = 1,
-        .pSetLayouts = &ssbo->set_layout,
-    };
-
-    bool grouped_bindings = ds_type == DS_TYPE_COMPUTE_RASTERIZER || DS_TYPE_COMPUTE; // TODO: COMPUTE_RASTERIZER does not make sense anymore
-    if (grouped_bindings) {
-        if (!ssbo->count) {
-            nob_log(NOB_ERROR, "failed to initialize compute descriptor set, no compute buffers");
-            nob_return_defer(false);
-        }
-        VkResult res = vkAllocateDescriptorSets(ctx.device, &alloc, &ssbo->descriptor_set);
-        if (!VK_SUCCEEDED(res)) {
-            nob_log(NOB_ERROR, "failed to allocate ssbo descriptor set");
-            nob_return_defer(false);
-        }
-    } else {
-        nob_log(NOB_ERROR, "currently don't support ungrouped bindings for ssbo");
-        nob_return_defer(false);
-    }
-
-    VkWriteDescriptorSet write = {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 1,
-    };
-
-    for (size_t i = 0; i < ssbo->count; i++) {
-        VkDescriptorBufferInfo buff_info = {
-            .buffer = ssbo->items[i].handle,
-            .range  = ssbo->items[i].size,
-        };
-        write.pBufferInfo = &buff_info;
-        if (grouped_bindings) {
-            write.dstSet = ssbo->descriptor_set;
-            write.dstBinding = i;
-        } else {
-            nob_log(NOB_ERROR, "currently don't support ungrouped bindings for ssbo");
-            nob_return_defer(false);
-            // NOTE: if we did we would do 
-            // write.dstSet = &ssbo->items[i].descriptor_set
-            // write.dstBinding = 0;
-        }
-        vkUpdateDescriptorSets(ctx.device, 1, &write, 0, NULL);
-    }
-
-
-defer:
-    return result;
+    return true;
 }
 
 bool is_device_suitable(VkPhysicalDevice phys_device)
@@ -3087,10 +2923,8 @@ bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
 int format_to_size(VkFormat fmt)
 {
     if (VK_FORMAT_R8G8B8A8_UNORM <= fmt && fmt <= VK_FORMAT_B8G8R8A8_SRGB) {
-    // if (fmt == VK_FORMAT_R8G8B8A8_SRGB) {
         return 4;
     } else if (VK_FORMAT_R8_UNORM <= fmt && fmt <= VK_FORMAT_R8_SRGB) {
-    // } else if (fmt == VK_FORMAT_R8_UNORM) {
         return 1;
     } else {
         nob_log(NOB_WARNING, "unrecognized format %d, returning 4 instead", fmt);
@@ -3202,7 +3036,6 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
         .sampler = sampler,
         .img = vk_img,
         .id = texture_set->count,
-        .active = true,
     };
 
     *id = texture.id;
@@ -3221,7 +3054,7 @@ bool vk_unload_texture(size_t id, Descriptor_Type ds_type)
     for (size_t i = 0; i < texture_set.count; i++) {
         Vk_Texture *texture = &texture_set.items[i];
         if (texture->id == id) {
-            if (!texture->active) {
+            if (!texture->img.handle) {
                 nob_log(NOB_WARNING, "cannot unload texture %d, already inactive", texture->id);
                 return false;
             } else {
@@ -3229,7 +3062,10 @@ bool vk_unload_texture(size_t id, Descriptor_Type ds_type)
                 vkDestroyImageView(ctx.device, texture->view, NULL);
                 vkDestroyImage(ctx.device, texture->img.handle, NULL);
                 vkFreeMemory(ctx.device, texture->img.mem, NULL);
-                texture->active = false;
+                texture->sampler = NULL;
+                texture->view = NULL;
+                texture->img.handle = NULL;
+                texture->img.mem =  NULL;
             }
         }
     }

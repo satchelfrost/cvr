@@ -35,15 +35,6 @@ int main()
 
     init_window(500, 500, "Load texture");
 
-    /* initialize and map the uniform data */
-    float time = 0.0f;
-    Buffer buff = {
-        .size  = sizeof(float),
-        .count = 1,
-        .items = &time,
-    };
-    if (!ubo_init(buff, EXAMPLE_TEX)) return 1;
-
     Texture matrix_tex = {0};
     if (!load_texture("res/matrix.png", &matrix_tex)) return 1;
     float matrix_aspect = (float)matrix_tex.width / matrix_tex.height;
@@ -51,6 +42,7 @@ int main()
     if (!load_texture("res/statue.jpg", &statue_tex)) return 1;
     float statue_aspect = (float)statue_tex.width / statue_tex.height;
 
+    float time = 0.0f;
     while(!window_should_close()) {
         time = get_time();
         begin_drawing(BLACK);
@@ -66,7 +58,6 @@ int main()
             if (!draw_texture(statue_tex, SHAPE_QUAD)) return 1;
             rotate_x(time);
             draw_shape_wireframe(SHAPE_CUBE);
-
         end_mode_3d();
         end_drawing();
     }

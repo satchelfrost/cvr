@@ -251,31 +251,6 @@ typedef struct float16 {
     float v[16];
 } float16;
 
-typedef enum {
-    SHADER_STAGE_VERT,
-    SHADER_STAGE_FRAG,
-    SHADER_STAGE_BOTH,
-    SHADER_STAGE_COUNT,
-} ShaderStage;
-
-/* correspond to pre-defined descriptor set layouts */
-typedef enum {
-    EXAMPLE_TEX,
-    EXAMPLE_POINT_CLOUD,
-    EXAMPLE_ADV_POINT_CLOUD,
-    EXAMPLE_COMPUTE,
-    EXAMPLE_COMPUTE_RASTERIZER,
-    EXAMPLE_CUSTOM,
-    EXAMPLE_COUNT,
-} Example;
-
-/* Structure for configuring uniform buffers */
-typedef struct {
-    ShaderStage stage;
-    Example example;
-    uint32_t binding;
-} Uniform_Config;
-
 typedef struct {
     int width;
     int height;
@@ -296,7 +271,6 @@ void end_drawing();                                         /* Submits commands,
 void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
 void begin_compute();
 void end_compute();
-bool compute(Example example);
 void set_window_size(int width, int height);
 void set_window_pos(int x, int y);
 void set_window_monitor();
@@ -364,10 +338,7 @@ bool is_mouse_button_down(int button);
 int get_last_btn_pressed();
 
 bool upload_point_cloud(Buffer buff, size_t *id);
-bool upload_compute_points(Buffer buff, size_t *id, Example example);
 void destroy_point_cloud(size_t id);
-void destroy_compute_buff(size_t id, Example example);
-bool draw_points(size_t vtx_id, Example example);
 bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
 bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
 bool get_mvp(Matrix *mvp);
@@ -375,10 +346,21 @@ bool get_mvp_float16(float16 *mvp);
 Matrix get_view_proj();
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
-bool ubo_init(Buffer buff, Example example);
-bool ssbo_init(Example example);
 Color color_from_HSV(float hue, float saturation, float value);
 void wait_idle();
 void log_fps();
+
+/* TDOO: everything that takes an example at the API level needs to be eradicated */
+/* correspond to pre-defined descriptor set layouts */
+typedef enum {
+    EXAMPLE_TEX,
+    EXAMPLE_POINT_CLOUD,
+    EXAMPLE_ADV_POINT_CLOUD,
+    EXAMPLE_COMPUTE,
+    EXAMPLE_COUNT,
+} Example;
+bool ubo_init(Buffer buff, Example example);
+bool compute(Example example);
+bool draw_points(size_t vtx_id, Example example);
 
 #endif // CVR_H_

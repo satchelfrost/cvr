@@ -662,10 +662,6 @@ void close_window()
 
     destroy_shape_res();
     destroy_ubos();
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        vkDestroyDescriptorPool(ctx.device, ctx.ssbo_sets[i].descriptor_pool, NULL);
-        vkDestroyDescriptorSetLayout(ctx.device, ctx.ssbo_sets[i].set_layout, NULL);
-    }
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -727,45 +723,74 @@ void unload_pc_texture(Texture texture)
 
 bool tex_sampler_init()
 {
-    Descriptor_Type type = DS_TYPE_TEX;
-    if (!vk_sampler_descriptor_set_layout_init(type, VK_SHADER_STAGE_FRAGMENT_BIT))
+    /* default descriptor set layout for texture */
+    VkDescriptorSetLayoutBinding binding = {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)};
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pBindings = &binding,
+        .bindingCount = 1,
+    };
+    VkDescriptorSetLayout *layout = &ctx.texture_sets[DS_TYPE_TEX].set_layout;
+    if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
+        nob_log(NOB_ERROR, "failed to create descriptor set layout for textures");
         return false;
-    if (!vk_sampler_descriptor_pool_init(type))
-        return false;
-    if (!vk_sampler_descriptor_set_init(type))
-        return false;
+    }
+    
+    /* default pool for default textures */
+    VkDescriptorPoolSize pool_size = {DS_POOL(COMBINED_IMAGE_SAMPLER, ctx.texture_sets[DS_TYPE_TEX].count)};
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = ctx.texture_sets[DS_TYPE_TEX].count,
+    };
+    VkDescriptorPool *pool = &ctx.texture_sets[DS_TYPE_TEX].descriptor_pool;
+    if (!vk_create_ds_pool(pool_ci, pool)) return false;
+
+    /* allocate descriptor sets based on layouts */
+    /* update descriptor sets based on layouts */
+    Vk_Texture_Set *texture_set = &ctx.texture_sets[DS_TYPE_TEX];
+    for (size_t tex = 0; tex < texture_set->count; tex++) {
+        VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layout, 1, *pool)};
+        if (!vk_alloc_ds(alloc, &texture_set->items[tex].descriptor_set)) return false;
+
+        VkDescriptorImageInfo img_info = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView   = texture_set->items[tex].view,
+            .sampler     = texture_set->items[tex].sampler,
+        };
+        VkWriteDescriptorSet write = {
+            DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, texture_set->items[tex].descriptor_set, &img_info)
+        };
+        vk_update_ds(1, &write);
+    }
+
     return true;
 }
 
 bool draw_texture(Texture texture, Shape_Type shape_type)
 {
-    bool result = true;
-
     if (!ctx.pipelines[PIPELINE_TEXTURE]) {
-        if (!tex_sampler_init()) nob_return_defer(false);
-        if (!vk_basic_pl_init(PIPELINE_TEXTURE))
-            nob_return_defer(false);
+        if (!tex_sampler_init()) return false;
+        if (!vk_basic_pl_init(PIPELINE_TEXTURE)) return false;
     }
-
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
 
     Matrix model = {0};
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+        return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
-        nob_return_defer(false);
+    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp)) return false;
 
-defer:
-    return result;
+    return true;
 }
 
 Vector3 get_camera_forward(Camera *camera)
@@ -931,29 +956,6 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-bool upload_compute_points(Buffer buff, size_t *id, Example example)
-{
-    Vk_Buffer vk_buff = {
-        .count = buff.count,
-        .size  = buff.size,
-    };
-    if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) return false;
-
-    Descriptor_Type ds_type;
-    switch (example) {
-    case EXAMPLE_COMPUTE:            ds_type = DS_TYPE_COMPUTE; break;
-    case EXAMPLE_COMPUTE_RASTERIZER: ds_type = DS_TYPE_COMPUTE_RASTERIZER; break;
-    default:
-        nob_log(NOB_ERROR, "example %d is not supported for ssbo upload", example);
-        return false;
-    }
-    
-    *id = ctx.ssbo_sets[ds_type].count;
-    nob_da_append(&ctx.ssbo_sets[ds_type], vk_buff);
-
-    return true;
-}
-
 bool ubo_init(Buffer buff, Example example)
 {
     Descriptor_Type ds_type; 
@@ -969,10 +971,6 @@ bool ubo_init(Buffer buff, Example example)
         break;
     case EXAMPLE_COMPUTE:
         ds_type = DS_TYPE_COMPUTE;
-        flags = VK_SHADER_STAGE_COMPUTE_BIT;
-        break;
-    case EXAMPLE_COMPUTE_RASTERIZER:
-        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
         flags = VK_SHADER_STAGE_COMPUTE_BIT;
         break;
     case EXAMPLE_POINT_CLOUD:
@@ -996,36 +994,13 @@ bool ubo_init(Buffer buff, Example example)
     return true;
 }
 
-bool ssbo_init(Example example)
-{
-    Descriptor_Type ds_type;
-    if (example == EXAMPLE_COMPUTE) {
-        ds_type = DS_TYPE_COMPUTE;
-        if (ctx.ssbo_sets[ds_type].count != 1) {
-            nob_log(NOB_ERROR, "one compute buffer was expected for this example");
-            return false;
-        }
-    } else {
-        nob_log(NOB_ERROR, "example %d is not supported for ssbo initialization", example);
-        return false;
-    }
-
-    if (!vk_ssbo_descriptor_set_layout_init(ds_type)) return false;
-    if (!vk_ssbo_descriptor_pool_init(ds_type))       return false;
-    if (!vk_ssbo_descriptor_set_init(ds_type))        return false;
-
-    return true;
-}
-
 bool pc_sampler_init()
 {
     Descriptor_Type type = DS_TYPE_ADV_POINT_CLOUD;
-    if (!vk_sampler_descriptor_set_layout_init(type, VK_SHADER_STAGE_FRAGMENT_BIT))
-        return false;
-    if (!vk_sampler_descriptor_pool_init(type))
-        return false;
-    if (!vk_sampler_descriptor_set_init(type))
-        return false;
+    VkShaderStageFlags flags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (!vk_sampler_descriptor_set_layout_init(type, flags)) return false;
+    if (!vk_sampler_descriptor_pool_init(type))              return false;
+    if (!vk_sampler_descriptor_set_init(type))               return false;
 
     return true;
 }
@@ -1042,8 +1017,7 @@ void destroy_point_cloud(size_t id)
         }
     }
 
-    if (!found)
-        nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
+    if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
 }
 
 void destroy_ubos()
@@ -1058,37 +1032,6 @@ void destroy_ubos()
         vkDestroyDescriptorPool(ctx.device, ctx.ubos[i].descriptor_pool, NULL);
         vkDestroyDescriptorSetLayout(ctx.device, ctx.ubos[i].set_layout, NULL);
     }
-}
-
-void destroy_compute_buff(size_t id, Example example)
-{
-    vkDeviceWaitIdle(ctx.device);
-
-    bool found = false;
-
-    Descriptor_Type type;
-    switch (example) {
-    case EXAMPLE_COMPUTE:
-        type = DS_TYPE_COMPUTE;
-        break;
-    case EXAMPLE_COMPUTE_RASTERIZER:
-        type = DS_TYPE_COMPUTE_RASTERIZER;
-        break;
-    default:
-        nob_log(NOB_ERROR, "unrecognized example %d for compute", example);
-        return;
-    }
-
-    // Descriptor_Type type = DS_TYPE_COMPUTE;
-    for (size_t i = 0; i < ctx.ssbo_sets[type].count; i++) {
-        if (i == id && ctx.ssbo_sets[type].items[i].handle) {
-            vk_buff_destroy(ctx.ssbo_sets[type].items[i]);
-            found = true;
-        }
-    }
-
-    if (!found)
-        nob_log(NOB_WARNING, "compute buffer %zu does not exist cannot destroy", id);
 }
 
 bool draw_points(size_t vtx_id, Example example)
