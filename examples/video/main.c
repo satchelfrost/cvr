@@ -18,10 +18,10 @@ typedef enum {
 
 typedef enum {
     VIDEO_IDX_SUITE_E,
+    VIDEO_IDX_COUNT,
     VIDEO_IDX_SUITE_W,
     VIDEO_IDX_SUITE_NW,
     VIDEO_IDX_SUITE_SE,
-    VIDEO_IDX_COUNT,
 } Video_Idx;
 
 const char *video_names[] = {
@@ -208,8 +208,8 @@ int main()
 
     /* create a texture from video */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
-        // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
+        // const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
+        const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
             nob_log(NOB_ERROR, "could not open file %s", file_name);
@@ -306,7 +306,7 @@ int main()
                     push_matrix();
                     scale(video_textures.aspects[i], 1.0f, 1.0f);
                     translate(i - 1.0f, 0.0f, 0.0f);
-                    if (!draw(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[i], SHAPE_QUAD))
+                    if (!draw_shape_ex(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[i], SHAPE_QUAD))
                         return 1;
                     pop_matrix();
                 }

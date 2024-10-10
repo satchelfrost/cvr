@@ -414,7 +414,8 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     ubo->data.shader_mode = shader_mode;
     ubo->data.idx = cam_order[3]; // TODO: unused in shader
 
-    memcpy(&ubo->buff.mapped, &ubo->data, ubo->buff.size);
+    memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
+    // memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
 
     return true;
 }
@@ -511,9 +512,8 @@ int main(int argc, char **argv)
         .pPushConstantRanges = &pk_range,
     };
     if (!vk_pl_layout_init3(layout_ci, &pl_layout)) return 1;
-    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
-    if (!vk_basic_pl_init2(pl_layout, shaders[0], shaders[1], &gfx_pl)) return 1;
-    return 1;
+    const char *shaders[] = {"./res/point-cloud.vert.spv", "./res/point-cloud.frag.spv"};
+    if (!vk_point_cloud_pl_init(pl_layout, shaders[0], shaders[1], &gfx_pl)) return 1;
 
     /* settings & logging*/
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
@@ -576,7 +576,7 @@ int main(int argc, char **argv)
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             size_t vtx_id = (use_hres) ? hres.id : lres.id;
-            if (!draw_points(vtx_id, EXAMPLE_ADV_POINT_CLOUD)) return 1;
+            draw_points_ex(vtx_id, gfx_pl, pl_layout, ds_sets, DS_SET_COUNT);
 
             /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
@@ -584,6 +584,8 @@ int main(int argc, char **argv)
         end_mode_3d();
         end_drawing();
     }
+
+    return 1;
 
     /* cleanup */
     for (size_t i = 0; i < NUM_IMGS; i++) vk_unload_texture2(textures[i]);

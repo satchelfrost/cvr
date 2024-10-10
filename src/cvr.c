@@ -159,8 +159,7 @@ bool draw_shape(Shape_Type shape_type)
     return vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
 }
 
-
-bool draw(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
+bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
 {
     if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
 
@@ -956,44 +955,6 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-bool ubo_init(Buffer buff, Example example)
-{
-    Descriptor_Type ds_type; 
-    VkShaderStageFlags flags;
-    switch (example) {
-    case EXAMPLE_TEX:
-        ds_type = DS_TYPE_TEX;
-        flags = VK_SHADER_STAGE_VERTEX_BIT;
-        break;
-    case EXAMPLE_ADV_POINT_CLOUD:
-        ds_type = DS_TYPE_ADV_POINT_CLOUD;
-        flags = VK_SHADER_STAGE_VERTEX_BIT;
-        break;
-    case EXAMPLE_COMPUTE:
-        ds_type = DS_TYPE_COMPUTE;
-        flags = VK_SHADER_STAGE_COMPUTE_BIT;
-        break;
-    case EXAMPLE_POINT_CLOUD:
-    default:
-        nob_log(NOB_ERROR, "example %d not handled for ubo_init", example);
-        return false;
-    }
-
-    UBO ubo = {
-        .buff = {
-            .count = buff.count,
-            .size  = buff.size
-        },
-        .data = buff.items,
-    };
-    if (!vk_ubo_init(ubo, ds_type)) return false;
-    if (!vk_ubo_descriptor_set_layout_init(flags, ds_type)) return false;
-    if (!vk_ubo_descriptor_pool_init(ds_type))              return false;
-    if (!vk_ubo_descriptor_set_init(ds_type))               return false;
-
-    return true;
-}
-
 bool pc_sampler_init()
 {
     Descriptor_Type type = DS_TYPE_ADV_POINT_CLOUD;
@@ -1071,8 +1032,32 @@ bool draw_points(size_t vtx_id, Example example)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    if (!vk_draw_points(vtx_buff, mvp, example))
+    if (!vk_draw_points(vtx_buff, mvp, example)) // TODO: I have an idea
         return false;
+
+    return true;
+}
+
+bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+{
+    Vk_Buffer vtx_buff = {0};
+    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
+        vtx_buff = point_clouds.items[vtx_id];
+    } else {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+        return false;
+    }
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        return false;
+    }
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+
+    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, ds_sets, ds_set_count);
 
     return true;
 }

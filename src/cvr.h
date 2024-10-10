@@ -260,9 +260,6 @@ bool init_window(int width, int height, const char *title); /* Initialize window
 void close_window();                                        /* Close window and vulkan context */
 bool window_should_close();                                 /* Check if window should close and poll events */
 Window_Size get_window_size();
-bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
-bool draw(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
-bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
 void start_timer();
 void begin_mode_3d(Camera camera);                          /* Set camera and push a matrix */
@@ -274,6 +271,11 @@ void end_compute();
 void set_window_size(int width, int height);
 void set_window_pos(int x, int y);
 void set_window_monitor();
+
+bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
+bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
+bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
+bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 bool is_key_pressed(int key);
 bool is_key_down(int key);
@@ -359,7 +361,6 @@ typedef enum {
     EXAMPLE_COMPUTE,
     EXAMPLE_COUNT,
 } Example;
-bool ubo_init(Buffer buff, Example example);
 bool draw_points(size_t vtx_id, Example example);
 
 #endif // CVR_H_
