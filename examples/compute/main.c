@@ -56,13 +56,11 @@ bool setup_ds_layout()
         {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
     };
-
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = NOB_ARRAY_LEN(bindings),
         .pBindings = bindings,
     };
-
     return vk_create_ds_layout(layout_ci, &compute_ds_layout);
 }
 
@@ -72,14 +70,12 @@ bool setup_ds_pool()
         {DS_POOL(UNIFORM_BUFFER, 1)},
         {DS_POOL(STORAGE_BUFFER, 1)},
     };
-
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
         .maxSets = 1,
     };
-
     return vk_create_ds_pool(pool_ci, &pool);
 }
 
@@ -134,12 +130,12 @@ int main()
     if (!vk_ubo_init2(&ubo)) return 1;
 
     /* setup descriptors */
-    if (!setup_ds_layout())             return 1;
-    if (!setup_ds_pool())               return 1;
+    if (!setup_ds_layout())        return 1;
+    if (!setup_ds_pool())          return 1;
     if (!setup_ds(ubo, comp_buff)) return 1;
 
     /* setup pipelines */
-    if (!vk_pl_layout_init(compute_ds_layout, &compute_pl_layout))                     return 1;
+    if (!vk_pl_layout_init(compute_ds_layout, &compute_pl_layout)) return 1;
     if (!vk_compute_pl_init("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return 1;
     if (!vk_basic_pl_init(PIPELINE_COMPUTE)) return 1;
 
@@ -150,6 +146,7 @@ int main()
         vk_compute(compute_pl, compute_pl_layout, compute_ds, group_x, 1, 1);
     if (!vk_end_rec_compute()) return 1;
 
+
     float time = 0.0f;
     while (!window_should_close()) {
         if (!vk_submit_compute()) return 1;
@@ -158,7 +155,7 @@ int main()
         begin_mode_3d(camera);
             Matrix mvp = {0};
             if (!get_mvp(&mvp)) return 1;
-            if (!vk_draw_points(comp_buff, mvp, EXAMPLE_COMPUTE)) return 1;
+            if (!vk_draw_points(comp_buff, mvp, PIPELINE_COMPUTE)) return 1;
             time = get_time();
             memcpy(ubo.mapped, &time, sizeof(float));
         end_mode_3d();

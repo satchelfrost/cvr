@@ -106,7 +106,6 @@ void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
-void destroy_ubos();
 bool tex_sampler_init();
 
 bool init_window(int width, int height, const char *title)
@@ -310,13 +309,6 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    // TODO: I really need to get rid of this
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        UBO ubo = ctx.ubos[i];
-        if (ubo.buff.handle)
-            memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
-    }
-
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -660,7 +652,6 @@ void close_window()
     vkDeviceWaitIdle(ctx.device);
 
     destroy_shape_res();
-    destroy_ubos();
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -695,29 +686,9 @@ Texture load_texture_from_image(Image img)
     return texture;
 }
 
-Texture load_pc_texture_from_image(Image img)
-{
-    Texture texture = {
-        .width    = img.width,
-        .height   = img.height,
-        .mipmaps  = img.mipmaps,
-        .format   = img.format,
-    };
-
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, DS_TYPE_ADV_POINT_CLOUD))
-        nob_log(NOB_ERROR, "unable to load texture");
-
-    return texture;
-}
-
 void unload_texture(Texture texture)
 {
     vk_unload_texture(texture.id, DS_TYPE_TEX);
-}
-
-void unload_pc_texture(Texture texture)
-{
-    vk_unload_texture(texture.id, DS_TYPE_ADV_POINT_CLOUD);
 }
 
 bool tex_sampler_init()
@@ -955,17 +926,6 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-bool pc_sampler_init()
-{
-    Descriptor_Type type = DS_TYPE_ADV_POINT_CLOUD;
-    VkShaderStageFlags flags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    if (!vk_sampler_descriptor_set_layout_init(type, flags)) return false;
-    if (!vk_sampler_descriptor_pool_init(type))              return false;
-    if (!vk_sampler_descriptor_set_init(type))               return false;
-
-    return true;
-}
-
 void destroy_point_cloud(size_t id)
 {
     vkDeviceWaitIdle(ctx.device);
@@ -981,39 +941,11 @@ void destroy_point_cloud(size_t id)
     if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
 }
 
-void destroy_ubos()
+bool draw_points(size_t vtx_id)
 {
-    vkDeviceWaitIdle(ctx.device);
-
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++)
-        if (ctx.ubos[i].buff.handle)
-            vk_buff_destroy(ctx.ubos[i].buff);
-
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        vkDestroyDescriptorPool(ctx.device, ctx.ubos[i].descriptor_pool, NULL);
-        vkDestroyDescriptorSetLayout(ctx.device, ctx.ubos[i].set_layout, NULL);
-    }
-}
-
-bool draw_points(size_t vtx_id, Example example)
-{
-    switch (example) {
-    case EXAMPLE_ADV_POINT_CLOUD:
-        if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
-            pc_sampler_init();
-            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
-                return false;
-        }
-        break;
-    case EXAMPLE_POINT_CLOUD:
-        if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
-                return false;
-        break; 
-    default:
-        nob_log(NOB_ERROR, "no other example supported yet for draw points");
-        return false;
-    }
+    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
+        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
+            return false;
 
     Vk_Buffer vtx_buff = {0};
     if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
@@ -1030,10 +962,11 @@ bool draw_points(size_t vtx_id, Example example)
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
-
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    if (!vk_draw_points(vtx_buff, mvp, example)) // TODO: I have an idea
-        return false;
+
+    VkPipeline pl = ctx.pipelines[PIPELINE_POINT_CLOUD];
+    VkPipelineLayout pl_layout = ctx.pipeline_layouts[PIPELINE_POINT_CLOUD];
+    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, NULL, 0);
 
     return true;
 }
@@ -1224,13 +1157,4 @@ void set_window_size(int width, int height)
 void set_window_pos(int x, int y)
 {
     glfwSetWindowPos(ctx.window, x, y);
-}
-
-void set_window_monitor()
-{
-    int num_monitors;
-    GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
-    const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
-    // glfwSetWindowMonitor(ctx.window, monitors[0], 0, 0, mode->width / 2, mode->height / 2, mode->refreshRate);
-    glfwSetWindowMonitor(ctx.window, monitors[0], 0, 0, mode->width, mode->height / 2, mode->refreshRate);
 }

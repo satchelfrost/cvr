@@ -270,11 +270,11 @@ void begin_compute();
 void end_compute();
 void set_window_size(int width, int height);
 void set_window_pos(int x, int y);
-void set_window_monitor();
 
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
+bool draw_points(size_t vtx_id);
 bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 bool is_key_pressed(int key);
@@ -333,7 +333,6 @@ typedef struct {
 Texture load_texture_from_image(Image img);
 Texture load_pc_texture_from_image(Image img);
 void unload_texture(Texture texture);
-void unload_pc_texture(Texture texture);
 bool draw_texture(Texture texture, Shape_Type shape_type);
 bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
@@ -351,16 +350,5 @@ Matrix get_proj(Camera camera);
 Color color_from_HSV(float hue, float saturation, float value);
 void wait_idle();
 void log_fps();
-
-/* TDOO: everything that takes an example at the API level needs to be eradicated */
-/* correspond to pre-defined descriptor set layouts */
-typedef enum {
-    EXAMPLE_TEX,
-    EXAMPLE_POINT_CLOUD,
-    EXAMPLE_ADV_POINT_CLOUD,
-    EXAMPLE_COMPUTE,
-    EXAMPLE_COUNT,
-} Example;
-bool draw_points(size_t vtx_id, Example example);
 
 #endif // CVR_H_

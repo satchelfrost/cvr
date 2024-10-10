@@ -415,7 +415,6 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     ubo->data.idx = cam_order[3]; // TODO: unused in shader
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
-    // memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
 
     return true;
 }
@@ -518,7 +517,6 @@ int main(int argc, char **argv)
     /* settings & logging*/
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
     bool use_hres = false;
-    bool print_fps = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
@@ -530,9 +528,8 @@ int main(int argc, char **argv)
 
     /* game loop */
     while (!window_should_close()) {
-        if (print_fps) log_fps();
-
         /* input */
+        if (is_key_down(KEY_F)) log_fps();
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
             nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
@@ -559,7 +556,6 @@ int main(int argc, char **argv)
             nob_log(NOB_INFO, "resetting camera defaults");
             copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
         }
-        if (is_key_pressed(KEY_F)) print_fps = !print_fps;
         update_camera_free(&cameras[cam_move_idx]);
 
         /* draw */
@@ -585,10 +581,14 @@ int main(int argc, char **argv)
         end_drawing();
     }
 
-    return 1;
-
     /* cleanup */
+    wait_idle();
     for (size_t i = 0; i < NUM_IMGS; i++) vk_unload_texture2(textures[i]);
+    vk_buff_destroy(ubo.buff);
+    vk_destroy_ds_pool(pool);
+    vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_UNIFORM]);
+    vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_SAMPLERS]);
+    vk_destroy_pl_res(gfx_pl, pl_layout);
     destroy_point_cloud(hres.id);
     destroy_point_cloud(lres.id);
     close_window();
