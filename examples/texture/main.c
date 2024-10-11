@@ -2,23 +2,114 @@
 #include "ext/nob.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <math.h>
+#include "vk_ctx.h"
 
-bool load_texture(const char *name, Texture *texture)
+typedef enum {
+    DS_MATRIX,
+    DS_STATUE,
+    DS_COUNT,
+} Ds_Name;
+
+VkDescriptorSet ds_sets[DS_COUNT];
+VkDescriptorSetLayout ds_layout;
+VkDescriptorPool ds_pool;
+VkPipeline gfx_pl;
+VkPipelineLayout gfx_pl_layout;
+
+typedef struct {
+    const char *file_name;
+    Vk_Texture texture;
+    float aspect;
+} Picture;
+
+Picture pictures[] = {
+    {.file_name = "res/matrix.png"},
+    {.file_name = "res/statue.jpg"}
+};
+
+bool init_picture(Picture *picture)
 {
-    Image img = load_image(name);
+    Image img = load_image(picture->file_name);
 
     if (!img.data) {
-        nob_log(NOB_ERROR, "image %s could not be loaded", name);
+        nob_log(NOB_ERROR, "image %s could not be loaded", picture->file_name);
         return false;
     } else {
-        nob_log(NOB_INFO, "image %s was successfully loaded", name);
+        nob_log(NOB_INFO, "image %s was successfully loaded", picture->file_name);
         nob_log(NOB_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
         nob_log(NOB_INFO, "    image size in memory = %d bytes", img.height * img.width * 4);
     }
 
-    *texture = load_texture_from_image(img);
-    nob_log(NOB_INFO, "    texture id %d", texture->id);
+    if (!vk_load_texture(img.data, img.width, img.height, img.format, &picture->texture))
+        return false;
+
+    picture->aspect = (float)img.width / img.height;
+
     unload_image(img);
+    return true;
+}
+
+bool setup_ds_layout()
+{
+    VkDescriptorSetLayoutBinding binding = {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)};
+    VkDescriptorSetLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pBindings = &binding,
+        .bindingCount = 1,
+    };
+    if (!vk_create_ds_layout(layout_ci, &ds_layout)) return false;
+    return true;
+}
+
+bool setup_ds_pool()
+{
+    VkDescriptorPoolSize pool_size = {DS_POOL(COMBINED_IMAGE_SAMPLER, DS_COUNT)};
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+        .maxSets = DS_COUNT,
+    };
+    if (!vk_create_ds_pool(pool_ci, &ds_pool)) return false;
+    return true;
+}
+
+bool setup_ds_sets()
+{
+    /* allocate descriptor sets based on layouts */
+    VkDescriptorSetLayout layouts[] = {ds_layout, ds_layout};
+    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, NOB_ARRAY_LEN(layouts), ds_pool)};
+    if (!vk_alloc_ds(alloc, ds_sets)) return false;
+
+    /* update descriptor sets based on layouts */
+    for (size_t i = 0; i < NOB_ARRAY_LEN(pictures); i++) {
+        VkDescriptorImageInfo img_info = {
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView   = pictures[i].texture.view,
+            .sampler     = pictures[i].texture.sampler,
+        };
+        VkWriteDescriptorSet write = {
+            DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[i], &img_info)
+        };
+        vk_update_ds(1, &write);
+    }
+
+    return true;
+}
+
+bool create_pipeline()
+{
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &ds_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
+    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
+    if (!vk_basic_pl_init2(gfx_pl_layout, shaders[0], shaders[1], &gfx_pl)) return false;
 
     return true;
 }
@@ -35,12 +126,15 @@ int main()
 
     init_window(500, 500, "Load texture");
 
-    Texture matrix_tex = {0};
-    if (!load_texture("res/matrix.png", &matrix_tex)) return 1;
-    float matrix_aspect = (float)matrix_tex.width / matrix_tex.height;
-    Texture statue_tex = {0};
-    if (!load_texture("res/statue.jpg", &statue_tex)) return 1;
-    float statue_aspect = (float)statue_tex.width / statue_tex.height;
+    for (size_t i = 0; i < NOB_ARRAY_LEN(pictures); i++)
+        if (!init_picture(&pictures[i])) return 1;
+
+    /* setup descriptors */
+    if (!setup_ds_layout()) return 1;
+    if (!setup_ds_pool())   return 1;
+    if (!setup_ds_sets())   return 1;
+
+    if (!create_pipeline()) return 1;
 
     float time = 0.0f;
     while(!window_should_close()) {
@@ -49,21 +143,27 @@ int main()
         begin_mode_3d(camera);
             rotate_y(time);
             push_matrix();
-                scale(matrix_aspect, 1.0f, 1.0f);
-                if (!draw_texture(matrix_tex, SHAPE_QUAD)) return 1;
+                scale(pictures[DS_MATRIX].aspect, 1.0f, 1.0f);
+                if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_MATRIX], SHAPE_QUAD))
+                    return 1;
             pop_matrix();
 
-            scale(statue_aspect, 1.0f, 1.0f);
+            scale(pictures[DS_STATUE].aspect, 1.0f, 1.0f);
             translate(0.0f, 0.0f, 1.0f);
-            if (!draw_texture(statue_tex, SHAPE_QUAD)) return 1;
+                if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_STATUE], SHAPE_QUAD))
+                    return 1;
             rotate_x(time);
             draw_shape_wireframe(SHAPE_CUBE);
         end_mode_3d();
         end_drawing();
     }
 
-    unload_texture(matrix_tex);
-    unload_texture(statue_tex);
+    wait_idle();
+    vk_unload_texture(&pictures[DS_MATRIX].texture);
+    vk_unload_texture(&pictures[DS_STATUE].texture);
+    vk_destroy_ds_layout(ds_layout);
+    vk_destroy_ds_pool(ds_pool);
+    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     close_window();
     return 0;
 }

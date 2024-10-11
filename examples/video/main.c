@@ -162,9 +162,8 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
         .view = img_view,
         .sampler = sampler,
         .img = vk_img,
-        .id = vid_plane_type + vid_idx * VIDEO_PLANE_COUNT,
     };
-    video_textures.planes[plane.id] = plane;
+    video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT] = plane;
 
     return true;
 }
@@ -191,6 +190,24 @@ bool update_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_pla
     );
 
     return result;
+}
+
+bool create_pipeline()
+{
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pPushConstantRanges = &pk_range,
+        .pushConstantRangeCount = 1,
+        .pSetLayouts = &video_textures.ds_layout,
+        .setLayoutCount = 1,
+    };
+
+    if (!vk_pl_layout_init(layout_ci, &video_textures.pl_layout)) return false;
+    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
+    if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return false;
+
+    return true;
 }
 
 int main()
@@ -257,17 +274,14 @@ int main()
     if (!setup_ds_sets())   return 1;
 
     /* setup the graphics pipeline */
-    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
-    if (!vk_pl_layout_init2(video_textures.ds_layout, &video_textures.pl_layout, &pk_range, 1)) return 1;
-    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
-    if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return 1;
+    if (!create_pipeline()) return 1;
 
     float vid_update_time = 0.0f;
     bool playback_finished = false;
 
     while(!window_should_close() && !playback_finished) {
         /* update */
-        log_fps();
+        if (is_key_down(KEY_F)) log_fps();
         update_camera_free(&camera);
         vid_update_time += get_frame_time();
 
@@ -320,7 +334,7 @@ int main()
         plm_destroy(video_textures.plms[i]);
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
             vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
-            vk_unload_texture2(video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
+            vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
     vk_destroy_ds_layout(video_textures.ds_layout);

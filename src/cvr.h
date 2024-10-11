@@ -330,11 +330,6 @@ typedef struct {
     size_t count; // number of items
 } Buffer;
 
-Texture load_texture_from_image(Image img);
-Texture load_pc_texture_from_image(Image img);
-void unload_texture(Texture texture);
-bool draw_texture(Texture texture, Shape_Type shape_type);
-bool draw_pc_texture(Texture texture);
 bool is_mouse_button_down(int button);
 int get_last_btn_pressed();
 

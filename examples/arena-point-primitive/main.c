@@ -188,7 +188,6 @@ bool load_texture(Image img, size_t img_idx)
         .view = img_view,
         .sampler = sampler,
         .img = vk_img,
-        .id = img_idx,
     };
     textures[img_idx] = texture;
 
@@ -496,10 +495,10 @@ int main(int argc, char **argv)
 
     /* initialize shader resources */
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
-    if (!vk_ubo_init2(&ubo.buff)) return 1;
+    if (!vk_ubo_init(&ubo.buff))  return 1;
     if (!setup_ds_layouts())      return 1;
     if (!setup_ds_pool())         return 1;
-    if (!setup_ds_sets(ubo.buff))  return 1;
+    if (!setup_ds_sets(ubo.buff)) return 1;
 
     /* setup the graphics pipeline */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
@@ -510,7 +509,7 @@ int main(int argc, char **argv)
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!vk_pl_layout_init3(layout_ci, &pl_layout)) return 1;
+    if (!vk_pl_layout_init(layout_ci, &pl_layout)) return 1;
     const char *shaders[] = {"./res/point-cloud.vert.spv", "./res/point-cloud.frag.spv"};
     if (!vk_point_cloud_pl_init(pl_layout, shaders[0], shaders[1], &gfx_pl)) return 1;
 
@@ -583,7 +582,7 @@ int main(int argc, char **argv)
 
     /* cleanup */
     wait_idle();
-    for (size_t i = 0; i < NUM_IMGS; i++) vk_unload_texture2(textures[i]);
+    for (size_t i = 0; i < NUM_IMGS; i++) vk_unload_texture(&textures[i]);
     vk_buff_destroy(ubo.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_UNIFORM]);

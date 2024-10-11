@@ -103,6 +103,20 @@ bool setup_ds(Vk_Buffer ubo, Vk_Buffer comp_buff)
     return true;
 }
 
+bool create_pipeline()
+{
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &compute_ds_layout,
+    };
+    if (!vk_pl_layout_init(layout_ci, &compute_pl_layout))                             return false;
+    if (!vk_compute_pl_init("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return false;
+    if (!vk_basic_pl_init(PIPELINE_COMPUTE))                                           return false;
+
+    return true;
+}
+
 int main()
 {
     /* initialize buffers */
@@ -127,7 +141,7 @@ int main()
     };
 
     if (!vk_comp_buff_staged_upload(&comp_buff, particles)) return 1;
-    if (!vk_ubo_init2(&ubo)) return 1;
+    if (!vk_ubo_init(&ubo)) return 1;
 
     /* setup descriptors */
     if (!setup_ds_layout())        return 1;
@@ -135,9 +149,7 @@ int main()
     if (!setup_ds(ubo, comp_buff)) return 1;
 
     /* setup pipelines */
-    if (!vk_pl_layout_init(compute_ds_layout, &compute_pl_layout)) return 1;
-    if (!vk_compute_pl_init("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return 1;
-    if (!vk_basic_pl_init(PIPELINE_COMPUTE)) return 1;
+    if (!create_pipeline()) return 1;
 
     /* record compute commands */
     if (!vk_rec_compute()) return 1;
@@ -145,7 +157,6 @@ int main()
         size_t group_x = PARTICLE_COUNT / 256 + 1;
         vk_compute(compute_pl, compute_pl_layout, compute_ds, group_x, 1, 1);
     if (!vk_end_rec_compute()) return 1;
-
 
     float time = 0.0f;
     while (!window_should_close()) {

@@ -16,12 +16,14 @@
  * [*] - get rid of cvr_chk macro
  * [*] - find queue families should return a boolean, and then indices should be stored in ctx
  * [*] - I don't like ext_manager
- * [ ] - texture set probably shouldn't be in vk_ctx.h
- * [ ] - grouped textures (i.e. multiple samplers) are unique so they shouldnt be allowed as default behavior
+ * [*] - texture set probably shouldn't be in vk_ctx.h
+ * [*] - grouped textures (i.e. multiple samplers) are unique so they shouldnt be allowed as default behavior
  * [*] - get rid of ubos in context
+ * [*] - eventually replace functions ending with "2" with the main one, once those can be removed
+ * [*] - switch to using only vk_ubo_init2, then once switched, rename to vk_ubo_init again
+ * [ ] - Pipeline_Type should be default pipelines, but they shouldn't be elevated to here unless they are really useful
+ *       e.g. have a default pipelines struct that contains pipeline and pipeline layout possibly
  * [ ] - for functions that "can't fail" due to Vulkan commands returning void, I should change my function to also return void, also don't forget cvr.c/h
- * [ ] - switch to using only vk_ubo_init2, then once switched, rename to vk_ubo_init again
- * [ ] - eventually replace functions ending with "2" with the main one, once those can be removed
  * [ ] - enable a method for choosing extensions in user space
  * [ ] - get rid of nob_da_resize
  * [ ] - remove dependency of glfw
@@ -90,18 +92,7 @@ typedef struct {
     VkImageView view;
     VkSampler sampler;
     Vk_Image img;
-    size_t id;
-    VkDescriptorSet descriptor_set; // TODO: I don't like this either
 } Vk_Texture;
-
-typedef struct {
-    Vk_Texture *items;
-    size_t count;
-    size_t capacity;
-    VkDescriptorSetLayout set_layout;
-    VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_set; // TODO: once I make the arena point primitive a special case I want to have an array here
-} Vk_Texture_Set;
 
 typedef struct {
     VkDescriptorSetLayoutBinding *items;
@@ -113,43 +104,9 @@ typedef enum {
     PIPELINE_DEFAULT = 0,
     PIPELINE_WIREFRAME,
     PIPELINE_POINT_CLOUD,
-    PIPELINE_TEXTURE,
     PIPELINE_COMPUTE,
     PIPELINE_COUNT,
 } Pipeline_Type; // TODO: these should be called default pipelines
-
-typedef enum {
-    DS_TYPE_TEX,
-    DS_TYPE_COMPUTE,
-    DS_TYPE_COUNT,
-} Descriptor_Type;
-
-typedef struct {
-    VkDescriptorSetLayout *items;
-    size_t count;
-    size_t capacity;
-} Descriptor_Set_Layouts;
-
-typedef struct {
-    Vk_Buffer *items;
-    size_t count;
-    size_t capacity;
-    VkDescriptorSet descriptor_set;
-    VkDescriptorPool descriptor_pool;
-    VkDescriptorSetLayout set_layout;
-} SSBO_Set;
-
-typedef struct {
-    VkPipeline *items;
-    size_t count;
-    size_t capacity;
-} Vk_Pipeline_Set;
-
-typedef struct {
-    VkPipelineLayout *items;
-    size_t count;
-    size_t capacity;
-} Vk_Pipeline_Layout_Set;
 
 typedef struct {
     GLFWwindow *window;
@@ -180,9 +137,6 @@ typedef struct {
     VkImageView depth_img_view;
     VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
     VkPipeline pipelines[PIPELINE_COUNT];
-    Vk_Pipeline_Set compute_pl_sets[DS_TYPE_COUNT];
-    Vk_Pipeline_Layout_Set compute_pl_layout_sets[DS_TYPE_COUNT];
-    Vk_Texture_Set texture_sets[DS_TYPE_COUNT];
 } Vk_Context;
 
 bool vk_init();
@@ -203,24 +157,17 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 
-bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout);
-bool vk_pl_layout_init2(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout, VkPushConstantRange *ranges, size_t range_count);
+bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
 bool vk_basic_pl_init(Pipeline_Type pipeline_type);
 bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl);
- // TODO: I want everything (init1/2) to converge into this function, but temporarily don't want everything to break
-bool vk_pl_layout_init3(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
-bool vk_compute_pl_init2(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
-
-/* general ubo initializer */
-bool vk_ubo_init2(Vk_Buffer *buff);
+bool vk_ubo_init(Vk_Buffer *buff);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
 bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Pipeline_Type pl_type);
-bool vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
-bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_rec_compute();
@@ -250,7 +197,6 @@ bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data);
 bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 bool vk_create_storage_img(Vk_Texture *texture);
-void vk_unload_texture2(Vk_Texture texture);
 void vk_pl_barrier(VkImageMemoryBarrier barrier);
 
 /* descriptor set macros */
@@ -345,8 +291,8 @@ void vk_begin_render_pass(Color color);
 int format_to_size(VkFormat fmt);
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
-bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type);
-bool vk_unload_texture(size_t id, Descriptor_Type ds_type);
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_Texture *texture);
+void vk_unload_texture(Vk_Texture *texture);
 bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 bool vk_sampler_init(VkSampler *sampler);
 
@@ -439,30 +385,10 @@ bool vk_destroy()
 
     cleanup_swapchain();
     vkDeviceWaitIdle(ctx.device);
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        Vk_Texture_Set texture_set = ctx.texture_sets[i];
-        vkDestroyDescriptorPool(ctx.device, texture_set.descriptor_pool, NULL);
-    }
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        Vk_Texture_Set texture_set = ctx.texture_sets[i];
-        vkDestroyDescriptorSetLayout(ctx.device, texture_set.set_layout, NULL);
-    }
     for (size_t i = 0; i < PIPELINE_COUNT; i++) {
         vkDestroyPipeline(ctx.device, ctx.pipelines[i], NULL);
         vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layouts[i], NULL);
     }
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        Vk_Pipeline_Set pipeline_set = ctx.compute_pl_sets[i];
-        for (size_t j = 0; j < pipeline_set.count; j++) {
-            vkDestroyPipeline(ctx.device, pipeline_set.items[j], NULL);
-        }
-    }
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        Vk_Pipeline_Layout_Set layout_set = ctx.compute_pl_layout_sets[i];
-        for (size_t j = 0; j < layout_set.count; j++)
-            vkDestroyPipelineLayout(ctx.device, layout_set.items[j], NULL);
-    }
-
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
 #ifdef ENABLE_VALIDATION
@@ -697,10 +623,6 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
     char *vert_shader_name;
     char *frag_shader_name;
     switch (pl_type) {
-    case PIPELINE_TEXTURE:
-        vert_shader_name = "./res/texture.vert.spv";
-        frag_shader_name = "./res/texture.frag.spv";
-        break;
     case PIPELINE_POINT_CLOUD:
         vert_shader_name = "./res/point-cloud.vert.spv";
         frag_shader_name = "./res/point-cloud.frag.spv";
@@ -794,9 +716,6 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
         .pAttachments = &color_blend,
         .logicOp = VK_LOGIC_OP_COPY,
     };
-    Descriptor_Set_Layouts set_layouts = {0};
-    if (pl_type == PIPELINE_TEXTURE)
-        nob_da_append(&set_layouts, ctx.texture_sets[DS_TYPE_TEX].set_layout);
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .offset = 0,
@@ -804,8 +723,6 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
     };
     VkPipelineLayoutCreateInfo pipeline_layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pSetLayouts = set_layouts.items,
-        .setLayoutCount = set_layouts.count,
         .pPushConstantRanges = &pk_range,
         .pushConstantRangeCount = 1,
     };
@@ -852,7 +769,6 @@ defer:
     vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
     vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
     nob_da_free(vert_attrs);
-    nob_da_free(set_layouts);
     return result;
 }
 
@@ -1180,40 +1096,7 @@ defer:
     return result;
 }
 
-bool vk_pl_layout_init(VkDescriptorSetLayout layout, VkPipelineLayout *pl_layout)
-{
-    VkPipelineLayoutCreateInfo ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 1,
-        .pSetLayouts = &layout,
-    };
-    VkResult res = vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create pipeline layout");
-        return false;
-    }
-
-    return true;
-}
-
-bool vk_pl_layout_init2(VkDescriptorSetLayout ds_layout, VkPipelineLayout *pl_layout, VkPushConstantRange *ranges, size_t range_count)
-{
-    VkPipelineLayoutCreateInfo ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 1,
-        .pSetLayouts = &ds_layout,
-        .pushConstantRangeCount = range_count,
-        .pPushConstantRanges = ranges,
-    };
-    if (!VK_SUCCEEDED(vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout))) {
-        nob_log(NOB_ERROR, "failed to create pipeline layout");
-        return false;
-    }
-
-    return true;
-}
-
-bool vk_pl_layout_init3(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
+bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
 {
     if (!VK_SUCCEEDED(vkCreatePipelineLayout(ctx.device, &ci, NULL, pl_layout))) {
         nob_log(NOB_ERROR, "failed to create pipeline layout");
@@ -1431,7 +1314,7 @@ defer:
     return result;
 }
 
-bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
+void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
     VkCommandBuffer cmd_buffer = ctx.gfx_buff;
 
@@ -1452,8 +1335,6 @@ bool vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float16), &mat);
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
-
-    return true; // TODO: do I want to do this?
 }
 
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
@@ -1558,9 +1439,8 @@ void vk_compute_pl_barrier()
 
 bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Pipeline_Type pl_type)
 {
-    bool result = true;
-
     VkCommandBuffer cmd_buffer = ctx.gfx_buff;
+
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pl_type]);
     VkViewport viewport = {
         .width = (float)ctx.extent.width,
@@ -1585,10 +1465,10 @@ bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Pipeline_Type pl_type)
 
     vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
 
-    return result;
+    return true;
 }
 
-bool vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
     VkCommandBuffer cmd_buffer = ctx.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
@@ -1622,53 +1502,6 @@ bool vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipeline
     );
 
     vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
-
-    return true; // TODO: what do I want to do instead?
-}
-
-bool vk_draw_texture(size_t id, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
-{
-    bool result = true;
-
-    VkCommandBuffer cmd_buffer = ctx.gfx_buff;
-
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[PIPELINE_TEXTURE]);
-    VkViewport viewport = {0};
-    viewport.width = (float)ctx.extent.width;
-    viewport.height =(float)ctx.extent.height;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
-    VkRect2D scissor = {0};
-    scissor.extent = ctx.extent;
-    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
-
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-
-    Vk_Texture_Set texture_set = ctx.texture_sets[DS_TYPE_TEX];
-    if (id < texture_set.count && texture_set.items[id].img.handle) {
-        vkCmdBindDescriptorSets(
-            cmd_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.pipeline_layouts[PIPELINE_TEXTURE], 0, 1,
-            &texture_set.items[id].descriptor_set, 0, NULL
-        );
-    }
-
-    float16 mat = MatrixToFloatV(mvp);
-    vkCmdPushConstants(
-        cmd_buffer,
-        ctx.pipeline_layouts[PIPELINE_TEXTURE],
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(float16),
-        &mat
-    );
-
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
-
-    return result;
 }
 
 bool vk_begin_drawing()
@@ -1815,7 +1648,7 @@ bool vk_depth_init()
     return true;
 }
 
-bool vk_ubo_init2(Vk_Buffer *buff)
+bool vk_ubo_init(Vk_Buffer *buff)
 {
     bool result = vk_buff_init(
         buff,
@@ -2281,7 +2114,7 @@ void vk_buff_destroy(Vk_Buffer buffer)
 {
     vkDestroyBuffer(ctx.device, buffer.handle, NULL);
     vkFreeMemory(ctx.device, buffer.mem, NULL);
-    buffer.handle = NULL;
+    buffer.handle = NULL; // TODO: buffer should have been a pointer because this actually does nothing
 }
 
 bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
@@ -2788,7 +2621,7 @@ bool vk_sampler_init(VkSampler *sampler)
     return true;
 }
 
-bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size_t *id, Descriptor_Type ds_type)
+bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_Texture *texture)
 {
     bool result = true;
 
@@ -2861,55 +2694,29 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, size
         nob_return_defer(false);
     }
 
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[ds_type];
-    Vk_Texture texture = {
+    Vk_Texture tex= {
         .view = img_view,
         .sampler = sampler,
         .img = vk_img,
-        .id = texture_set->count,
     };
-
-    *id = texture.id;
-    nob_da_append(texture_set, texture);
+    *texture = tex;
 
 defer:
     vk_buff_destroy(stg_buff);
     return result;
 }
 
-bool vk_unload_texture(size_t id, Descriptor_Type ds_type)
+void vk_unload_texture(Vk_Texture *texture)
 {
-    vkDeviceWaitIdle(ctx.device);
+    vkDestroySampler(ctx.device, texture->sampler, NULL);
+    vkDestroyImageView(ctx.device, texture->view, NULL);
+    vkDestroyImage(ctx.device, texture->img.handle, NULL);
+    vkFreeMemory(ctx.device, texture->img.mem, NULL);
 
-    Vk_Texture_Set texture_set = ctx.texture_sets[ds_type];
-    for (size_t i = 0; i < texture_set.count; i++) {
-        Vk_Texture *texture = &texture_set.items[i];
-        if (texture->id == id) {
-            if (!texture->img.handle) {
-                nob_log(NOB_WARNING, "cannot unload texture %d, already inactive", texture->id);
-                return false;
-            } else {
-                vkDestroySampler(ctx.device, texture->sampler, NULL);
-                vkDestroyImageView(ctx.device, texture->view, NULL);
-                vkDestroyImage(ctx.device, texture->img.handle, NULL);
-                vkFreeMemory(ctx.device, texture->img.mem, NULL);
-                texture->sampler = NULL;
-                texture->view = NULL;
-                texture->img.handle = NULL;
-                texture->img.mem =  NULL;
-            }
-        }
-    }
-
-    return true;
-}
-
-void vk_unload_texture2(Vk_Texture texture)
-{
-    vkDestroySampler(ctx.device, texture.sampler, NULL);
-    vkDestroyImageView(ctx.device, texture.view, NULL);
-    vkDestroyImage(ctx.device, texture.img.handle, NULL);
-    vkFreeMemory(ctx.device, texture.img.mem, NULL);
+    texture->sampler = NULL;
+    texture->view = NULL;
+    texture->img.handle = NULL;
+    texture->img.mem = NULL;
 }
 
 bool vk_create_storage_img(Vk_Texture *texture)

@@ -106,7 +106,6 @@ void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
-bool tex_sampler_init();
 
 bool init_window(int width, int height, const char *title)
 {
@@ -173,7 +172,9 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape].idx_buff;
-    return vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, mvp);
+    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, mvp);
+
+    return true;
 }
 
 bool draw_shape_wireframe(Shape_Type shape_type)
@@ -671,98 +672,6 @@ void unload_image(Image image)
     free(image.data);
 }
 
-Texture load_texture_from_image(Image img)
-{
-    Texture texture = {
-        .width    = img.width,
-        .height   = img.height,
-        .mipmaps  = img.mipmaps,
-        .format   = img.format,
-    };
-
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, DS_TYPE_TEX))
-        nob_log(NOB_ERROR, "unable to load texture");
-
-    return texture;
-}
-
-void unload_texture(Texture texture)
-{
-    vk_unload_texture(texture.id, DS_TYPE_TEX);
-}
-
-bool tex_sampler_init()
-{
-    /* default descriptor set layout for texture */
-    VkDescriptorSetLayoutBinding binding = {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)};
-    VkDescriptorSetLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .pBindings = &binding,
-        .bindingCount = 1,
-    };
-    VkDescriptorSetLayout *layout = &ctx.texture_sets[DS_TYPE_TEX].set_layout;
-    if (!VK_SUCCEEDED(vkCreateDescriptorSetLayout(ctx.device, &layout_ci, NULL, layout))) {
-        nob_log(NOB_ERROR, "failed to create descriptor set layout for textures");
-        return false;
-    }
-    
-    /* default pool for default textures */
-    VkDescriptorPoolSize pool_size = {DS_POOL(COMBINED_IMAGE_SAMPLER, ctx.texture_sets[DS_TYPE_TEX].count)};
-    VkDescriptorPoolCreateInfo pool_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_size,
-        .maxSets = ctx.texture_sets[DS_TYPE_TEX].count,
-    };
-    VkDescriptorPool *pool = &ctx.texture_sets[DS_TYPE_TEX].descriptor_pool;
-    if (!vk_create_ds_pool(pool_ci, pool)) return false;
-
-    /* allocate descriptor sets based on layouts */
-    /* update descriptor sets based on layouts */
-    Vk_Texture_Set *texture_set = &ctx.texture_sets[DS_TYPE_TEX];
-    for (size_t tex = 0; tex < texture_set->count; tex++) {
-        VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layout, 1, *pool)};
-        if (!vk_alloc_ds(alloc, &texture_set->items[tex].descriptor_set)) return false;
-
-        VkDescriptorImageInfo img_info = {
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView   = texture_set->items[tex].view,
-            .sampler     = texture_set->items[tex].sampler,
-        };
-        VkWriteDescriptorSet write = {
-            DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, texture_set->items[tex].descriptor_set, &img_info)
-        };
-        vk_update_ds(1, &write);
-    }
-
-    return true;
-}
-
-bool draw_texture(Texture texture, Shape_Type shape_type)
-{
-    if (!ctx.pipelines[PIPELINE_TEXTURE]) {
-        if (!tex_sampler_init()) return false;
-        if (!vk_basic_pl_init(PIPELINE_TEXTURE)) return false;
-    }
-    if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
-
-
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        return false;
-    }
-
-    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
-    if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp)) return false;
-
-    return true;
-}
-
 Vector3 get_camera_forward(Camera *camera)
 {
     return Vector3Normalize(Vector3Subtract(camera->target, camera->position));
@@ -1122,7 +1031,7 @@ Window_Size get_window_size()
     return win_size;
 }
 
-void wait_idle()
+void wait_idle() // TODO: this should be in vk_ctx.h
 {
     vkDeviceWaitIdle(ctx.device);
 }
