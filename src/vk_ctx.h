@@ -11,24 +11,8 @@
 #include "nob_ext.h"
 
 /*
- * [*] - take out cmd manager and move into vulkan context
- * [*] - get rid of vk_chk macro
- * [*] - get rid of cvr_chk macro
- * [*] - find queue families should return a boolean, and then indices should be stored in ctx
- * [*] - I don't like ext_manager
- * [*] - texture set probably shouldn't be in vk_ctx.h
- * [*] - grouped textures (i.e. multiple samplers) are unique so they shouldnt be allowed as default behavior
- * [*] - get rid of ubos in context
- * [*] - eventually replace functions ending with "2" with the main one, once those can be removed
- * [*] - switch to using only vk_ubo_init2, then once switched, rename to vk_ubo_init again
- * [*] - for functions that "can't fail" due to Vulkan commands returning void, I should change my function to also return void, also don't forget cvr.c/h
- * [ ] - Pipeline_Type should be default pipelines, but they shouldn't be elevated to here unless they are really useful
- *       e.g. have a default pipelines struct that contains pipeline and pipeline layout possibly
- * [ ] - get rid of nob_da_resize
- * [ ] - remove dependency of nob
- * [ ] - remove dependency of glfw
- * [ ] - remove dependency of raymath
- *
+ * Note: if I ever get around to making this a proper header-only library then I will want to remove
+ * the dependencies on glfw, nob, and raymath.
  * */
 
 #define GLFW_INCLUDE_VULKAN // TODO: would like to move this into cvr.c
@@ -94,20 +78,6 @@ typedef struct {
 } Vk_Texture;
 
 typedef struct {
-    VkDescriptorSetLayoutBinding *items;
-    size_t count;
-    size_t capacity;
-} Descriptor_Set_Layout_Bindings;
-
-typedef enum {
-    PIPELINE_DEFAULT = 0,
-    PIPELINE_WIREFRAME,
-    PIPELINE_POINT_CLOUD,
-    PIPELINE_COMPUTE,
-    PIPELINE_COUNT,
-} Pipeline_Type; // TODO: these should be called default pipelines
-
-typedef struct {
     GLFWwindow *window;
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_msgr;
@@ -134,8 +104,6 @@ typedef struct {
     Vk_Swapchain swapchain;
     Vk_Image depth_img;
     VkImageView depth_img_view;
-    VkPipelineLayout pipeline_layouts[PIPELINE_COUNT];
-    VkPipeline pipelines[PIPELINE_COUNT];
 } Vk_Context;
 
 bool vk_init();
@@ -146,7 +114,6 @@ bool vk_surface_init();
 bool vk_swapchain_init();
 bool vk_img_views_init();
 bool vk_img_view_init(Vk_Image img, VkImageView *img_view);
-bool vk_point_cloud_pl_init(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl);
 bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
 bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
@@ -156,16 +123,26 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 
+typedef struct {
+    VkPipelineLayout pl_layout;
+    const char *vert;
+    const char *frag;
+    VkPrimitiveTopology topology;
+    VkPolygonMode polygon_mode;
+    VkVertexInputAttributeDescription *vert_attrs;
+    size_t vert_attr_count;
+    VkVertexInputBindingDescription *vert_bindings;
+    size_t vert_binding_count;
+} Pipeline_Config;
+
 bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
-bool vk_basic_pl_init(Pipeline_Type pipeline_type);
-bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl);
+bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl);
 bool vk_ubo_init(Vk_Buffer *buff);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
-bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
+void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
 void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Pipeline_Type pl_type);
 void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
@@ -314,6 +291,9 @@ bool vk_sampler_init(VkSampler *sampler);
 
 Vk_Context ctx = {0};
 
+/* swapchain image index */
+static uint32_t img_idx = 0;
+
 bool cmd_buff_init();
 bool cmd_syncs_init();
 bool cmd_pool_init();
@@ -336,18 +316,6 @@ Instance_Exts instance_exts = {0};
 bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
-
-/* Vertex attributes */
-VkVertexInputBindingDescription get_binding_desc(Pipeline_Type pipeline_type);
-typedef struct {
-    VkVertexInputAttributeDescription *items;
-    size_t count;
-    size_t capacity;
-} VtxAttrDescs;
-
-void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type);
-
-static uint32_t img_idx = 0;
 
 bool vk_init()
 {
@@ -384,10 +352,6 @@ bool vk_destroy()
 
     cleanup_swapchain();
     vkDeviceWaitIdle(ctx.device);
-    for (size_t i = 0; i < PIPELINE_COUNT; i++) {
-        vkDestroyPipeline(ctx.device, ctx.pipelines[i], NULL);
-        vkDestroyPipelineLayout(ctx.device, ctx.pipeline_layouts[i], NULL);
-    }
     vkDestroyRenderPass(ctx.device, ctx.render_pass, NULL);
     vkDestroyDevice(ctx.device, NULL);
 #ifdef ENABLE_VALIDATION
@@ -615,28 +579,9 @@ bool vk_img_views_init()
     return true;
 }
 
-bool vk_basic_pl_init(Pipeline_Type pl_type)
+bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
 {
     bool result = true;
-
-    char *vert_shader_name;
-    char *frag_shader_name;
-    switch (pl_type) {
-    case PIPELINE_POINT_CLOUD:
-        vert_shader_name = "./res/point-cloud.vert.spv";
-        frag_shader_name = "./res/point-cloud.frag.spv";
-        break;
-    case PIPELINE_COMPUTE:
-        vert_shader_name = "./res/particle.vert.spv";
-        frag_shader_name = "./res/particle.frag.spv";
-        break;
-    case PIPELINE_DEFAULT:
-    case PIPELINE_WIREFRAME:
-    default:
-        vert_shader_name = "./res/default.vert.spv";
-        frag_shader_name = "./res/default.frag.spv";
-        break;
-    }
 
     VkPipelineShaderStageCreateInfo stages[] = {
         {
@@ -650,9 +595,8 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
             .pName = "main",
         },
     };
-
-    if (!vk_shader_mod_init(vert_shader_name, &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init(frag_shader_name, &stages[1].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(config.vert, &stages[0].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(config.frag, &stages[1].module)) nob_return_defer(false);
 
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
@@ -660,20 +604,16 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
         .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
         .pDynamicStates = dynamic_states,
     };
-    VtxAttrDescs vert_attrs = {0};
-    get_attr_descs(&vert_attrs, pl_type);
-    VkVertexInputBindingDescription binding_desc = get_binding_desc(pl_type);
     VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &binding_desc,
-        .vertexAttributeDescriptionCount = vert_attrs.count,
-        .pVertexAttributeDescriptions = vert_attrs.items,
+        .vertexBindingDescriptionCount = config.vert_binding_count,
+        .pVertexBindingDescriptions = config.vert_bindings,
+        .vertexAttributeDescriptionCount = config.vert_attr_count,
+        .pVertexAttributeDescriptions = config.vert_attrs,
     };
     VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = (pl_type == PIPELINE_POINT_CLOUD || pl_type == PIPELINE_COMPUTE) ?
-            VK_PRIMITIVE_TOPOLOGY_POINT_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .topology = config.topology,
     };
     VkViewport viewport = {
         .width    = (float) ctx.extent.width,
@@ -690,10 +630,9 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
     };
     VkPipelineRasterizationStateCreateInfo rasterizer_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = (pl_type == PIPELINE_WIREFRAME) ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL,
+        .polygonMode = config.polygon_mode,
         .lineWidth = 1.0f,
         .cullMode = VK_CULL_MODE_NONE,
-        // .frontFace = VK_FRONT_FACE_CLOCKWISE,
     };
     VkPipelineMultisampleStateCreateInfo multisampling_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -715,24 +654,8 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
         .pAttachments = &color_blend,
         .logicOp = VK_LOGIC_OP_COPY,
     };
-    VkPushConstantRange pk_range = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = sizeof(float16),
-    };
-    VkPipelineLayoutCreateInfo pipeline_layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pPushConstantRanges = &pk_range,
-        .pushConstantRangeCount = 1,
-    };
-    VkResult res = vkCreatePipelineLayout(
-        ctx.device,
-        &pipeline_layout_ci,
-        NULL,
-        &ctx.pipeline_layouts[pl_type]
-    );
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create pipeline layout");
+    if (!config.pl_layout) {
+        nob_log(NOB_ERROR, "pipeline layout was NULL");
         nob_return_defer(false);
     }
     VkPipelineDepthStencilStateCreateInfo depth_ci = {
@@ -754,12 +677,11 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
         .pColorBlendState = &color_blend_ci,
         .pDynamicState = &dynamic_state_ci,
         .pDepthStencilState = &depth_ci,
-        .layout = ctx.pipeline_layouts[pl_type],
+        .layout = config.pl_layout,
         .renderPass = ctx.render_pass,
         .subpass = 0,
     };
-    res = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, &ctx.pipelines[pl_type]);
-    if (!VK_SUCCEEDED(res)) {
+    if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
         nob_log(NOB_ERROR, "failed to create pipeline");
         nob_return_defer(false);
     }
@@ -767,236 +689,6 @@ bool vk_basic_pl_init(Pipeline_Type pl_type)
 defer:
     vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
     vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
-    nob_da_free(vert_attrs);
-    return result;
-}
-
-bool vk_basic_pl_init2(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl)
-{
-    bool result = true;
-
-    VkPipelineShaderStageCreateInfo stages[] = {
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .pName = "main",
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pName = "main",
-        },
-    };
-    if (!vk_shader_mod_init(vert, &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init(frag, &stages[1].module)) nob_return_defer(false);
-
-    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
-        .pDynamicStates = dynamic_states,
-    };
-
-    VtxAttrDescs vert_attrs = {0};
-    get_attr_descs(&vert_attrs, PIPELINE_DEFAULT);
-    VkVertexInputBindingDescription binding_desc = get_binding_desc(PIPELINE_DEFAULT);
-    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &binding_desc,
-        .vertexAttributeDescriptionCount = vert_attrs.count,
-        .pVertexAttributeDescriptions = vert_attrs.items,
-    };
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-    };
-    VkViewport viewport = {
-        .width    = (float)ctx.extent.width,
-        .height   = (float)ctx.extent.height,
-        .maxDepth = 1.0f,
-    };
-    VkRect2D scissor = {.extent = ctx.extent,};
-    VkPipelineViewportStateCreateInfo viewport_state_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = &viewport,
-        .scissorCount = 1,
-        .pScissors = &scissor,
-    };
-    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = VK_POLYGON_MODE_FILL,
-        .lineWidth = 1.0f,
-        .cullMode = VK_CULL_MODE_NONE,
-    };
-    VkPipelineMultisampleStateCreateInfo multisampling_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-    };
-    VkPipelineColorBlendAttachmentState color_blend = {
-        .colorWriteMask = 0xf, // rgba
-        .blendEnable = VK_TRUE,
-        .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-    };
-    VkPipelineColorBlendStateCreateInfo color_blend_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &color_blend,
-        .logicOp = VK_LOGIC_OP_COPY,
-    };
-    VkPipelineDepthStencilStateCreateInfo depth_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = VK_TRUE,
-        .depthWriteEnable = VK_TRUE,
-        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-        .maxDepthBounds = 1.0f,
-    };
-    VkGraphicsPipelineCreateInfo pipeline_ci = {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = NOB_ARRAY_LEN(stages),
-        .pStages = stages,
-        .pVertexInputState = &vertex_input_ci,
-        .pInputAssemblyState = &input_assembly_ci,
-        .pViewportState = &viewport_state_ci,
-        .pRasterizationState = &rasterizer_ci,
-        .pMultisampleState = &multisampling_ci,
-        .pColorBlendState = &color_blend_ci,
-        .pDynamicState = &dynamic_state_ci,
-        .pDepthStencilState = &depth_ci,
-        .layout = pl_layout,
-        .renderPass = ctx.render_pass,
-        .subpass = 0,
-    };
-
-    if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
-        nob_log(NOB_INFO, "failed to create pipeline");
-        nob_return_defer(false);
-    }
-
-defer:
-    vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
-    vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
-    nob_da_free(vert_attrs);
-    return result;
-}
-
-bool vk_point_cloud_pl_init(VkPipelineLayout pl_layout, const char *vert, const char *frag, VkPipeline *pl)
-{
-    bool result = true;
-
-    VkPipelineShaderStageCreateInfo stages[] = {
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .pName = "main",
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pName = "main",
-        },
-    };
-    if (!vk_shader_mod_init(vert, &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init(frag, &stages[1].module)) nob_return_defer(false);
-
-    VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
-        .pDynamicStates = dynamic_states,
-    };
-    VtxAttrDescs vert_attrs = {0};
-    get_attr_descs(&vert_attrs, PIPELINE_POINT_CLOUD);
-    VkVertexInputBindingDescription binding_desc = get_binding_desc(PIPELINE_POINT_CLOUD);
-    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = 1,
-        .pVertexBindingDescriptions = &binding_desc,
-        .vertexAttributeDescriptionCount = vert_attrs.count,
-        .pVertexAttributeDescriptions = vert_attrs.items,
-    };
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
-    };
-    VkViewport viewport = {
-        .width    = (float)ctx.extent.width,
-        .height   = (float)ctx.extent.height,
-        .maxDepth = 1.0f,
-    };
-    VkRect2D scissor = {.extent = ctx.extent};
-    VkPipelineViewportStateCreateInfo viewport_state_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = &viewport,
-        .scissorCount = 1,
-        .pScissors = &scissor,
-    };
-    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = VK_POLYGON_MODE_FILL,
-        .lineWidth = 1.0f,
-        .cullMode = VK_CULL_MODE_NONE,
-    };
-    VkPipelineMultisampleStateCreateInfo multisampling_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-    };
-    VkPipelineColorBlendAttachmentState color_blend = {
-        .colorWriteMask = 0xf, // rgba
-        .blendEnable = VK_TRUE,
-        .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-    };
-    VkPipelineColorBlendStateCreateInfo color_blend_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &color_blend,
-        .logicOp = VK_LOGIC_OP_COPY,
-    };
-    VkPipelineDepthStencilStateCreateInfo depth_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthTestEnable = VK_TRUE,
-        .depthWriteEnable = VK_TRUE,
-        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-        .maxDepthBounds = 1.0f,
-    };
-    VkGraphicsPipelineCreateInfo pipeline_ci = {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = NOB_ARRAY_LEN(stages),
-        .pStages = stages,
-        .pVertexInputState = &vertex_input_ci,
-        .pInputAssemblyState = &input_assembly_ci,
-        .pViewportState = &viewport_state_ci,
-        .pRasterizationState = &rasterizer_ci,
-        .pMultisampleState = &multisampling_ci,
-        .pColorBlendState = &color_blend_ci,
-        .pDynamicState = &dynamic_state_ci,
-        .pDepthStencilState = &depth_ci,
-        .layout = pl_layout,
-        .renderPass = ctx.render_pass,
-        .subpass = 0,
-    };
-
-    if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
-        nob_log(NOB_INFO, "failed to create pipeline");
-        nob_return_defer(false);
-    }
-
-defer:
-    vkDestroyShaderModule(ctx.device, stages[0].module, NULL);
-    vkDestroyShaderModule(ctx.device, stages[1].module, NULL);
-    nob_da_free(vert_attrs);
     return result;
 }
 
@@ -1273,24 +965,17 @@ void vk_begin_render_pass(Color color)
     vkCmdBeginRenderPass(ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
+void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
 {
-    bool result = true;
-
-    if (pipeline_type == PIPELINE_POINT_CLOUD) {
-        nob_log(NOB_ERROR, "point cloud pipelines should use vk_draw_points");
-        nob_return_defer(false);
-    }
-
     VkCommandBuffer cmd_buffer = ctx.gfx_buff;
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pipeline_type]);
-    VkViewport viewport = {0};
-    viewport.width = (float)ctx.extent.width;
-    viewport.height =(float)ctx.extent.height;
-    viewport.maxDepth = 1.0f;
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    VkViewport viewport = {
+        .width = (float)ctx.extent.width,
+        .height =(float)ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
     vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
-    VkRect2D scissor = {0};
-    scissor.extent = ctx.extent;
+    VkRect2D scissor = {.extent = ctx.extent};
     vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
     VkDeviceSize offsets[] = {0};
@@ -1300,7 +985,7 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     float16 mat = MatrixToFloatV(mvp);
     vkCmdPushConstants(
         cmd_buffer,
-        ctx.pipeline_layouts[pipeline_type],
+        pl_layout,
         VK_SHADER_STAGE_VERTEX_BIT,
         0,
         sizeof(float16),
@@ -1308,9 +993,6 @@ bool vk_draw(Pipeline_Type pipeline_type, Vk_Buffer vtx_buff, Vk_Buffer idx_buff
     );
 
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
-
-defer:
-    return result;
 }
 
 void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
@@ -1434,37 +1116,6 @@ void vk_compute_pl_barrier()
         .pMemoryBarriers = &barrier,
     };
     vkCmdPipelineBarrier2(ctx.compute_buff, &dependency);
-}
-
-bool vk_draw_points(Vk_Buffer vtx_buff, Matrix mvp, Pipeline_Type pl_type)
-{
-    VkCommandBuffer cmd_buffer = ctx.gfx_buff;
-
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.pipelines[pl_type]);
-    VkViewport viewport = {
-        .width = (float)ctx.extent.width,
-        .height =(float)ctx.extent.height,
-        .maxDepth = 1.0f,
-    };
-    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
-    VkRect2D scissor = {.extent = ctx.extent};
-    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-
-    float16 mat = MatrixToFloatV(mvp);
-    vkCmdPushConstants(
-        cmd_buffer,
-        ctx.pipeline_layouts[pl_type],
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(float16),
-        &mat
-    );
-
-    vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
-
-    return true;
 }
 
 void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
@@ -1976,75 +1627,6 @@ bool device_exts_supported(VkPhysicalDevice phys_device)
     }
 
     return false;
-}
-
-VkVertexInputBindingDescription get_binding_desc(Pipeline_Type pipeline_type)
-{
-    VkVertexInputBindingDescription bindingDescription = {0};
-    if (pipeline_type == PIPELINE_POINT_CLOUD) {
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Small_Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    } else if (pipeline_type == PIPELINE_COMPUTE) {
-        bindingDescription.binding = 0;
-        bindingDescription.stride = 32; // TODO: this is hardcoded
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    } else {
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    }
-    return bindingDescription;
-}
-
-void get_attr_descs(VtxAttrDescs *attr_descs, Pipeline_Type pipeline_type)
-{
-    VkVertexInputAttributeDescription desc = {0};
-
-    /* for point clouds use small vertex */
-    if (pipeline_type == PIPELINE_POINT_CLOUD) {
-        desc.binding = 0;
-        desc.location = 0;
-        desc.format = VK_FORMAT_R32G32B32_SFLOAT;
-        desc.offset = 0;
-        nob_da_append(attr_descs, desc);
-
-        desc.binding = 0;
-        desc.location = 1;
-        desc.format = VK_FORMAT_R8G8B8A8_UINT;
-        desc.offset = 12;
-        nob_da_append(attr_descs, desc);
-    } else if (pipeline_type == PIPELINE_COMPUTE) {
-        desc.binding = 0;
-        desc.location = 0;
-        desc.format = VK_FORMAT_R32G32_SFLOAT;
-        desc.offset = 0;
-        nob_da_append(attr_descs, desc);
-
-        desc.binding = 0;
-        desc.location = 1;
-        desc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-        desc.offset = 16;
-        nob_da_append(attr_descs, desc);
-    } else {
-        desc.binding = 0;
-        desc.location = 0;
-        desc.format = VK_FORMAT_R32G32B32_SFLOAT;
-        desc.offset = offsetof(Vertex, pos);
-        nob_da_append(attr_descs, desc);
-
-        desc.binding = 0;
-        desc.location = 1;
-        desc.format = VK_FORMAT_R32G32B32_SFLOAT;
-        desc.offset = offsetof(Vertex, color);
-        nob_da_append(attr_descs, desc);
-
-        desc.binding = 0;
-        desc.location = 2;
-        desc.format = VK_FORMAT_R32G32_SFLOAT;
-        desc.offset = offsetof(Vertex, tex_coord);
-        nob_da_append(attr_descs, desc);
-    }
 }
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)

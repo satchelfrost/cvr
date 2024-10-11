@@ -20,6 +20,8 @@ VkDescriptorSetLayout compute_ds_layout;
 VkPipelineLayout compute_pl_layout;
 VkPipeline compute_pl;
 VkDescriptorPool pool;
+VkPipeline gfx_pl;
+VkPipelineLayout gfx_pl_layout;
 
 Color colors[] = {
     LIGHTGRAY, GRAY, DARKGRAY, YELLOW, GOLD, ORANGE, PINK, RED,
@@ -112,7 +114,37 @@ bool create_pipeline()
     };
     if (!vk_pl_layout_init(layout_ci, &compute_pl_layout))                             return false;
     if (!vk_compute_pl_init("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return false;
-    if (!vk_basic_pl_init(PIPELINE_COMPUTE))                                           return false;
+
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
+    layout_ci.pushConstantRangeCount = 1;
+    layout_ci.pPushConstantRanges = &pk_range;
+    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32_SFLOAT, // position
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32A32_SFLOAT, // color
+            .offset = 16,
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = gfx_pl_layout,
+        .vert = "./res/particle.vert.spv",
+        .frag = "./res/particle.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
+        .polygon_mode = VK_POLYGON_MODE_POINT,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init69(config, &gfx_pl)) return false;
 
     return true;
 }
@@ -165,8 +197,8 @@ int main()
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             Matrix mvp = {0};
-            if (!get_mvp(&mvp)) return 1;
-            if (!vk_draw_points(comp_buff, mvp, PIPELINE_COMPUTE)) return 1;
+            get_mvp(&mvp);
+            vk_draw_points_ex(comp_buff, mvp, gfx_pl, gfx_pl_layout, NULL, 0);
             time = get_time();
             memcpy(ubo.mapped, &time, sizeof(float));
         end_mode_3d();
@@ -179,6 +211,7 @@ int main()
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(compute_ds_layout);
     vk_destroy_pl_res(compute_pl, compute_pl_layout);
+    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     close_window();
     return 0;
 }

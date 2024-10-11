@@ -84,7 +84,21 @@ typedef struct {
     Matrix view_proj;
 } Matrices;
 
+typedef enum {
+    DEFAULT_PL_FILL,
+    DEFAULT_PL_WIREFRAME,
+    DEFAULT_PL_POINT_CLOUD,
+    DEFAULT_PL_COMPUTE,
+    DEFAULT_PL_COUNT,
+} Default_Pipeline;
+
+typedef struct {
+    VkPipeline handles[DEFAULT_PL_COUNT];
+    VkPipelineLayout layouts[DEFAULT_PL_COUNT];
+} Default_Pipelines;
+
 /* State */
+Default_Pipelines pipelines = {0};
 Matrices matrices = {0};
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
@@ -135,11 +149,62 @@ bool window_should_close()
     return result;
 }
 
+bool default_pl_fill_init()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_FILL])) return false;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, pos),
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, color),
+        },
+        {
+            .location = 2,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(Vertex, tex_coord),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pipelines.layouts[DEFAULT_PL_FILL],
+        .vert = "./res/default.vert.spv",
+        .frag = "./res/default.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .polygon_mode = VK_POLYGON_MODE_FILL,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_FILL])) return false;
+
+    return true;
+}
+
 bool draw_shape(Shape_Type shape_type)
 {
-    if (!ctx.pipelines[PIPELINE_DEFAULT])
-        if (!vk_basic_pl_init(PIPELINE_DEFAULT))
-            return false;
+    /* create basic shape pipeline if it hasn't been created */
+    if (!pipelines.handles[DEFAULT_PL_FILL])
+        if (!default_pl_fill_init()) return false;
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
@@ -154,7 +219,9 @@ bool draw_shape(Shape_Type shape_type)
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    return vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
+    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, mvp);
+
+    return true;
 }
 
 bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
@@ -177,13 +244,63 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     return true;
 }
 
+bool default_pl_wireframe_init()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_WIREFRAME]))
+        return false;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, pos),
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, color),
+        },
+        {
+            .location = 2,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(Vertex, tex_coord),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pipelines.layouts[DEFAULT_PL_WIREFRAME],
+        .vert = "./res/default.vert.spv",
+        .frag = "./res/default.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .polygon_mode = VK_POLYGON_MODE_LINE,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_WIREFRAME])) return false;
+
+    return true;
+}
+
 bool draw_shape_wireframe(Shape_Type shape_type)
 {
-    bool result = true;
-
-    if (!ctx.pipelines[PIPELINE_WIREFRAME])
-        if (!vk_basic_pl_init(PIPELINE_WIREFRAME))
-            nob_return_defer(false);
+    /* create basic wireframe pipeline if it hasn't been created */
+    if (!pipelines.handles[DEFAULT_PL_WIREFRAME])
+        if (!default_pl_wireframe_init()) return false;
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
@@ -194,14 +311,16 @@ bool draw_shape_wireframe(Shape_Type shape_type)
         model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+        return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    result = vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mvp);
-
-defer:
-    return result;
+    vk_draw(
+        pipelines.handles[DEFAULT_PL_WIREFRAME],
+        pipelines.layouts[DEFAULT_PL_WIREFRAME],
+        vtx_buff, idx_buff, mvp
+    );
+    return true;
 }
 
 Matrix get_proj(Camera camera)
@@ -652,6 +771,9 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
+    for (size_t i = 0; i < DEFAULT_PL_COUNT; i++)
+        vk_destroy_pl_res(pipelines.handles[i], pipelines.layouts[i]);
+
     destroy_shape_res();
     vk_destroy();
     glfwDestroyWindow(ctx.window);
@@ -850,11 +972,57 @@ void destroy_point_cloud(size_t id)
     if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
 }
 
+bool default_pl_point_cloud_init()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_POINT_CLOUD]))
+        return false;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R8G8B8A8_UINT,
+            .offset = offsetof(Small_Vertex, r),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Small_Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD],
+        .vert = "./res/point-cloud.vert.spv",
+        .frag = "./res/point-cloud.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
+        .polygon_mode = VK_POLYGON_MODE_POINT,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_POINT_CLOUD])) return false;
+
+    return true;
+}
+
 bool draw_points(size_t vtx_id)
 {
-    if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-        if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
-            return false;
+    /* create point cloud pipeline if it hasn't been created */
+    if (!pipelines.handles[DEFAULT_PL_POINT_CLOUD])
+        if (!default_pl_point_cloud_init()) return false;
 
     Vk_Buffer vtx_buff = {0};
     if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
@@ -873,8 +1041,8 @@ bool draw_points(size_t vtx_id)
     }
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
 
-    VkPipeline pl = ctx.pipelines[PIPELINE_POINT_CLOUD];
-    VkPipelineLayout pl_layout = ctx.pipeline_layouts[PIPELINE_POINT_CLOUD];
+    VkPipeline pl = pipelines.handles[DEFAULT_PL_POINT_CLOUD];
+    VkPipelineLayout pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD];
     vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, NULL, 0);
 
     return true;

@@ -194,6 +194,7 @@ bool update_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_pla
 
 bool create_pipeline()
 {
+    /* create pipeline layout */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
     VkPipelineLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -204,8 +205,40 @@ bool create_pipeline()
     };
 
     if (!vk_pl_layout_init(layout_ci, &video_textures.pl_layout)) return false;
-    const char *shaders[] = {"./res/texture.vert.spv", "./res/texture.frag.spv"};
-    if (!vk_basic_pl_init2(video_textures.pl_layout, shaders[0], shaders[1], &video_textures.gfx_pl)) return false;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, pos),
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, color),
+        },
+        {
+            .location = 2,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(Vertex, tex_coord),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = video_textures.pl_layout,
+        .vert = "./res/texture.vert.spv",
+        .frag = "./res/texture.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .polygon_mode = VK_POLYGON_MODE_FILL,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &video_textures.gfx_pl)) return false;
 
     return true;
 }

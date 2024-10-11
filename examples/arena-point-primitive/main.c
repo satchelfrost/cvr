@@ -418,6 +418,50 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     return true;
 }
 
+bool create_pipelines()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = DS_LAYOUT_COUNT,
+        .pSetLayouts = ds_layouts,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pl_layout)) return 1;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R8G8B8A8_UINT,
+            .offset = offsetof(Small_Vertex, r),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Small_Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pl_layout,
+        .vert = "./res/point-cloud.vert.spv",
+        .frag = "./res/point-cloud.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
+        .polygon_mode = VK_POLYGON_MODE_POINT,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &gfx_pl)) return false;
+
+    return true;
+}
+
 Camera cameras[] = {
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
@@ -500,18 +544,7 @@ int main(int argc, char **argv)
     if (!setup_ds_pool())         return 1;
     if (!setup_ds_sets(ubo.buff)) return 1;
 
-    /* setup the graphics pipeline */
-    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
-    VkPipelineLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = DS_LAYOUT_COUNT,
-        .pSetLayouts = ds_layouts,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pk_range,
-    };
-    if (!vk_pl_layout_init(layout_ci, &pl_layout)) return 1;
-    const char *shaders[] = {"./res/point-cloud.vert.spv", "./res/point-cloud.frag.spv"};
-    if (!vk_point_cloud_pl_init(pl_layout, shaders[0], shaders[1], &gfx_pl)) return 1;
+    if (!create_pipelines()) return 1;
 
     /* settings & logging*/
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
