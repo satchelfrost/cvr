@@ -1,44 +1,13 @@
 # Cool Vulkan Renderer
 
-Cool Vulkan Renderer (or simply cvr) is a framework heavily inspired by [raylib](https://github.com/raysan5/raylib), but with a Vulkan backend instead of OpenGL. Like raylib, cvr is written in C, and has a very similar API. There are deviations here and there, but the general idea of simplicity is still the same. For example, drawing a rotating cube can be done with the following code:
-
-```c
-#include "cvr.h"
-
-int main()
-{
-    Camera camera = {
-        .position   = {0.0f, 1.0f, 2.0f},
-        .target     = {0.0f, 0.0f, 0.0f},
-        .up         = {0.0f, 1.0f, 0.0f},
-        .fovy       = 45.0f,
-        .projection = PERSPECTIVE,
-    };
-
-    init_window(500, 500, "cube");
-
-    while(!window_should_close()) {
-        begin_drawing(BEIGE);
-        begin_mode_3d(camera);
-            rotate_y(get_time());
-            if (!draw_shape(SHAPE_CUBE)) return 1;
-        end_mode_3d();
-        end_drawing();
-    }
-
-    close_window();
-    return 0;
-}
-```
-
-For now, cvr is for my own learning purposes, and is not expected to have feature parity with raylib.
+Cool Vulkan Renderer (or simply cvr) is a project initially inspired by [raylib](https://github.com/raysan5/raylib), but with a Vulkan twist (i.e. more verbose, less beginner friendly, and overall less feature rich). For now this project is public for my own convenience, however, it might help others interested in C programming with Vulkan. The eventual goal is to make `vk_ctx.h` a proper header-only library, but currently it still has a few dependencies. Note that some examples may have private data because they are for my research; these examples (should) have a little note attached in each folder to let you know the data is private.
 
 ## Building from Source on Linux
 
 First, install the dependencies using a package manager e.g.:
 
 ```bash
-sudo apt install vulkan-tools libvulkan-dev vulkan-validationlayers-dev spirv-tools libglfw3-dev libxxf86vm-dev libxi-dev
+sudo apt install vulkan-tools libvulkan-dev vulkan-validationlayers-dev spirv-tools libxxf86vm-dev libxi-dev
 ```
 
 Next, we need a shader compiler.
