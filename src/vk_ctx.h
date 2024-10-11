@@ -21,14 +21,13 @@
  * [*] - get rid of ubos in context
  * [*] - eventually replace functions ending with "2" with the main one, once those can be removed
  * [*] - switch to using only vk_ubo_init2, then once switched, rename to vk_ubo_init again
+ * [*] - for functions that "can't fail" due to Vulkan commands returning void, I should change my function to also return void, also don't forget cvr.c/h
  * [ ] - Pipeline_Type should be default pipelines, but they shouldn't be elevated to here unless they are really useful
  *       e.g. have a default pipelines struct that contains pipeline and pipeline layout possibly
- * [ ] - for functions that "can't fail" due to Vulkan commands returning void, I should change my function to also return void, also don't forget cvr.c/h
- * [ ] - enable a method for choosing extensions in user space
  * [ ] - get rid of nob_da_resize
+ * [ ] - remove dependency of nob
  * [ ] - remove dependency of glfw
  * [ ] - remove dependency of raymath
- * [ ] - remove dependency of nob
  *
  * */
 
