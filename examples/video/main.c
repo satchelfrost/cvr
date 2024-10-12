@@ -1,6 +1,7 @@
 #include "vk_ctx.h"
 #include "cvr.h"
 #include "ext/nob.h"
+#include <pthread.h>
 
 #define PL_MPEG_IMPLEMENTATION
 #include "pl_mpeg.h"
@@ -18,10 +19,10 @@ typedef enum {
 
 typedef enum {
     VIDEO_IDX_SUITE_E,
-    VIDEO_IDX_COUNT,
     VIDEO_IDX_SUITE_W,
     VIDEO_IDX_SUITE_NW,
     VIDEO_IDX_SUITE_SE,
+    VIDEO_IDX_COUNT,
 } Video_Idx;
 
 const char *video_names[] = {
@@ -45,6 +46,125 @@ typedef struct {
 } Video_Textures;
 
 Video_Textures video_textures = {0};
+
+#define MAX_BUFFERED_FRAMES 200
+plm_frame_t video_buffers[VIDEO_IDX_COUNT * MAX_BUFFERED_FRAMES] = {0};
+
+#define MAX_QUEUED_FRAMES 50
+typedef struct {
+    plm_frame_t frames[VIDEO_IDX_COUNT * MAX_QUEUED_FRAMES];
+    int head;
+    int tail;
+    int size;
+    pthread_mutex_t mutex;
+    pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+    bool playback_finished;
+} Video_Queue;
+
+Video_Queue video_queue = {0};
+
+bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
+
+void video_queue_init(plm_frame_t *frame)
+{
+    pthread_mutex_init(&video_queue.mutex, NULL);
+    pthread_cond_init(&video_queue.not_full, NULL);
+    pthread_cond_init(&video_queue.not_empty, NULL);
+
+    /* use a single frame to determine how much memory needs allocated for a decoded frame */
+    size_t y_size  = frame->y.width  * frame->y.height;
+    size_t cb_size = frame->cb.width * frame->cb.height;
+    size_t cr_size = frame->cr.width * frame->cr.height;
+    for (size_t i = 0; i < MAX_QUEUED_FRAMES * VIDEO_IDX_COUNT; i++) {
+        video_queue.frames[i] = *frame; // copy other info
+
+        video_queue.frames[i].y.data  = malloc(y_size);
+        video_queue.frames[i].cb.data = malloc(cb_size);
+        video_queue.frames[i].cr.data = malloc(cr_size);
+    }
+}
+
+void video_queue_destroy()
+{
+    pthread_mutex_destroy(&video_queue.mutex);
+    pthread_cond_destroy(&video_queue.not_full);
+    pthread_cond_destroy(&video_queue.not_empty);
+
+    for (size_t i = 0; i < MAX_QUEUED_FRAMES * VIDEO_IDX_COUNT; i++) {
+        free(video_queue.frames[i].y.data);
+        free(video_queue.frames[i].cb.data);
+        free(video_queue.frames[i].cr.data);
+    }
+}
+
+bool video_enqueue()
+{
+    bool result = true;
+    pthread_mutex_lock(&video_queue.mutex);
+
+    /* if queue is full then wait for consumer */
+    while (video_queue.size == MAX_QUEUED_FRAMES)
+        pthread_cond_wait(&video_queue.not_full, &video_queue.mutex);
+
+    /* decode the next four video frames and enqueue */
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
+        if (!frame) {
+            video_queue.playback_finished = true;
+            nob_return_defer(false);
+        }
+        plm_frame_t *saved = &video_queue.frames[i + video_queue.head * VIDEO_IDX_COUNT];
+        size_t y_size  = frame->y.width  * frame->y.height;
+        size_t cb_size = frame->cb.width * frame->cb.height;
+        size_t cr_size = frame->cr.width * frame->cr.height;
+        memcpy(saved->y.data , frame->y.data,  y_size);
+        memcpy(saved->cb.data, frame->cb.data, cb_size);
+        memcpy(saved->cr.data, frame->cr.data, cr_size);
+    }
+    video_queue.head = (video_queue.head + 1) % MAX_QUEUED_FRAMES;
+    video_queue.size++;
+
+defer:
+    pthread_cond_signal(&video_queue.not_empty);
+    pthread_mutex_unlock(&video_queue.mutex);
+    return result;
+}
+
+bool video_dequeue()
+{
+    bool result = true;
+    pthread_mutex_lock(&video_queue.mutex);
+
+    if (video_queue.playback_finished) nob_return_defer(false);
+
+    while (video_queue.size == 0)
+        pthread_cond_wait(&video_queue.not_empty, &video_queue.mutex);
+
+    /* dequeue the next four video frames */
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        plm_frame_t *saved = &video_queue.frames[i + video_queue.tail * VIDEO_IDX_COUNT];
+        if (!update_video_texture(saved->y.data, i, VIDEO_PLANE_Y))   nob_return_defer(false);
+        if (!update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB)) nob_return_defer(false);
+        if (!update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR)) nob_return_defer(false);
+    }
+    video_queue.tail = (video_queue.tail + 1) % MAX_QUEUED_FRAMES;
+    video_queue.size--;
+
+defer:
+    pthread_cond_signal(&video_queue.not_full);
+    pthread_mutex_unlock(&video_queue.mutex);
+    return result;
+}
+
+void *producer(void *arg)
+{
+    (void)arg;
+
+    while (!video_enqueue());
+
+    return NULL;
+}
  
 bool setup_ds_layout()
 {
@@ -112,22 +232,21 @@ bool setup_ds_sets()
     return true;
 }
 
-// TODO: I should be working with plm_frame_t instead of Image because image is meant to be used with cvr.h API
-bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+bool init_video_texture(void *data, int width, int height, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
 {
     bool result = true;
 
     /* create staging buffer for image */
     Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
-    stg_buff->size  = img.width * img.height * format_to_size(img.format);
-    stg_buff->count = img.width * img.height;
-    if (!vk_stg_buff_init(stg_buff, img.data, true)) return false;
+    stg_buff->size  = width * height * format_to_size(VK_FORMAT_R8_UNORM);
+    stg_buff->count = width * height;
+    if (!vk_stg_buff_init(stg_buff, data, true)) return false;
 
     /* create the image */
     Vk_Image vk_img = {
-        .extent  = {img.width, img.height},
+        .extent  = {width, height},
         .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = img.format,
+        .format = VK_FORMAT_R8_UNORM,
     };
     result = vk_img_init(
         &vk_img,
@@ -168,13 +287,13 @@ bool init_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane
     return true;
 }
 
-bool update_video_texture(Image img, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
 {
     bool result = true;
 
     /* create staging buffer for image */
     Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
-    memcpy(stg_buff->mapped, img.data, stg_buff->size);
+    memcpy(stg_buff->mapped, data, stg_buff->size);
 
     Vk_Image vk_img = video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT].img;
     transition_img_layout(
@@ -258,8 +377,8 @@ int main()
 
     /* create a texture from video */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        // const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
-        const char *file_name = "res/bjork-all-is-full-of-love.mpg";
+        const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
+        // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
             nob_log(NOB_ERROR, "could not open file %s", file_name);
@@ -281,24 +400,15 @@ int main()
     }
 
     /* decode one frame and use the luminance to create a texture */
+    plm_frame_t *frame = NULL;
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        Image img = {.format = VK_FORMAT_R8_UNORM};
-        plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
-        img.data   = frame->y.data;
-        img.width  = frame->y.width;
-        img.height = frame->y.height;
+        frame = plm_decode_video(video_textures.plms[i]);
         nob_log(NOB_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
-        if (!init_video_texture(img, i, VIDEO_PLANE_Y)) return 1;
-        img.data   = frame->cb.data;
-        img.width  = frame->cb.width;
-        img.height = frame->cb.height;
         nob_log(NOB_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
-        if (!init_video_texture(img, i, VIDEO_PLANE_CB)) return 1;
-        img.data   = frame->cr.data;
-        img.width  = frame->cr.width;
-        img.height = frame->cr.height;
         nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
-        if (!init_video_texture(img, i, VIDEO_PLANE_CR)) return 1;
+        if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
+        if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
+        if (!init_video_texture(frame->cb.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
     }
 
     /* setup descriptors */
@@ -306,41 +416,71 @@ int main()
     if (!setup_ds_pool())   return 1;
     if (!setup_ds_sets())   return 1;
 
+    // /* decode some frames to start */
+    nob_log(NOB_INFO, "buffering the first %zu frames for all %zu videos", MAX_BUFFERED_FRAMES, VIDEO_IDX_COUNT);
+    for (size_t i = 0; i < MAX_BUFFERED_FRAMES; i++) {
+        for (size_t j = 0; j < VIDEO_IDX_COUNT; j++) {
+            plm_frame_t *frame = plm_decode_video(video_textures.plms[j]);
+            plm_frame_t *saved = &video_buffers[j + i * VIDEO_IDX_COUNT];
+            size_t y_size  = frame->y.width  * frame->y.height;
+            size_t cb_size = frame->cb.width * frame->cb.height;
+            size_t cr_size = frame->cr.width * frame->cr.height;
+            saved->y.data  = malloc(y_size);
+            saved->cb.data = malloc(cb_size);
+            saved->cr.data = malloc(cr_size);
+            memcpy(saved->y.data , frame->y.data,  y_size);
+            memcpy(saved->cb.data, frame->cb.data, cb_size);
+            memcpy(saved->cr.data, frame->cr.data, cr_size);
+        }
+    }
+    nob_log(NOB_INFO, "done buffering");
+
     /* setup the graphics pipeline */
     if (!create_pipeline()) return 1;
 
     float vid_update_time = 0.0f;
     bool playback_finished = false;
+    size_t buffered_frame_idx = 0;
 
     while(!window_should_close() && !playback_finished) {
         /* update */
         if (is_key_down(KEY_F)) log_fps();
+
+        log_fps(); // TODO: debug only
+
         update_camera_free(&camera);
         vid_update_time += get_frame_time();
 
-        /* decode the next frame */
+        // /* decode the next frame */
         if (vid_update_time > 1.0f / 30.0f) {
-            for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-                plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
-                if (!frame) {
-                    playback_finished = true;
-                    nob_log(NOB_INFO, "playback finished!");
-                    return 1;
-                }
+            if (buffered_frame_idx < MAX_BUFFERED_FRAMES) {
+                for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+                    plm_frame_t *frame = &video_buffers[i + buffered_frame_idx * VIDEO_IDX_COUNT];
+                    if (!frame) {
+                        playback_finished = true;
+                        nob_log(NOB_INFO, "playback finished!");
+                        return 1;
+                    }
 
-                Image img = {.format = VK_FORMAT_R8_UNORM};
-                img.data   = frame->y.data;
-                img.width  = frame->y.width;
-                img.height = frame->y.height;
-                if (!update_video_texture(img, i, VIDEO_PLANE_Y)) return 1;
-                img.data   = frame->cb.data;
-                img.width  = frame->cb.width;
-                img.height = frame->cb.height;
-                if (!update_video_texture(img, i, VIDEO_PLANE_CB)) return 1;
-                img.data   = frame->cr.data;
-                img.width  = frame->cr.width;
-                img.height = frame->cr.height;
-                if (!update_video_texture(img, i, VIDEO_PLANE_CR)) return 1;
+                    if (!update_video_texture(frame->y.data, i, VIDEO_PLANE_Y)) return 1;
+                    if (!update_video_texture(frame->cb.data, i, VIDEO_PLANE_CB)) return 1;
+                    if (!update_video_texture(frame->cr.data, i, VIDEO_PLANE_CR)) return 1;
+
+                }
+                buffered_frame_idx++;
+            } else {
+                for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+                    plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
+                    if (!frame) {
+                        playback_finished = true;
+                        nob_log(NOB_INFO, "playback finished!");
+                        return 1;
+                    }
+
+                    if (!update_video_texture(frame->y.data, i, VIDEO_PLANE_Y)) return 1;
+                    if (!update_video_texture(frame->cb.data, i, VIDEO_PLANE_CB)) return 1;
+                    if (!update_video_texture(frame->cr.data, i, VIDEO_PLANE_CR)) return 1;
+                }
             }
 
             vid_update_time = 0.0f;
@@ -373,6 +513,13 @@ int main()
     vk_destroy_ds_layout(video_textures.ds_layout);
     vk_destroy_ds_pool(video_textures.ds_pool);
     vk_destroy_pl_res(video_textures.gfx_pl, video_textures.pl_layout);
+
+    /* cleanup buffered frames */
+    for (size_t i = 0; i < MAX_BUFFERED_FRAMES * VIDEO_IDX_COUNT; i++) {
+        free(video_buffers[i].y.data);
+        free(video_buffers[i].cb.data);
+        free(video_buffers[i].cr.data);
+    }
 
     close_window();
     return 0;
