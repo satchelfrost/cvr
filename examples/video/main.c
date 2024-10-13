@@ -21,8 +21,8 @@ typedef enum {
     VIDEO_IDX_SUITE_E,
     VIDEO_IDX_SUITE_W,
     VIDEO_IDX_SUITE_NW,
-    VIDEO_IDX_SUITE_SE,
     VIDEO_IDX_COUNT,
+    VIDEO_IDX_SUITE_SE,
 } Video_Idx;
 
 const char *video_names[] = {
@@ -50,7 +50,7 @@ Video_Textures video_textures = {0};
 #define MAX_BUFFERED_FRAMES 200
 plm_frame_t video_buffers[VIDEO_IDX_COUNT * MAX_BUFFERED_FRAMES] = {0};
 
-#define MAX_QUEUED_FRAMES 10
+#define MAX_QUEUED_FRAMES 20
 typedef struct {
     plm_frame_t frames[VIDEO_IDX_COUNT * MAX_QUEUED_FRAMES];
     int head;
@@ -58,8 +58,9 @@ typedef struct {
     int size;
     pthread_mutex_t mutex;
     pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+    bool buffering;
 } Video_Queue;
-
 Video_Queue video_queue = {0};
 
 bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
@@ -68,6 +69,7 @@ void video_queue_init(plm_frame_t *frame)
 {
     pthread_mutex_init(&video_queue.mutex, NULL);
     pthread_cond_init(&video_queue.not_full, NULL);
+    pthread_cond_init(&video_queue.not_empty, NULL);
 
     /* use a single frame to determine how much memory needs allocated for a decoded frame */
     size_t y_size  = frame->y.width  * frame->y.height;
@@ -85,6 +87,7 @@ void video_queue_destroy()
 {
     pthread_mutex_destroy(&video_queue.mutex);
     pthread_cond_destroy(&video_queue.not_full);
+    pthread_cond_destroy(&video_queue.not_empty);
 
     for (size_t i = 0; i < MAX_QUEUED_FRAMES * VIDEO_IDX_COUNT; i++) {
         free(video_queue.frames[i].y.data);
@@ -95,54 +98,71 @@ void video_queue_destroy()
 
 bool video_enqueue()
 {
-    char queue_str[MAX_QUEUED_FRAMES + 2];
+    char queue_str[MAX_QUEUED_FRAMES + 3];
     queue_str[0] = '[';
+    queue_str[MAX_QUEUED_FRAMES + 1] = ']';
+    queue_str[MAX_QUEUED_FRAMES + 2] = 0;
     for (int i = 0; i < MAX_QUEUED_FRAMES; i++)
         queue_str[i + 1] = (i < video_queue.size) ? '*' : ' ';
-    queue_str[MAX_QUEUED_FRAMES + 1] = ']';
-
     nob_log(NOB_INFO, "%s", queue_str);
-    /* if queue is full then wait for consumer */
-    while (video_queue.size == MAX_QUEUED_FRAMES) {
-        pthread_cond_wait(&video_queue.not_full, &video_queue.mutex);
-    }
 
-    /* decode the next four video frames and enqueue */
+    /* first decode the frames */
+    plm_frame_t temp_frames[VIDEO_IDX_COUNT];
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
         if (!frame) return false;
 
-        plm_frame_t *saved = &video_queue.frames[i + video_queue.head * VIDEO_IDX_COUNT];
         size_t y_size  = frame->y.width  * frame->y.height;
         size_t cb_size = frame->cb.width * frame->cb.height;
         size_t cr_size = frame->cr.width * frame->cr.height;
-        memcpy(saved->y.data , frame->y.data,  y_size);
-        memcpy(saved->cb.data, frame->cb.data, cb_size);
-        memcpy(saved->cr.data, frame->cr.data, cr_size);
+        temp_frames[i] = *frame; // shallow copy first
+        memcpy(temp_frames[i].y.data , frame->y.data,  y_size);
+        memcpy(temp_frames[i].cb.data, frame->cb.data, cb_size);
+        memcpy(temp_frames[i].cr.data, frame->cr.data, cr_size);
     }
-    video_queue.head = (video_queue.head + 1) % MAX_QUEUED_FRAMES;
-    video_queue.size++;
+
+    pthread_mutex_lock(&video_queue.mutex);
+        /* if queue is full then wait for consumer */
+        if (video_queue.size == MAX_QUEUED_FRAMES)
+            pthread_cond_wait(&video_queue.not_full, &video_queue.mutex);
+
+        /* decode the next "VIDEO_IDX_COUNT" video frames and enqueue */
+        for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+            plm_frame_t *saved = &video_queue.frames[i + video_queue.head * VIDEO_IDX_COUNT];
+            size_t y_size  = temp_frames[i].y.width  * temp_frames[i].y.height;
+            size_t cb_size = temp_frames[i].cb.width * temp_frames[i].cb.height;
+            size_t cr_size = temp_frames[i].cr.width * temp_frames[i].cr.height;
+            memcpy(saved->y.data , temp_frames[i].y.data,  y_size);
+            memcpy(saved->cb.data, temp_frames[i].cb.data, cb_size);
+            memcpy(saved->cr.data, temp_frames[i].cr.data, cr_size);
+        }
+        video_queue.head = (video_queue.head + 1) % MAX_QUEUED_FRAMES;
+        video_queue.size++;
+        pthread_cond_signal(&video_queue.not_empty);
+    pthread_mutex_unlock(&video_queue.mutex);
 
     return true;
 }
 
 bool video_dequeue()
 {
-    while (video_queue.size == 0) {
-        return false;
-    }
+    pthread_mutex_lock(&video_queue.mutex);
+        /* if queue is empty then wait for producer */
+        if (video_queue.size == 0)
+            pthread_cond_wait(&video_queue.not_empty, &video_queue.mutex);
 
-    /* dequeue the next four video frames */
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        plm_frame_t *saved = &video_queue.frames[i + video_queue.tail * VIDEO_IDX_COUNT];
-        if (!update_video_texture(saved->y.data, i, VIDEO_PLANE_Y))   return false;
-        if (!update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB)) return false;
-        if (!update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR)) return false;
-    }
-    video_queue.tail = (video_queue.tail + 1) % MAX_QUEUED_FRAMES;
-    video_queue.size--;
+        /* dequeue the next four video frames */
+        for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+            plm_frame_t *saved = &video_queue.frames[i + video_queue.tail * VIDEO_IDX_COUNT];
+            if (!update_video_texture(saved->y.data, i, VIDEO_PLANE_Y))   return false;
+            if (!update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB)) return false;
+            if (!update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR)) return false;
+        }
+        video_queue.tail = (video_queue.tail + 1) % MAX_QUEUED_FRAMES;
+        video_queue.size--;
+        pthread_cond_signal(&video_queue.not_full);
+    pthread_mutex_unlock(&video_queue.mutex);
 
-    pthread_cond_signal(&video_queue.not_full);
     return true;
 }
 
@@ -150,6 +170,9 @@ void *producer(void *arg)
 {
     (void)arg;
 
+    video_queue.buffering = true;
+
+    /* locking producer */
     while (true) {
         if (!video_enqueue()) {
             nob_log(NOB_INFO, "producer finished");
@@ -370,7 +393,7 @@ int main()
     };
 
     init_window(WIDTH, HEIGHT, "video");
-    // set_target_fps(60);
+    set_target_fps(60);
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
@@ -398,7 +421,7 @@ int main()
         nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
         if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
         if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
-        if (!init_video_texture(frame->cb.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
+        if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
     }
 
     /* setup descriptors */
@@ -442,7 +465,7 @@ int main()
     while(!window_should_close() && !playback_finished) {
         /* update */
         if (is_key_down(KEY_F)) log_fps();
-        // log_fps();
+        log_fps();
 
         update_camera_free(&camera);
         vid_update_time += get_frame_time();
@@ -474,8 +497,8 @@ int main()
 #elif defined(MULTI_THREADED)
             if (video_dequeue())
                 vid_update_time = 0.0f;
-            else
-                nob_log(NOB_INFO, "dropped frame");
+            // else
+            //     nob_log(NOB_INFO, "dropped frame");
 #else // On the fly decode, i.e. the slowest method
             for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
                 plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
