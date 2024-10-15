@@ -9,6 +9,8 @@
 #define FACTOR 50
 #define WIDTH  (16 * FACTOR)
 #define HEIGHT (9 * FACTOR)
+#define DUAL_THREADED     // disabling reverts to a single thread
+#define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
 
 typedef enum {
     VIDEO_PLANE_Y,
@@ -47,9 +49,6 @@ typedef struct {
 
 Video_Textures video_textures = {0};
 
-#define MAX_BUFFERED_FRAMES 200
-plm_frame_t video_buffers[VIDEO_IDX_COUNT * MAX_BUFFERED_FRAMES] = {0};
-
 #define MAX_QUEUED_FRAMES 20
 typedef struct {
     plm_frame_t frames[VIDEO_IDX_COUNT * MAX_QUEUED_FRAMES];
@@ -59,8 +58,8 @@ typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t not_full;
     pthread_cond_t not_empty;
-    bool buffering;
 } Video_Queue;
+
 Video_Queue video_queue = {0};
 
 bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
@@ -98,6 +97,7 @@ void video_queue_destroy()
 
 bool video_enqueue()
 {
+#ifdef DEBUG_PRINT
     char queue_str[MAX_QUEUED_FRAMES + 3];
     queue_str[0] = '[';
     queue_str[MAX_QUEUED_FRAMES + 1] = ']';
@@ -105,6 +105,7 @@ bool video_enqueue()
     for (int i = 0; i < MAX_QUEUED_FRAMES; i++)
         queue_str[i + 1] = (i < video_queue.size) ? '*' : ' ';
     nob_log(NOB_INFO, "%s", queue_str);
+#endif
 
     /* first decode the frames */
     plm_frame_t temp_frames[VIDEO_IDX_COUNT];
@@ -169,17 +170,8 @@ bool video_dequeue()
 void *producer(void *arg)
 {
     (void)arg;
-
-    video_queue.buffering = true;
-
-    /* locking producer */
-    while (true) {
-        if (!video_enqueue()) {
-            nob_log(NOB_INFO, "producer finished");
-            break;
-        }
-    };
-
+    while (video_enqueue());
+    nob_log(NOB_INFO, "producer finished");
     return NULL;
 }
  
@@ -379,9 +371,6 @@ bool create_pipeline()
     return true;
 }
 
-// #define STATIC_DECODE
-#define MULTI_THREADED
-
 int main()
 {
     Camera camera = {
@@ -429,31 +418,10 @@ int main()
     if (!setup_ds_pool())   return 1;
     if (!setup_ds_sets())   return 1;
 
-#if defined(STATIC_DECODE)
-    /* decode some frames to start */
-    size_t buffered_frame_idx = 0;
-    nob_log(NOB_INFO, "buffering the first %zu frames for all %zu videos", MAX_BUFFERED_FRAMES, VIDEO_IDX_COUNT);
-    for (size_t i = 0; i < MAX_BUFFERED_FRAMES; i++) {
-        for (size_t j = 0; j < VIDEO_IDX_COUNT; j++) {
-            plm_frame_t *frame = plm_decode_video(video_textures.plms[j]);
-            plm_frame_t *saved = &video_buffers[j + i * VIDEO_IDX_COUNT];
-            size_t y_size  = frame->y.width  * frame->y.height;
-            size_t cb_size = frame->cb.width * frame->cb.height;
-            size_t cr_size = frame->cr.width * frame->cr.height;
-            saved->y.data  = malloc(y_size);
-            saved->cb.data = malloc(cb_size);
-            saved->cr.data = malloc(cr_size);
-            memcpy(saved->y.data , frame->y.data,  y_size);
-            memcpy(saved->cb.data, frame->cb.data, cb_size);
-            memcpy(saved->cr.data, frame->cr.data, cr_size);
-        }
-    }
-    nob_log(NOB_INFO, "done buffering");
-#elif defined(MULTI_THREADED)
+#ifdef DUAL_THREADED
     video_queue_init(frame);
     pthread_t prod_thread;
     pthread_create(&prod_thread, NULL, producer, NULL);
-#else
 #endif
 
     /* setup the graphics pipeline */
@@ -464,41 +432,14 @@ int main()
 
     while(!window_should_close() && !playback_finished) {
         /* update */
-        if (is_key_down(KEY_F)) log_fps();
         log_fps();
-
         update_camera_free(&camera);
         vid_update_time += get_frame_time();
 
         /* decode the next frame */
         if (vid_update_time > 1.0f / 30.0f) {
-#if defined(STATIC_DECODE)
-            if (buffered_frame_idx < MAX_BUFFERED_FRAMES) {
-                for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-                    plm_frame_t *frame = &video_buffers[i + buffered_frame_idx * VIDEO_IDX_COUNT];
-                    if (!frame) {
-                        playback_finished = true;
-                        nob_log(NOB_INFO, "playback finished!");
-                        return 1;
-                    }
-
-                    if (!update_video_texture(frame->y.data, i, VIDEO_PLANE_Y)) return 1;
-                    if (!update_video_texture(frame->cb.data, i, VIDEO_PLANE_CB)) return 1;
-                    if (!update_video_texture(frame->cr.data, i, VIDEO_PLANE_CR)) return 1;
-
-                }
-                buffered_frame_idx++;
-            } else {
-                playback_finished = true;
-                nob_log(NOB_INFO, "playback finished!");
-                continue;
-            }
-            vid_update_time = 0.0f;
-#elif defined(MULTI_THREADED)
-            if (video_dequeue())
-                vid_update_time = 0.0f;
-            // else
-            //     nob_log(NOB_INFO, "dropped frame");
+#ifdef DUAL_THREADED
+            if (video_dequeue()) vid_update_time = 0.0f;
 #else // On the fly decode, i.e. the slowest method
             for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
                 plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
@@ -514,7 +455,6 @@ int main()
             }
             vid_update_time = 0.0f;
 #endif
-
         }
 
         /* drawing */
@@ -532,18 +472,10 @@ int main()
         end_drawing();
     }
 
-#if defined(STATIC_DECODE)
-    /* cleanup buffered frames */
-    for (size_t i = 0; i < MAX_BUFFERED_FRAMES * VIDEO_IDX_COUNT; i++) {
-        free(video_buffers[i].y.data);
-        free(video_buffers[i].cb.data);
-        free(video_buffers[i].cr.data);
-    }
-#elif defined(MULTI_THREADED)
+#ifdef DUAL_THREADED
     pthread_cancel(prod_thread);
     pthread_join(prod_thread, NULL);
     video_queue_destroy();
-#else
 #endif
 
     /* cleanup device */
