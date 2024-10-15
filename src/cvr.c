@@ -27,6 +27,7 @@
 #define FPS_CAPTURE_FRAMES_COUNT 30
 #define FPS_AVERAGE_TIME_SECONDS 0.5f
 #define FPS_STEP (FPS_AVERAGE_TIME_SECONDS/FPS_CAPTURE_FRAMES_COUNT)
+#define DEAD_ZONE 0.25f
 
 typedef struct {
     int exit_key;
@@ -887,20 +888,29 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
 
     float move_speed = CAMERA_MOVE_SPEED * ft;
-    if (is_key_down(KEY_LEFT_SHIFT))
-        move_speed *= 10.0f;
 
     /* gamepad movement */
-    camera_yaw(camera, -get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X)  * ft * GAMEPAD_ROT_SENSITIVITY);
-    camera_pitch(camera,-get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y) * ft * GAMEPAD_ROT_SENSITIVITY);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) <= -0.25f)  camera_move_forward(camera,  move_speed);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) <= -0.25f)  camera_move_right(camera,   -move_speed);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) >=  0.25f)  camera_move_forward(camera, -move_speed);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) >=  0.25f)  camera_move_right(camera,    move_speed);
+    float joy_x = get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X);
+    float joy_y = get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y);
+    float joy_x_norm = (fabsf(joy_x) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    float joy_y_norm = (fabsf(joy_y) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    if (joy_x >  DEAD_ZONE) camera_yaw(camera,  -joy_x_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    if (joy_y >  DEAD_ZONE) camera_pitch(camera,-joy_y_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    if (joy_x < -DEAD_ZONE) camera_yaw(camera,   joy_x_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    if (joy_y < -DEAD_ZONE) camera_pitch(camera, joy_y_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    float fb = get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y);
+    float lr = get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X);
+    float fb_norm = (fabsf(fb) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    float lr_norm = (fabsf(lr) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    if (fb <= -DEAD_ZONE) camera_move_forward(camera,  move_speed * fb_norm);
+    if (lr <= -DEAD_ZONE) camera_move_right(camera,   -move_speed * lr_norm);
+    if (fb >=  DEAD_ZONE) camera_move_forward(camera, -move_speed * fb_norm);
+    if (lr >=  DEAD_ZONE) camera_move_right(camera,    move_speed * lr_norm);
     if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed);
     if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed);
 
     /* keyboard movement */
+    if (is_key_down(KEY_LEFT_SHIFT)) move_speed *= 10.0f;
     if (is_key_down(KEY_W)) camera_move_forward(camera,  move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera,   -move_speed);
     if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);
