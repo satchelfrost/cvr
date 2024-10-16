@@ -23,8 +23,8 @@ typedef enum {
     VIDEO_IDX_SUITE_E,
     VIDEO_IDX_SUITE_W,
     VIDEO_IDX_SUITE_NW,
-    VIDEO_IDX_COUNT,
     VIDEO_IDX_SUITE_SE,
+    VIDEO_IDX_COUNT,
 } Video_Idx;
 
 const char *video_names[] = {
@@ -97,7 +97,7 @@ void video_queue_destroy()
 
 bool video_enqueue()
 {
-#ifdef DEBUG_PRINT
+#ifdef DEBUG_QUEUE_PRINT
     char queue_str[MAX_QUEUED_FRAMES + 3];
     queue_str[0] = '[';
     queue_str[MAX_QUEUED_FRAMES + 1] = ']';
@@ -386,8 +386,8 @@ int main()
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
-        // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
+        // const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
+        const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
             nob_log(NOB_ERROR, "could not open file %s", file_name);

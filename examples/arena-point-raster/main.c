@@ -4,7 +4,7 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define FRAME_BUFF_SZ 2048
+#define FRAME_BUFF_SZ 1600
 #define MAX_FPS_REC 100
 #define SUBGROUP_SZ 1024    // Subgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
@@ -264,26 +264,7 @@ bool build_compute_cmds(size_t highest_lod)
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
-
-                // vk_compute_pl_barrier(); // TODO: this makes things flicker less, but problem persists
             }
-
-            // size_t points_per_batch = SUBGROUP_SZ * 25000;
-            // size_t points_rendered = 0;
-            // size_t points_remaining = pc_layers[lod].count;
-            // while (points_remaining > 0) {
-            //     size_t points_in_batch = (points_remaining < points_per_batch) ? points_remaining : points_per_batch;
-            //     size_t start = 16ul * points_rendered;
-            //     // size_t size = 16ul * points_in_batch;
-            //     size_t num_batches = ceil(points_in_batch / SUBGROUP_SZ);
-            //     uint32_t offset = start * SUBGROUP_SZ;
-            //     uint32_t count = pc_layers[lod].count;
-            //     vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
-            //     vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
-            //     vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, num_batches, group_y, group_z);
-            //     points_rendered += points_in_batch;
-            //     points_remaining -= points_in_batch;
-            // }
         }
 
         vk_compute_pl_barrier();
@@ -292,7 +273,7 @@ bool build_compute_cmds(size_t highest_lod)
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
 
-        vk_compute_pl_barrier(); // TODO: maybe this will help as well?
+        vk_compute_pl_barrier();
 
     if (!vk_end_rec_compute()) return false;
     return true;
@@ -329,7 +310,7 @@ bool create_pipelines()
 
 int main(int argc, char **argv)
 {
-    Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
+    Vk_Texture storage_tex = {.img.extent = {1600, 900}};
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
