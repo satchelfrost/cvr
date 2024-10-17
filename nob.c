@@ -198,10 +198,12 @@ static Example examples[] = {
             .names = (const char *[]) {
                 "default.vert",
                 "default.frag",
+                "sst.vert",
+                "sst.frag",
                 "render.comp",
                 "resolve.comp",
             },
-            .count = 4,
+            .count = 6,
         },
         .c_files = {
             .names = default_c_file_names,
@@ -213,10 +215,28 @@ static Example examples[] = {
         .name = "arena-point-raster",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
+                "sst.vert",
+                "sst.frag",
                 "render.comp",
                 "resolve.comp",
+            },
+            .count = 4,
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+        .supported_targets[TARGET_LINUX] = true,
+        .supported_targets[TARGET_WINDOWS] = true,
+    },
+    {
+        .name = "video",
+        .shaders = {
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "texture.vert",
+                "texture.frag",
             },
             .count = 4,
         },

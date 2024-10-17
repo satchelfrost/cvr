@@ -4,12 +4,10 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 
-#define MAX_POINTS 100000000 // 100 million
-#define MIN_POINTS 100000    // 100 thousand
-#define FRAME_BUFF_SZ 2048
+#define FRAME_BUFF_SZ 1600
 #define MAX_FPS_REC 100
-#define SUBGROUP_SZ 1024     // Subgroup size for render.comp
-#define NUM_BATCHES 4        // Number of batches to dispatch
+#define SUBGROUP_SZ 1024    // Subgroup size for render.comp
+#define NUM_BATCHES 4       // Number of batches to dispatch
 #define MAX_LOD 7
 
 #define read_attr(attr, sv)                   \
@@ -30,7 +28,6 @@ typedef struct {
     size_t count;
     size_t capacity;
     Vk_Buffer buff;
-    bool gpu_visible;
     const char *name;
     VkDescriptorSet set;
 } Point_Cloud_Layer;
@@ -254,7 +251,7 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
 
 bool build_compute_cmds(size_t highest_lod)
 {
-    size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
+    size_t group_x = 1, group_y = 1, group_z = 1;
     if (!vk_rec_compute()) return false;
         /* loop through the lod layers of the point cloud */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
@@ -263,7 +260,9 @@ bool build_compute_cmds(size_t highest_lod)
             size_t batch_size = group_x / NUM_BATCHES;
             for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
                 uint32_t offset = batch * batch_size * SUBGROUP_SZ;
+                uint32_t count = pc_layers[lod].count;
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
             }
         }
@@ -273,13 +272,45 @@ bool build_compute_cmds(size_t highest_lod)
         /* resolve the frame buffer */
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
+
+        vk_compute_pl_barrier();
+
     if (!vk_end_rec_compute()) return false;
+    return true;
+}
+
+bool create_pipelines()
+{
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 2 * sizeof(uint32_t)};
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &cs_render_ds_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+
+    /* compute shader render pipeline */
+    if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                 return false;
+    if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return false;
+
+    /* compute shader resolve pipeline */
+    layout_ci.pSetLayouts = &cs_resolve_ds_layout;
+    layout_ci.pushConstantRangeCount = 0;
+    if (!vk_pl_layout_init(layout_ci, &cs_resolve_pl_layout))                                return false;
+    if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return false;
+
+    /* screen space triangle + frag image sampler for raster display */
+    layout_ci.pSetLayouts = &gfx_ds_layout;
+    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout))                                       return false;
+    if (!vk_sst_pl_init(gfx_pl_layout, &gfx_pl))                                             return false;
+
     return true;
 }
 
 int main(int argc, char **argv)
 {
-    Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
+    Vk_Texture storage_tex = {.img.extent = {1600, 900}};
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
@@ -304,7 +335,7 @@ int main(int argc, char **argv)
     /* upload resources to GPU */
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
-    if (!vk_ubo_init2(&ubo.buff))                                                return 1;
+    if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
 
     /* setup descriptors */
@@ -320,13 +351,7 @@ int main(int argc, char **argv)
     if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
 
     /* create pipelines */
-    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(uint32_t)};
-    if (!vk_pl_layout_init2(cs_render_ds_layout, &cs_render_pl_layout, 1, &pk_range))        return 1;
-    if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return 1;
-    if (!vk_pl_layout_init(cs_resolve_ds_layout, &cs_resolve_pl_layout))                     return 1;
-    if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return 1;
-    if (!vk_pl_layout_init(gfx_ds_layout, &gfx_pl_layout))                                   return 1;
-    if (!vk_basic_pl_init2(gfx_pl_layout, &gfx_pl))                                          return 1;
+    if (!create_pipelines()) return 1;
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(lod)) return 1;
@@ -417,7 +442,7 @@ int main(int argc, char **argv)
         vk_pl_barrier(barrier);
         vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
-            vk_gfx(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
+            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
@@ -441,7 +466,7 @@ int main(int argc, char **argv)
     vk_destroy_pl_res(cs_render_pl, cs_render_pl_layout);
     vk_destroy_pl_res(cs_resolve_pl, cs_resolve_pl_layout);
     vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
-    vk_unload_texture2(storage_tex);
+    vk_unload_texture(&storage_tex);
     close_window();
     return 0;
 }

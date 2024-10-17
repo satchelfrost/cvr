@@ -3,7 +3,7 @@
 layout(location = 0) in vec3 model_color;
 layout(location = 1) in vec3 debug_color;
 layout(location = 2) flat in int shader_mode;
-layout(location = 3) flat in int closest_cam_idx;
+layout(location = 3) flat in int unused_variable; // TODO: remove
 layout(location = 4) flat in int cam_sees[4];
 layout(location = 8) in vec3 ndcs[4];
 layout(location = 12) flat in int cam_order[4];
@@ -29,6 +29,22 @@ void main()
     tex_colors[1] = textureLod(tex_sampler_1, uv_1, 0.0);
     tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
     tex_colors[3] = textureLod(tex_sampler_3, uv_3, 0.0);
+    if ((uv_0.x < 0.05 && uv_0.y < 0.05) ||
+        (uv_0.x > 0.95 && uv_0.y > 0.95) ||
+        (uv_0.x > 0.95 && uv_0.y < 0.05) ||
+        (uv_0.x < 0.05 && uv_0.y > 0.95)) tex_colors[0] = vec4(0.0, 1.0, 0.0, 1.0);
+    if ((uv_1.x < 0.05 && uv_1.y < 0.05) ||
+        (uv_1.x > 0.95 && uv_1.y > 0.95) ||
+        (uv_1.x > 0.95 && uv_1.y < 0.05) ||
+        (uv_1.x < 0.05 && uv_1.y > 0.95)) tex_colors[1] = vec4(0.0, 1.0, 0.0, 1.0);
+    if ((uv_2.x < 0.05 && uv_2.y < 0.05) ||
+        (uv_2.x > 0.95 && uv_2.y > 0.95) ||
+        (uv_2.x > 0.95 && uv_2.y < 0.05) ||
+        (uv_2.x < 0.05 && uv_2.y > 0.95)) tex_colors[2] = vec4(0.0, 1.0, 0.0, 1.0);
+    if ((uv_3.x < 0.05 && uv_3.y < 0.05) ||
+        (uv_3.x > 0.95 && uv_3.y > 0.95) ||
+        (uv_3.x > 0.95 && uv_3.y < 0.05) ||
+        (uv_3.x < 0.05 && uv_3.y > 0.95)) tex_colors[3] = vec4(0.0, 1.0, 0.0, 1.0);
 
     switch (shader_mode) {
     case 0:

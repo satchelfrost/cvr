@@ -27,6 +27,7 @@
 #define FPS_CAPTURE_FRAMES_COUNT 30
 #define FPS_AVERAGE_TIME_SECONDS 0.5f
 #define FPS_STEP (FPS_AVERAGE_TIME_SECONDS/FPS_CAPTURE_FRAMES_COUNT)
+#define DEAD_ZONE 0.25f
 
 typedef struct {
     int exit_key;
@@ -84,7 +85,21 @@ typedef struct {
     Matrix view_proj;
 } Matrices;
 
+typedef enum {
+    DEFAULT_PL_FILL,
+    DEFAULT_PL_WIREFRAME,
+    DEFAULT_PL_POINT_CLOUD,
+    DEFAULT_PL_COMPUTE,
+    DEFAULT_PL_COUNT,
+} Default_Pipeline;
+
+typedef struct {
+    VkPipeline handles[DEFAULT_PL_COUNT];
+    VkPipelineLayout layouts[DEFAULT_PL_COUNT];
+} Default_Pipelines;
+
 /* State */
+Default_Pipelines pipelines = {0};
 Matrices matrices = {0};
 Point_Clouds point_clouds = {0};
 Keyboard keyboard = {0};
@@ -106,34 +121,15 @@ void poll_input_events();
 bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 float get_mouse_wheel_move();
-void destroy_ubos();
-bool tex_sampler_init();
 
 bool init_window(int width, int height, const char *title)
 {
-    bool result = true;
-
     /* Initialize glfw stuff */
     glfwInit();
-
-    /* Interesting option for full screen */
-    // int num_monitors;
-    // GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
-    // const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
-    // width = mode->width;
-    // height = mode->height;
     win_size.width = width;
     win_size.height = height;
-
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     ctx.window = glfwCreateWindow(width, height, title, NULL, NULL);
-
-    // glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-    // glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-    // glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-    // glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-    // ctx.window = glfwCreateWindow(width, height, title, monitors[0], NULL);
-
     glfwSetWindowUserPointer(ctx.window, &ctx);
     glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
     glfwSetKeyCallback(ctx.window, key_callback);
@@ -142,10 +138,9 @@ bool init_window(int width, int height, const char *title)
     glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
     glfwSetJoystickCallback(joystick_callback);
 
-    cvr_chk(vk_init(), "failed to initialize Vulkan context");
-
-defer:
-    return result;
+    /* initialize vulkan */
+    if (!vk_init()) return false;
+    else return true;
 }
 
 bool window_should_close()
@@ -155,40 +150,158 @@ bool window_should_close()
     return result;
 }
 
+bool default_pl_fill_init()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_FILL])) return false;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, pos),
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, color),
+        },
+        {
+            .location = 2,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(Vertex, tex_coord),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pipelines.layouts[DEFAULT_PL_FILL],
+        .vert = "./res/default.vert.spv",
+        .frag = "./res/default.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .polygon_mode = VK_POLYGON_MODE_FILL,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_FILL])) return false;
+
+    return true;
+}
+
 bool draw_shape(Shape_Type shape_type)
 {
-    bool result = true;
-
-    if (!ctx.pipelines[PIPELINE_DEFAULT])
-        if (!vk_basic_pl_init(PIPELINE_DEFAULT))
-            nob_return_defer(false);
+    /* create basic shape pipeline if it hasn't been created */
+    if (!pipelines.handles[DEFAULT_PL_FILL])
+        if (!default_pl_fill_init()) return false;
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix model = {0};
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+        return false;
+    }
+
+    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, mvp);
+
+    return true;
+}
+
+bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
+{
+    if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    result = vk_draw(PIPELINE_DEFAULT, vtx_buff, idx_buff, mvp);
+    Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
+    Vk_Buffer idx_buff = shapes[shape].idx_buff;
+    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, mvp);
 
-defer:
-    return result;
+    return true;
+}
+
+bool default_pl_wireframe_init()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_WIREFRAME]))
+        return false;
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, pos),
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Vertex, color),
+        },
+        {
+            .location = 2,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(Vertex, tex_coord),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pipelines.layouts[DEFAULT_PL_WIREFRAME],
+        .vert = "./res/default.vert.spv",
+        .frag = "./res/default.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .polygon_mode = VK_POLYGON_MODE_LINE,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_WIREFRAME])) return false;
+
+    return true;
 }
 
 bool draw_shape_wireframe(Shape_Type shape_type)
 {
-    bool result = true;
-
-    if (!ctx.pipelines[PIPELINE_WIREFRAME])
-        if (!vk_basic_pl_init(PIPELINE_WIREFRAME))
-            nob_return_defer(false);
+    /* create basic wireframe pipeline if it hasn't been created */
+    if (!pipelines.handles[DEFAULT_PL_WIREFRAME])
+        if (!default_pl_wireframe_init()) return false;
 
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
@@ -199,14 +312,16 @@ bool draw_shape_wireframe(Shape_Type shape_type)
         model = mat_stack[mat_stack_p - 1];
     } else {
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
+        return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    result = vk_draw(PIPELINE_WIREFRAME, vtx_buff, idx_buff, mvp);
-
-defer:
-    return result;
+    vk_draw(
+        pipelines.handles[DEFAULT_PL_WIREFRAME],
+        pipelines.layouts[DEFAULT_PL_WIREFRAME],
+        vtx_buff, idx_buff, mvp
+    );
+    return true;
 }
 
 Matrix get_proj(Camera camera)
@@ -315,12 +430,6 @@ void begin_drawing(Color color)
 
 void end_drawing()
 {
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        UBO ubo = ctx.ubos[i];
-        if (ubo.buff.handle)
-            memcpy(ubo.buff.mapped, ubo.data, ubo.buff.size);
-    }
-
     vk_end_drawing();
 
     cvr_time.curr = get_time();
@@ -663,12 +772,10 @@ void close_window()
 {
     vkDeviceWaitIdle(ctx.device);
 
+    for (size_t i = 0; i < DEFAULT_PL_COUNT; i++)
+        vk_destroy_pl_res(pipelines.handles[i], pipelines.layouts[i]);
+
     destroy_shape_res();
-    destroy_ubos();
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        vkDestroyDescriptorPool(ctx.device, ctx.ssbo_sets[i].descriptor_pool, NULL);
-        vkDestroyDescriptorSetLayout(ctx.device, ctx.ssbo_sets[i].set_layout, NULL);
-    }
     vk_destroy();
     glfwDestroyWindow(ctx.window);
     glfwTerminate();
@@ -686,89 +793,6 @@ Image load_image(const char *file_name)
 void unload_image(Image image)
 {
     free(image.data);
-}
-
-Texture load_texture_from_image(Image img)
-{
-    Texture texture = {
-        .width    = img.width,
-        .height   = img.height,
-        .mipmaps  = img.mipmaps,
-        .format   = img.format,
-    };
-
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, DS_TYPE_TEX))
-        nob_log(NOB_ERROR, "unable to load texture");
-
-    return texture;
-}
-
-Texture load_pc_texture_from_image(Image img)
-{
-    Texture texture = {
-        .width    = img.width,
-        .height   = img.height,
-        .mipmaps  = img.mipmaps,
-        .format   = img.format,
-    };
-
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &texture.id, DS_TYPE_ADV_POINT_CLOUD))
-        nob_log(NOB_ERROR, "unable to load texture");
-
-    return texture;
-}
-
-void unload_texture(Texture texture)
-{
-    vk_unload_texture(texture.id, DS_TYPE_TEX);
-}
-
-void unload_pc_texture(Texture texture)
-{
-    vk_unload_texture(texture.id, DS_TYPE_ADV_POINT_CLOUD);
-}
-
-bool tex_sampler_init()
-{
-    Descriptor_Type type = DS_TYPE_TEX;
-    if (!vk_sampler_descriptor_set_layout_init(type, VK_SHADER_STAGE_FRAGMENT_BIT))
-        return false;
-    if (!vk_sampler_descriptor_pool_init(type))
-        return false;
-    if (!vk_sampler_descriptor_set_init(type))
-        return false;
-    return true;
-}
-
-bool draw_texture(Texture texture, Shape_Type shape_type)
-{
-    bool result = true;
-
-    if (!ctx.pipelines[PIPELINE_TEXTURE]) {
-        if (!tex_sampler_init()) nob_return_defer(false);
-        if (!vk_basic_pl_init(PIPELINE_TEXTURE))
-            nob_return_defer(false);
-    }
-
-    if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
-
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
-
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        nob_return_defer(false);
-    }
-
-    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    if (!vk_draw_texture(texture.id, vtx_buff, idx_buff, mvp))
-        nob_return_defer(false);
-
-defer:
-    return result;
 }
 
 Vector3 get_camera_forward(Camera *camera)
@@ -864,20 +888,29 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
 
     float move_speed = CAMERA_MOVE_SPEED * ft;
-    if (is_key_down(KEY_LEFT_SHIFT))
-        move_speed *= 10.0f;
 
     /* gamepad movement */
-    camera_yaw(camera, -get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X)  * ft * GAMEPAD_ROT_SENSITIVITY);
-    camera_pitch(camera,-get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y) * ft * GAMEPAD_ROT_SENSITIVITY);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) <= -0.25f)  camera_move_forward(camera,  move_speed);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) <= -0.25f)  camera_move_right(camera,   -move_speed);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y) >=  0.25f)  camera_move_forward(camera, -move_speed);
-    if (get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X) >=  0.25f)  camera_move_right(camera,    move_speed);
+    float joy_x = get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_X);
+    float joy_y = get_gamepad_axis_movement(GAMEPAD_AXIS_RIGHT_Y);
+    float joy_x_norm = (fabsf(joy_x) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    float joy_y_norm = (fabsf(joy_y) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    if (joy_x >  DEAD_ZONE) camera_yaw(camera,  -joy_x_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    if (joy_y >  DEAD_ZONE) camera_pitch(camera,-joy_y_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    if (joy_x < -DEAD_ZONE) camera_yaw(camera,   joy_x_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    if (joy_y < -DEAD_ZONE) camera_pitch(camera, joy_y_norm * ft * GAMEPAD_ROT_SENSITIVITY);
+    float fb = get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_Y);
+    float lr = get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X);
+    float fb_norm = (fabsf(fb) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    float lr_norm = (fabsf(lr) - DEAD_ZONE) / (1.0f - DEAD_ZONE);
+    if (fb <= -DEAD_ZONE) camera_move_forward(camera,  move_speed * fb_norm);
+    if (lr <= -DEAD_ZONE) camera_move_right(camera,   -move_speed * lr_norm);
+    if (fb >=  DEAD_ZONE) camera_move_forward(camera, -move_speed * fb_norm);
+    if (lr >=  DEAD_ZONE) camera_move_right(camera,    move_speed * lr_norm);
     if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed);
     if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed);
 
     /* keyboard movement */
+    if (is_key_down(KEY_LEFT_SHIFT)) move_speed *= 10.0f;
     if (is_key_down(KEY_W)) camera_move_forward(camera,  move_speed);
     if (is_key_down(KEY_A)) camera_move_right(camera,   -move_speed);
     if (is_key_down(KEY_S)) camera_move_forward(camera, -move_speed);
@@ -934,105 +967,6 @@ bool upload_point_cloud(Buffer buff, size_t *id)
     return true;
 }
 
-bool upload_compute_points(Buffer buff, size_t *id, Example example)
-{
-    Vk_Buffer vk_buff = {
-        .count = buff.count,
-        .size  = buff.size,
-    };
-    if (!vk_comp_buff_staged_upload(&vk_buff, buff.items)) return false;
-
-    Descriptor_Type ds_type;
-    switch (example) {
-    case EXAMPLE_COMPUTE:            ds_type = DS_TYPE_COMPUTE; break;
-    case EXAMPLE_COMPUTE_RASTERIZER: ds_type = DS_TYPE_COMPUTE_RASTERIZER; break;
-    default:
-        nob_log(NOB_ERROR, "example %d is not supported for ssbo upload", example);
-        return false;
-    }
-    
-    *id = ctx.ssbo_sets[ds_type].count;
-    nob_da_append(&ctx.ssbo_sets[ds_type], vk_buff);
-
-    return true;
-}
-
-bool ubo_init(Buffer buff, Example example)
-{
-    Descriptor_Type ds_type; 
-    VkShaderStageFlags flags;
-    switch (example) {
-    case EXAMPLE_TEX:
-        ds_type = DS_TYPE_TEX;
-        flags = VK_SHADER_STAGE_VERTEX_BIT;
-        break;
-    case EXAMPLE_ADV_POINT_CLOUD:
-        ds_type = DS_TYPE_ADV_POINT_CLOUD;
-        flags = VK_SHADER_STAGE_VERTEX_BIT;
-        break;
-    case EXAMPLE_COMPUTE:
-        ds_type = DS_TYPE_COMPUTE;
-        flags = VK_SHADER_STAGE_COMPUTE_BIT;
-        break;
-    case EXAMPLE_COMPUTE_RASTERIZER:
-        ds_type = DS_TYPE_COMPUTE_RASTERIZER;
-        flags = VK_SHADER_STAGE_COMPUTE_BIT;
-        break;
-    case EXAMPLE_POINT_CLOUD:
-    default:
-        nob_log(NOB_ERROR, "example %d not handled for ubo_init", example);
-        return false;
-    }
-
-    UBO ubo = {
-        .buff = {
-            .count = buff.count,
-            .size  = buff.size
-        },
-        .data = buff.items,
-    };
-    if (!vk_ubo_init(ubo, ds_type)) return false;
-    if (!vk_ubo_descriptor_set_layout_init(flags, ds_type)) return false;
-    if (!vk_ubo_descriptor_pool_init(ds_type))              return false;
-    if (!vk_ubo_descriptor_set_init(ds_type))               return false;
-
-    return true;
-}
-
-bool ssbo_init(Example example)
-{
-    Descriptor_Type ds_type;
-    if (example == EXAMPLE_COMPUTE) {
-        ds_type = DS_TYPE_COMPUTE;
-        if (ctx.ssbo_sets[ds_type].count != 1) {
-            nob_log(NOB_ERROR, "one compute buffer was expected for this example");
-            return false;
-        }
-    } else {
-        nob_log(NOB_ERROR, "example %d is not supported for ssbo initialization", example);
-        return false;
-    }
-
-    if (!vk_ssbo_descriptor_set_layout_init(ds_type)) return false;
-    if (!vk_ssbo_descriptor_pool_init(ds_type))       return false;
-    if (!vk_ssbo_descriptor_set_init(ds_type))        return false;
-
-    return true;
-}
-
-bool pc_sampler_init()
-{
-    Descriptor_Type type = DS_TYPE_ADV_POINT_CLOUD;
-    if (!vk_sampler_descriptor_set_layout_init(type, VK_SHADER_STAGE_FRAGMENT_BIT))
-        return false;
-    if (!vk_sampler_descriptor_pool_init(type))
-        return false;
-    if (!vk_sampler_descriptor_set_init(type))
-        return false;
-
-    return true;
-}
-
 void destroy_point_cloud(size_t id)
 {
     vkDeviceWaitIdle(ctx.device);
@@ -1045,74 +979,60 @@ void destroy_point_cloud(size_t id)
         }
     }
 
-    if (!found)
-        nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
+    if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
 }
 
-void destroy_ubos()
+bool default_pl_point_cloud_init()
 {
-    vkDeviceWaitIdle(ctx.device);
-
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++)
-        if (ctx.ubos[i].buff.handle)
-            vk_buff_destroy(ctx.ubos[i].buff);
-
-    for (size_t i = 0; i < DS_TYPE_COUNT; i++) {
-        vkDestroyDescriptorPool(ctx.device, ctx.ubos[i].descriptor_pool, NULL);
-        vkDestroyDescriptorSetLayout(ctx.device, ctx.ubos[i].set_layout, NULL);
-    }
-}
-
-void destroy_compute_buff(size_t id, Example example)
-{
-    vkDeviceWaitIdle(ctx.device);
-
-    bool found = false;
-
-    Descriptor_Type type;
-    switch (example) {
-    case EXAMPLE_COMPUTE:
-        type = DS_TYPE_COMPUTE;
-        break;
-    case EXAMPLE_COMPUTE_RASTERIZER:
-        type = DS_TYPE_COMPUTE_RASTERIZER;
-        break;
-    default:
-        nob_log(NOB_ERROR, "unrecognized example %d for compute", example);
-        return;
-    }
-
-    // Descriptor_Type type = DS_TYPE_COMPUTE;
-    for (size_t i = 0; i < ctx.ssbo_sets[type].count; i++) {
-        if (i == id && ctx.ssbo_sets[type].items[i].handle) {
-            vk_buff_destroy(ctx.ssbo_sets[type].items[i]);
-            found = true;
-        }
-    }
-
-    if (!found)
-        nob_log(NOB_WARNING, "compute buffer %zu does not exist cannot destroy", id);
-}
-
-bool draw_points(size_t vtx_id, Example example)
-{
-    switch (example) {
-    case EXAMPLE_ADV_POINT_CLOUD:
-        if (!ctx.pipelines[PIPELINE_POINT_CLOUD_ADV]) {
-            pc_sampler_init();
-            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD_ADV))
-                return false;
-        }
-        break;
-    case EXAMPLE_POINT_CLOUD:
-        if (!ctx.pipelines[PIPELINE_POINT_CLOUD])
-            if (!vk_basic_pl_init(PIPELINE_POINT_CLOUD))
-                return false;
-        break; 
-    default:
-        nob_log(NOB_ERROR, "no other example supported yet for draw points");
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_POINT_CLOUD]))
         return false;
-    }
+
+    /* create pipeline */
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R8G8B8A8_UINT,
+            .offset = offsetof(Small_Vertex, r),
+        },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Small_Vertex),
+    };
+    Pipeline_Config config = {
+        .pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD],
+        .vert = "./res/point-cloud.vert.spv",
+        .frag = "./res/point-cloud.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
+        .polygon_mode = VK_POLYGON_MODE_POINT,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_POINT_CLOUD])) return false;
+
+    return true;
+}
+
+bool draw_points(size_t vtx_id)
+{
+    /* create point cloud pipeline if it hasn't been created */
+    if (!pipelines.handles[DEFAULT_PL_POINT_CLOUD])
+        if (!default_pl_point_cloud_init()) return false;
 
     Vk_Buffer vtx_buff = {0};
     if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
@@ -1129,10 +1049,35 @@ bool draw_points(size_t vtx_id, Example example)
         nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
-
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    if (!vk_draw_points(vtx_buff, mvp, example))
+
+    VkPipeline pl = pipelines.handles[DEFAULT_PL_POINT_CLOUD];
+    VkPipelineLayout pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD];
+    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, NULL, 0);
+
+    return true;
+}
+
+bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+{
+    Vk_Buffer vtx_buff = {0};
+    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
+        vtx_buff = point_clouds.items[vtx_id];
+    } else {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
         return false;
+    }
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        return false;
+    }
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+
+    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, ds_sets, ds_set_count);
 
     return true;
 }
@@ -1264,7 +1209,7 @@ Window_Size get_window_size()
     return win_size;
 }
 
-void wait_idle()
+void wait_idle() // TODO: this should be in vk_ctx.h
 {
     vkDeviceWaitIdle(ctx.device);
 }
@@ -1299,13 +1244,4 @@ void set_window_size(int width, int height)
 void set_window_pos(int x, int y)
 {
     glfwSetWindowPos(ctx.window, x, y);
-}
-
-void set_window_monitor()
-{
-    int num_monitors;
-    GLFWmonitor **monitors = glfwGetMonitors(&num_monitors);
-    const GLFWvidmode *mode = glfwGetVideoMode(monitors[0]);
-    // glfwSetWindowMonitor(ctx.window, monitors[0], 0, 0, mode->width / 2, mode->height / 2, mode->refreshRate);
-    glfwSetWindowMonitor(ctx.window, monitors[0], 0, 0, mode->width, mode->height / 2, mode->refreshRate);
 }
