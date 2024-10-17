@@ -512,12 +512,13 @@ bool vk_swapchain_init()
         .imageColorSpace = ctx.surface_fmt.colorSpace,
         .imageExtent = ctx.extent = choose_swp_extent(),
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, // I wonder can you combine this with VK_IMAGE_USAGE_SAMPLED_BIT?
         .clipped = VK_TRUE,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = choose_present_mode(),
         .preTransform = capabilities.currentTransform,
     };
+    /* Note: I think this check is only necessary if the present queue & gfx queue are different */
     uint32_t queue_fam_idxs[] = {ctx.gfx_idx, ctx.present_idx};
     if (ctx.gfx_idx != ctx.present_idx) {
         swapchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
