@@ -428,11 +428,12 @@ int main(int argc, char **argv)
         }
 
         /* depth pass */
-        // if (!vk_begin_drawing()) return 1;
-        // begin_mode_3d(camera);
-        //     draw_shape(SHAPE_CUBE);
-        // end_mode_3d();
-        // end_drawing();
+        if (!vk_begin_drawing()) return 1;
+        vk_begin_render_pass(BLACK);
+        begin_mode_3d(camera);
+            draw_shape(SHAPE_CUBE);
+        end_mode_3d();
+        end_drawing();
 
         /* submit compute commands */
         if (!vk_submit_compute()) return 1;
