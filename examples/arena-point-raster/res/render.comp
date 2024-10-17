@@ -26,6 +26,8 @@ layout(std430, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 
+layout(binding = 3) uniform sampler2D depth_sampler;
+
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
 void main()
@@ -50,6 +52,10 @@ void main()
 
     if (depth < old_depth) {
         uint64_t packed = depth << 32 | uint64_t(vert.colors);
+        atomicMin(frame_buff[pixel_id], packed);
+
+        vec4 classic_depth = texture(depth_sampler, img_pos);
+        packed = uint64_t(classic_depth) << 32 | uint64_t(0xffff00ff);
         atomicMin(frame_buff[pixel_id], packed);
     }
 }

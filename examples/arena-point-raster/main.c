@@ -55,6 +55,7 @@ typedef struct {
 } Point_Cloud_UBO;
 
 /* Vulkan state */
+VkSampler depth_sampler;
 VkDescriptorSetLayout cs_render_ds_layout;
 VkDescriptorSetLayout cs_resolve_ds_layout;
 VkDescriptorSetLayout gfx_ds_layout;
@@ -138,6 +139,7 @@ bool setup_ds_layouts()
         {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2, STORAGE_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(3,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -174,6 +176,7 @@ bool setup_ds_pool()
         {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},
         {DS_POOL(COMBINED_IMAGE_SAMPLER, 1)},
         {DS_POOL(STORAGE_IMAGE, 1)},
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, MAX_LOD)},
     };
 
     VkDescriptorPoolCreateInfo pool_ci = {
@@ -238,11 +241,19 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         .buffer = frame_buff.handle,
         .range  = frame_buff.size,
     };
+    VkDescriptorImageInfo img_info = {
+        // .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        // .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .imageView   = vk_get_depth_img_view(),
+        .sampler     = depth_sampler,
+    };
     VkWriteDescriptorSet writes[] = {
         /* render.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
+        {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_info)},
     };
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
@@ -337,6 +348,7 @@ int main(int argc, char **argv)
     if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
+    if (!vk_sampler_init(&depth_sampler))                                        return 1; // TODO: maybe have sampler border white
 
     /* setup descriptors */
     if (!setup_ds_layouts())                               return 1;
@@ -415,39 +427,46 @@ int main(int argc, char **argv)
             }
         }
 
+        /* depth pass */
+        // if (!vk_begin_drawing()) return 1;
+        // begin_mode_3d(camera);
+        //     draw_shape(SHAPE_CUBE);
+        // end_mode_3d();
+        // end_drawing();
+
         /* submit compute commands */
         if (!vk_submit_compute()) return 1;
 
         /* render loop */
         start_timer();
         if (!vk_begin_drawing()) return 1;
-        /* create a barrier to ensure compute shaders are done before sampling */
-        VkImageMemoryBarrier barrier = {
-           .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-           .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-           .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-           .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-           .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-           .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-           .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-           .image = storage_tex.img.handle,
-           .subresourceRange = {
-               .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-               .baseMipLevel = 0,
-               .levelCount = 1,
-               .baseArrayLayer = 0,
-               .layerCount = 1,
-           },
-        };
-        vk_pl_barrier(barrier);
-        vk_begin_render_pass(BLACK);
-        begin_mode_3d(camera);
-            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-            translate(0.0f, 0.0f, -100.0f);
-            rotate_x(-PI / 2);
-            if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
-            else return 1;
-        end_mode_3d();
+            /* create a barrier to ensure compute shaders are done before sampling */
+            VkImageMemoryBarrier barrier = {
+               .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+               .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+               .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+               .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+               .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+               .image = storage_tex.img.handle,
+               .subresourceRange = {
+                   .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                   .baseMipLevel = 0,
+                   .levelCount = 1,
+                   .baseArrayLayer = 0,
+                   .layerCount = 1,
+               },
+            };
+            vk_pl_barrier(barrier);
+            vk_begin_render_pass(BLACK);
+            begin_mode_3d(camera);
+                vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
+                translate(0.0f, 0.0f, -100.0f);
+                rotate_x(-PI / 2);
+                if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
+                else return 1;
+            end_mode_3d();
         end_drawing();
     }
 
@@ -467,6 +486,7 @@ int main(int argc, char **argv)
     vk_destroy_pl_res(cs_resolve_pl, cs_resolve_pl_layout);
     vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     vk_unload_texture(&storage_tex);
+    vk_destroy_sampler(depth_sampler);
     close_window();
     return 0;
 }

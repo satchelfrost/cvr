@@ -121,6 +121,7 @@ bool vk_render_pass_init();
 bool vk_frame_buffs_init();
 bool vk_recreate_swapchain();
 bool vk_depth_init();
+VkImageView vk_get_depth_img_view();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 
 typedef struct {
@@ -269,6 +270,7 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
 bool vk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_Texture *texture);
 void vk_unload_texture(Vk_Texture *texture);
+void vk_destroy_sampler(VkSampler sampler);
 bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 bool vk_sampler_init(VkSampler *sampler);
 
@@ -878,11 +880,12 @@ bool vk_render_pass_init()
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        // .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .finalLayout = VK_IMAGE_LAYOUT_GENERAL,
     };
     VkAttachmentReference depth_ref = {
         .attachment = 1,
-        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .layout = VK_IMAGE_LAYOUT_GENERAL,
     };
     VkSubpassDescription gfx_subpass = {
         .colorAttachmentCount = 1,
@@ -1284,7 +1287,7 @@ bool vk_depth_init()
     ctx.depth_img.format = VK_FORMAT_D32_SFLOAT; // TODO: check supported formats e.g. Meta quest does not support D32
     bool result = vk_img_init(
         &ctx.depth_img,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     if (!result) {
@@ -1297,6 +1300,11 @@ bool vk_depth_init()
     }
 
     return true;
+}
+
+VkImageView vk_get_depth_img_view()
+{
+    return ctx.depth_img_view;
 }
 
 bool vk_ubo_init(Vk_Buffer *buff)
@@ -2300,6 +2308,11 @@ void vk_unload_texture(Vk_Texture *texture)
     texture->view = NULL;
     texture->img.handle = NULL;
     texture->img.mem = NULL;
+}
+
+void vk_destroy_sampler(VkSampler sampler)
+{
+    vkDestroySampler(ctx.device, sampler, NULL);
 }
 
 bool vk_create_storage_img(Vk_Texture *texture)
