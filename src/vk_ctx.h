@@ -138,6 +138,8 @@ typedef struct {
 bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
 bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl);
 bool vk_ubo_init(Vk_Buffer *buff);
+void vk_ubo_unmap(Vk_Buffer *buff);
+bool vk_ubo_map(Vk_Buffer *buff);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
@@ -1306,9 +1308,23 @@ bool vk_ubo_init(Vk_Buffer *buff)
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
+    if (!result) return false;
 
-    if (result) vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped);
-    else return false;
+    if (!VK_SUCCEEDED(vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped)))
+        return false;
+
+    return true;
+}
+
+void vk_ubo_unmap(Vk_Buffer *buff)
+{
+    vkUnmapMemory(ctx.device, buff->mem);
+}
+
+bool vk_ubo_map(Vk_Buffer *buff)
+{
+    if (!VK_SUCCEEDED(vkMapMemory(ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped)))
+        return false;
 
     return true;
 }

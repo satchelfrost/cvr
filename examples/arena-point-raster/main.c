@@ -239,9 +239,8 @@ bool setup_ds_layouts()
 
     /* resolve.comp shader layout */
     VkDescriptorSetLayoutBinding cs_resolve_bindings[] = {
-        {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(2,  STORAGE_IMAGE, COMPUTE_BIT)},
+        {DS_BINDING(0, STORAGE_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(1,  STORAGE_IMAGE, COMPUTE_BIT)},
     };
     layout_ci.bindingCount = NOB_ARRAY_LEN(cs_resolve_bindings);
     layout_ci.pBindings = cs_resolve_bindings;
@@ -261,7 +260,7 @@ bool setup_ds_layouts()
 bool setup_ds_pool()
 {
     VkDescriptorPoolSize pool_sizes[] = {
-        {DS_POOL(UNIFORM_BUFFER, 2)},
+        {DS_POOL(UNIFORM_BUFFER, 1)},
         {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},
         {DS_POOL(COMBINED_IMAGE_SAMPLER, 1)},
         {DS_POOL(STORAGE_IMAGE, 1)},
@@ -279,7 +278,7 @@ bool setup_ds_pool()
     return true;
 }
 
-bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, Vk_Texture storage_tex)
+bool setup_ds_sets(Vk_Buffer frame_buff, Vk_Texture storage_tex)
 {
     /* allocate descriptor sets based on layouts */
     VkDescriptorSetLayout layouts[] = {cs_resolve_ds_layout, gfx_ds_layout};
@@ -288,10 +287,6 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, Vk_Texture storage_tex)
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
 
     /* update descriptor sets */
-    VkDescriptorBufferInfo ubo_info = {
-        .buffer = ubo.handle,
-        .range  = ubo.size,
-    };
     VkDescriptorBufferInfo frame_buff_info = {
         .buffer = frame_buff.handle,
         .range  = frame_buff.size,
@@ -303,9 +298,8 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, Vk_Texture storage_tex)
     };
     VkWriteDescriptorSet writes[] = {
         /* resolve.comp */
-        {DS_WRITE_BUFF(0, UNIFORM_BUFFER, ds_sets[DS_RESOLVE], &ubo_info)},
-        {DS_WRITE_BUFF(1, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &frame_buff_info)},
-        {DS_WRITE_IMG (2, STORAGE_IMAGE,  ds_sets[DS_RESOLVE], &img_info)},
+        {DS_WRITE_BUFF(0, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &frame_buff_info)},
+        {DS_WRITE_IMG (1, STORAGE_IMAGE,  ds_sets[DS_RESOLVE], &img_info)},
         /* default.frag */
         {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SST], &img_info)},
     };
@@ -355,7 +349,6 @@ bool build_compute_cmds(size_t highest_lod)
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
-                vk_compute_pl_barrier();
             }
         }
 
@@ -364,8 +357,6 @@ bool build_compute_cmds(size_t highest_lod)
         /* resolve the frame buffer */
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
-
-        vk_compute_pl_barrier();
 
     if (!vk_end_rec_compute()) return false;
     return true;
@@ -427,6 +418,7 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     ubo->data.shader_mode = shader_mode;
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
+
     return true;
 }
 
@@ -502,9 +494,9 @@ int main(int argc, char **argv)
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
 
     /* setup descriptors */
-    if (!setup_ds_layouts())                               return 1;
-    if (!setup_ds_pool())                                  return 1;
-    if (!setup_ds_sets(ubo.buff, frame.buff, storage_tex)) return 1;
+    if (!setup_ds_layouts())                     return 1;
+    if (!setup_ds_pool())                        return 1;
+    if (!setup_ds_sets(frame.buff, storage_tex)) return 1;
 
     /* allocate descriptor sets based on layouts */
     for (size_t i = 0; i < MAX_LOD; i++) {
@@ -583,39 +575,38 @@ int main(int argc, char **argv)
             }
         }
 
-        /* submit compute commands */
-        if (!vk_submit_compute()) return 1;
-
         /* render loop */
         start_timer();
         if (!vk_begin_drawing()) return 1;
-        /* create a barrier to ensure compute shaders are done before sampling */
-        VkImageMemoryBarrier barrier = {
-           .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-           .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-           .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-           .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-           .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-           .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-           .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-           .image = storage_tex.img.handle,
-           .subresourceRange = {
-               .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-               .baseMipLevel = 0,
-               .levelCount = 1,
-               .baseArrayLayer = 0,
-               .layerCount = 1,
-           },
-        };
-        vk_pl_barrier(barrier);
-        vk_begin_render_pass(BLACK);
-        begin_mode_3d(*camera);
-            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-            translate(0.0f, 0.0f, -100.0f);
-            rotate_x(-PI / 2);
-            get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
-            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
-        end_mode_3d();
+            /* create a barrier to ensure compute shaders are done before sampling */
+            VkImageMemoryBarrier barrier = {
+               .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+               .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+               .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+               .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+               .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+               .image = storage_tex.img.handle,
+               .subresourceRange = {
+                   .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                   .baseMipLevel = 0,
+                   .levelCount = 1,
+                   .baseArrayLayer = 0,
+                   .layerCount = 1,
+               },
+            };
+            vk_pl_barrier(barrier);
+            vk_begin_render_pass(BLACK);
+            begin_mode_3d(*camera);
+                vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
+
+                translate(0.0f, 0.0f, -100.0f);
+                rotate_x(-PI / 2);
+                get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
+                if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
+                if (!vk_submit_compute()) return 1;
+            end_mode_3d();
         end_drawing();
     }
 
