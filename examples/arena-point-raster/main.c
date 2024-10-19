@@ -3,12 +3,14 @@
 #include "ext/nob.h"
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
+#include <float.h>
 
 #define FRAME_BUFF_SZ 1600
 #define MAX_FPS_REC 100
 #define SUBGROUP_SZ 1024    // Subgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
 #define MAX_LOD 7
+#define NUM_CCTVS 4
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -46,7 +48,13 @@ typedef struct {
 } Frame_Buffer;
 
 typedef struct {
-    float16 mvp;
+    float16 main_cam_mvp;
+    float16 cctv_mvps[NUM_CCTVS];
+    int shader_mode;
+    int cam_order_0;
+    int cam_order_1;
+    int cam_order_2;
+    int cam_order_3;
 } UBO_Data;
 
 typedef struct {
@@ -80,6 +88,89 @@ Point_Cloud_Layer pc_layers[MAX_LOD] = {
 
 typedef enum {DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
+
+int get_closest_camera(Camera *cameras, size_t count)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    float shortest = FLT_MAX;
+    int shortest_idx = -1;
+    for (size_t i = 1; i < count; i++) {
+        Vector3 cctv_pos = cameras[i].position;
+        float dist_sqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        if (dist_sqr < shortest) {
+            shortest_idx = i - 1;
+            shortest = dist_sqr;
+        }
+    }
+    if (shortest_idx < 0) nob_log(NOB_ERROR, "Unknown camera index");
+
+    return shortest_idx;
+}
+
+typedef struct {
+    int idx;
+    float dist_sqr;
+} Distance_Sqr_Idx;
+
+int dist_sqr_compare(const void *d1, const void *d2)
+{
+    if (((Distance_Sqr_Idx*)d1)->dist_sqr < ((Distance_Sqr_Idx*)d2)->dist_sqr)
+        return -1;
+    else if (((Distance_Sqr_Idx*)d2)->dist_sqr < ((Distance_Sqr_Idx*)d1)->dist_sqr)
+        return 1;
+    else
+        return 0;
+}
+
+/* returns the camera indices in distance sorted order */
+void get_cam_order(const Camera *cameras, size_t count, int *cam_order, size_t cam_order_count)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    Distance_Sqr_Idx sqr_distances[4] = {0};
+    for (size_t i = 1; i < count; i++) {
+        Vector3 cctv_pos = cameras[i].position;
+        sqr_distances[i - 1].dist_sqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
+        sqr_distances[i - 1].idx = i - 1;
+    }
+
+    qsort(sqr_distances, NOB_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
+    for (size_t i = 0; i < cam_order_count; i++)
+        cam_order[i] = sqr_distances[i].idx;
+}
+
+void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
+{
+    for (size_t i = 0; i < count; i++) dst[i] = src[i];
+}
+
+typedef enum {
+    SHADER_MODE_BASE_MODEL,
+    SHADER_MODE_PROGRESSIVE_COLOR,
+    SHADER_MODE_COUNT,
+    SHADER_MODE_SINGLE_TEX,
+    SHADER_MODE_MULTI_TEX,
+} Shader_Mode;
+
+void log_shader_mode(Shader_Mode mode)
+{
+    switch (mode) {
+    case SHADER_MODE_BASE_MODEL:
+        nob_log(NOB_INFO, "Shader mode: base model");
+        break;
+    case SHADER_MODE_PROGRESSIVE_COLOR:
+        nob_log(NOB_INFO, "Shader mode: progressive color");
+        break;
+    case SHADER_MODE_SINGLE_TEX:
+        nob_log(NOB_INFO, "Shader mode: single texture");
+        break;
+    case SHADER_MODE_MULTI_TEX:
+        nob_log(NOB_INFO, "Shader mode: multi-texture");
+        break;
+    default:
+        nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
+        break;
+    }
+}
 
 bool load_points(const char *file, Point_Cloud_Layer *pc)
 {
@@ -264,6 +355,7 @@ bool build_compute_cmds(size_t highest_lod)
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
+                vk_compute_pl_barrier();
             }
         }
 
@@ -308,6 +400,76 @@ bool create_pipelines()
     return true;
 }
 
+bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_UBO *ubo)
+{
+    /* update mvp for main viewing camera */
+    if (!get_mvp_float16(&ubo->data.main_cam_mvp)) return false;
+
+    /* calculate mvps for cctvs */
+    Matrix model = {0};
+    if (!get_matrix_tos(&model)) return false;
+    for (size_t i = 0; i < 4; i++) {
+        Matrix view = MatrixLookAt(
+            four_cameras[i].position,
+            four_cameras[i].target,
+            four_cameras[i].up
+        );
+        Matrix proj = get_proj(four_cameras[i]);
+        Matrix view_proj = MatrixMultiply(view, proj);
+        Matrix mvp = MatrixMultiply(model, view_proj);
+        ubo->data.cctv_mvps[i] = MatrixToFloatV(mvp);
+    }
+
+    ubo->data.cam_order_0 = cam_order[0];
+    ubo->data.cam_order_1 = cam_order[1];
+    ubo->data.cam_order_2 = cam_order[2];
+    ubo->data.cam_order_3 = cam_order[3];
+    ubo->data.shader_mode = shader_mode;
+
+    memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
+    return true;
+}
+
+Camera cameras[] = {
+    { // Camera to rule all cameras
+        .position   = {38.54, 23.47, 42.09},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {25.18, 16.37, 38.97},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    { // cctv 1
+        .position   = {25.20, 9.68, 38.50},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {20.30, 8.86, 37.39},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    { // cctv 2
+        .position   = {-54.02, 12.14, 22.01},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {-44.42, 9.74, 23.87},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    { // cctv 3
+        .position   = {12.24, 15.17, 69.39},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {-6.66, 8.88, 64.07},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+    { // cctv 4
+        .position   = {-38.50, 15.30, -14.38},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {-18.10, 8.71, -7.94},
+        .fovy       = 45.0f,
+        .projection = PERSPECTIVE,
+    },
+};
+
+Camera camera_defaults[4] = {0};
+
 int main(int argc, char **argv)
 {
     Vk_Texture storage_tex = {.img.extent = {1600, 900}};
@@ -324,13 +486,14 @@ int main(int argc, char **argv)
     } else {
         init_window(1600, 900, "arena point cloud rasterization");
     }
-    Camera camera = {
-        .position   = {10.0f, 10.0f, 10.0f},
-        .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {0.0f, 0.0f, 0.0f},
-        .fovy       = 45.0f,
-        .projection = PERSPECTIVE,
-    };
+
+    /* camera state tracking */
+    copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
+    int cam_view_idx = 0;
+    // int cam_move_idx = 0;
+    Camera *camera = &cameras[cam_view_idx];
+    int cam_order[4] = {0};
+    Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
 
     /* upload resources to GPU */
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
@@ -359,8 +522,9 @@ int main(int argc, char **argv)
     /* game loop */
     while (!window_should_close()) {
         /* input */
-        update_camera_free(&camera);
+        update_camera_free(camera); // TODO: use cam_move_idx when ready
 
+        /* handle keyboard input */
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
             if (++lod < MAX_LOD) {
                 wait_idle();
@@ -397,9 +561,13 @@ int main(int argc, char **argv)
                 nob_log(NOB_INFO, "min lod %zu reached", lod);
             }
         }
-        if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) log_fps();
+        // if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) log_fps();
         if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             record.collecting = true;
+        if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
+            shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
+            log_shader_mode(shader_mode);
+        }
 
         /* collect the frame rate */
         if (record.collecting) {
@@ -441,12 +609,12 @@ int main(int argc, char **argv)
         };
         vk_pl_barrier(barrier);
         vk_begin_render_pass(BLACK);
-        begin_mode_3d(camera);
+        begin_mode_3d(*camera);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-            if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
-            else return 1;
+            get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
+            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
         end_mode_3d();
         end_drawing();
     }
