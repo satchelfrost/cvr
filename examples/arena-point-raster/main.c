@@ -306,11 +306,11 @@ bool setup_ds_layouts()
         {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2, STORAGE_BUFFER, COMPUTE_BIT)},
-        // {DS_BINDING(3, STORAGE_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(4, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(5, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(6, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(3, STORAGE_BUFFER, COMPUTE_BIT)},
+        // {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        // {DS_BINDING(4, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        // {DS_BINDING(5, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        // {DS_BINDING(6, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -405,26 +405,26 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         .buffer = frame_buff.handle,
         .range  = frame_buff.size,
     };
-    VkDescriptorImageInfo img_infos[NUM_CCTVS] = {0};
-    for (size_t i = 0; i < NUM_CCTVS; i++) {
-        img_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_infos[i].imageView   = textures[i].view;
-        img_infos[i].sampler     = textures[i].sampler;
-    }
-    // VkDescriptorBufferInfo tex_buff_info = {
-    //     .buffer = tex_buff.buff.handle,
-    //     .range  = tex_buff.buff.size,
-    // };
+    // VkDescriptorImageInfo img_infos[NUM_CCTVS] = {0};
+    // for (size_t i = 0; i < NUM_CCTVS; i++) {
+    //     img_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    //     img_infos[i].imageView   = textures[i].view;
+    //     img_infos[i].sampler     = textures[i].sampler;
+    // }
+    VkDescriptorBufferInfo tex_buff_info = {
+        .buffer = tex_buff.buff.handle,
+        .range  = tex_buff.buff.size,
+    };
     VkWriteDescriptorSet writes[] = {
         /* render.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
-        // {DS_WRITE_BUFF(3, STORAGE_BUFFER, pc_layers[lod].set, &tex_buff_info)},
-        {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
-        {DS_WRITE_IMG (4, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
-        {DS_WRITE_IMG (5, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
-        {DS_WRITE_IMG (6, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[3])},
+        {DS_WRITE_BUFF(3, STORAGE_BUFFER, pc_layers[lod].set, &tex_buff_info)},
+        // {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
+        // {DS_WRITE_IMG (4, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
+        // {DS_WRITE_IMG (5, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
+        // {DS_WRITE_IMG (6, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[3])},
     };
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
@@ -580,7 +580,7 @@ int main(int argc, char **argv)
             nob_log(NOB_INFO, "    width %d height %d", imgs[i].width, imgs[i].height);
         }
     }
-    // alloc_tex_buff(imgs[0]);
+    alloc_tex_buff(imgs[0]);
 
     /* initialize window and Vulkan */
     if (argc > 4) {
@@ -599,13 +599,13 @@ int main(int argc, char **argv)
     Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
 
     /* upload resources to GPU */
-    for (size_t i = 0; i < NUM_CCTVS; i++) {
-       if (!load_texture(imgs[i], i)) return 1;
-       free(imgs[i].data);
-    }
+    // for (size_t i = 0; i < NUM_CCTVS; i++) {
+    //    if (!load_texture(imgs[i], i)) return 1;
+    //    free(imgs[i].data);
+    // }
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
-    // if (!vk_comp_buff_staged_upload(&tex_buff.buff, tex_buff.data))              return 1;
+    if (!vk_comp_buff_staged_upload(&tex_buff.buff, tex_buff.data))              return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
 
