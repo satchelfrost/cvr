@@ -41,14 +41,30 @@ layout(std430, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 
-//layout(set = 1, binding = 0) uniform sampler2D tex_sampler_0;
-//layout(set = 1, binding = 1) uniform sampler2D tex_sampler_1;
-//layout(set = 1, binding = 2) uniform sampler2D tex_sampler_2;
-//layout(set = 1, binding = 3) uniform sampler2D tex_sampler_3;
+//layout(std430, binding = 3) buffer tex_data {
+//   uint tex_buff[ ];
+//};
+
+layout(binding = 3) uniform sampler2D tex_sampler_0;
+layout(binding = 4) uniform sampler2D tex_sampler_1;
+layout(binding = 5) uniform sampler2D tex_sampler_2;
+layout(binding = 6) uniform sampler2D tex_sampler_3;
 
 vec4 tex_colors[4];
+int cam_sees[4];
 
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+vec3 srgb_to_linear(vec3 srgb)
+{
+    return mix(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, srgb));
+}
+
+uint vec3_to_uint(vec3 color)
+{
+    color = color * 255;
+    return uint(color.b) << 16 | uint(color.g) << 8 | uint(color.r);
+}
 
 void main()
 {
@@ -66,34 +82,42 @@ void main()
     vec4 cam1_pos = ubo.mvps[1] * vec4(vert.x, vert.y, vert.z, 1.0);
     vec4 cam2_pos = ubo.mvps[2] * vec4(vert.x, vert.y, vert.z, 1.0);
     vec4 cam3_pos = ubo.mvps[3] * vec4(vert.x, vert.y, vert.z, 1.0);
-    //vec3 ndc_0 = cam0_pos.xyz / cam0_pos.w;
-    //vec3 ndc_1 = cam1_pos.xyz / cam1_pos.w;
-    //vec3 ndc_2 = cam2_pos.xyz / cam2_pos.w;
-    //vec3 ndc_3 = cam3_pos.xyz / cam3_pos.w;
-    //vec2 uv_0 = (ndc_0.xy * 0.5) + 0.5;
-    //vec2 uv_1 = (ndc_1.xy * 0.5) + 0.5;
-    //vec2 uv_2 = (ndc_2.xy * 0.5) + 0.5;
-    //vec2 uv_3 = (ndc_3.xy * 0.5) + 0.5;
-    //tex_colors[0] = textureLod(tex_sampler_0, uv_0, 0.0);
-    //tex_colors[1] = textureLod(tex_sampler_1, uv_1, 0.0);
-    //tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
-    //tex_colors[3] = textureLod(tex_sampler_3, uv_3, 0.0);
+    vec3 ndc_0 = cam0_pos.xyz / cam0_pos.w;
+    vec3 ndc_1 = cam1_pos.xyz / cam1_pos.w;
+    vec3 ndc_2 = cam2_pos.xyz / cam2_pos.w;
+    vec3 ndc_3 = cam3_pos.xyz / cam3_pos.w;
+    vec2 uv_0 = (ndc_0.xy * 0.5) + 0.5;
+    vec2 uv_1 = (ndc_1.xy * 0.5) + 0.5;
+    vec2 uv_2 = (ndc_2.xy * 0.5) + 0.5;
+    vec2 uv_3 = (ndc_3.xy * 0.5) + 0.5;
 
-    int cam_sees_0 = int((-cam0_pos.w < cam0_pos.x && cam0_pos.x < cam0_pos.w) &&
-                         (-cam0_pos.w < cam0_pos.y && cam0_pos.y < cam0_pos.w) &&
-                         (-cam0_pos.w < cam0_pos.z && cam0_pos.z < cam0_pos.w));
-    int cam_sees_1 = int((-cam1_pos.w < cam1_pos.x && cam1_pos.x < cam1_pos.w) &&
-                         (-cam1_pos.w < cam1_pos.y && cam1_pos.y < cam1_pos.w) &&
-                         (-cam1_pos.w < cam1_pos.z && cam1_pos.z < cam1_pos.w));
-    int cam_sees_2 = int((-cam2_pos.w < cam2_pos.x && cam2_pos.x < cam2_pos.w) &&
-                         (-cam2_pos.w < cam2_pos.y && cam2_pos.y < cam2_pos.w) &&
-                         (-cam2_pos.w < cam2_pos.z && cam2_pos.z < cam2_pos.w));
-    int cam_sees_3 = int((-cam3_pos.w < cam3_pos.x && cam3_pos.x < cam3_pos.w) &&
-                         (-cam3_pos.w < cam3_pos.y && cam3_pos.y < cam3_pos.w) &&
-                         (-cam3_pos.w < cam3_pos.z && cam3_pos.z < cam3_pos.w));
+    // width 3712 height 2784
+    //ivec2 tex_img_size = ivec2(3712, 2784);
+    //vec2 tex_img_pos = uv_0 * tex_img_size;
+    //ivec2 tex_coords = ivec2(tex_img_pos);
+    //int tex_id = tex_coords.x + tex_coords.y * tex_img_size.x;
 
-    uint brightness = uint((cam_sees_0 * 0.25 + cam_sees_1 * 0.25 + cam_sees_2 * 0.25 + cam_sees_3 * 0.25) * 255.0);
+    tex_colors[0] = textureLod(tex_sampler_0, uv_0, 0.0);
+    tex_colors[1] = textureLod(tex_sampler_1, uv_1, 0.0);
+    tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
+    tex_colors[3] = textureLod(tex_sampler_3, uv_3, 0.0);
+
+    cam_sees[0] = int((-cam0_pos.w < cam0_pos.x && cam0_pos.x < cam0_pos.w) &&
+                      (-cam0_pos.w < cam0_pos.y && cam0_pos.y < cam0_pos.w) &&
+                      (-cam0_pos.w < cam0_pos.z && cam0_pos.z < cam0_pos.w));
+    cam_sees[1] = int((-cam1_pos.w < cam1_pos.x && cam1_pos.x < cam1_pos.w) &&
+                      (-cam1_pos.w < cam1_pos.y && cam1_pos.y < cam1_pos.w) &&
+                      (-cam1_pos.w < cam1_pos.z && cam1_pos.z < cam1_pos.w));
+    cam_sees[2] = int((-cam2_pos.w < cam2_pos.x && cam2_pos.x < cam2_pos.w) &&
+                      (-cam2_pos.w < cam2_pos.y && cam2_pos.y < cam2_pos.w) &&
+                      (-cam2_pos.w < cam2_pos.z && cam2_pos.z < cam2_pos.w));
+    cam_sees[3] = int((-cam3_pos.w < cam3_pos.x && cam3_pos.x < cam3_pos.w) &&
+                      (-cam3_pos.w < cam3_pos.y && cam3_pos.y < cam3_pos.w) &&
+                      (-cam3_pos.w < cam3_pos.z && cam3_pos.z < cam3_pos.w));
+
+    uint brightness = uint((cam_sees[0] * 0.25 + cam_sees[1] * 0.25 + cam_sees[2] * 0.25 + cam_sees[3] * 0.25) * 255.0);
     uint out_color = 0;
+    //out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
     switch (ubo.shader_mode) {
     case 0:
         out_color = vert.color;
@@ -101,16 +125,17 @@ void main()
     case 1:
         out_color = brightness << 16 | brightness << 8 | brightness;
         break;
-    //case 2:
-    //    out_color = (cam_sees[cam_order[0]] > 0) ? tex_colors[cam_order[0]] : vec4(model_color, 1.0);
-    //    break;
-    //case 3:
-    //    if (cam_sees[cam_order[3]] > 0) out_color = tex_colors[cam_order[3]];
-    //    if (cam_sees[cam_order[2]] > 0) out_color = tex_colors[cam_order[2]];
-    //    if (cam_sees[cam_order[1]] > 0) out_color = tex_colors[cam_order[1]];
-    //    if (cam_sees[cam_order[0]] > 0) out_color = tex_colors[cam_order[0]];
-    //    int cam_count = cam_sees[0] + cam_sees[1] + cam_sees[2] + cam_sees[3];
-    //    if (cam_count == 0) out_color = vec4(model_color, 1.0);
+    case 2:
+        out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
+        //out_color = (cam_sees[ubo.cam_order_0] > 0) ? tex_buff[tex_id] : vert.color;
+        break;
+    case 3:
+        if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
+        if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
+        if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);
+        if (cam_sees[ubo.cam_order_0] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
+        int cam_count = cam_sees[0] + cam_sees[1] + cam_sees[2] + cam_sees[3];
+        if (cam_count == 0) out_color = vert.color;
     }
 
     /* determine the pixel coordinate and write to framebuffer */

@@ -48,6 +48,13 @@ typedef struct {
 } Frame_Buffer;
 
 typedef struct {
+    Vk_Buffer buff;
+    void *data;
+} Texture_Buffer;
+
+Texture_Buffer tex_buff = {0};
+
+typedef struct {
     float16 main_cam_mvp;
     float16 cctv_mvps[NUM_CCTVS];
     int shader_mode;
@@ -75,6 +82,7 @@ VkPipeline gfx_pl;
 VkDescriptorPool pool;
 VkDescriptorSet cs_resolve_ds;
 VkDescriptorSet gfx_sst; // screen space triangle
+Vk_Texture textures[NUM_CCTVS];
 
 Point_Cloud_Layer pc_layers[MAX_LOD] = {
     {.name = "res/arena_5060224_f32.vtx"},
@@ -146,9 +154,9 @@ void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
 typedef enum {
     SHADER_MODE_BASE_MODEL,
     SHADER_MODE_PROGRESSIVE_COLOR,
-    SHADER_MODE_COUNT,
     SHADER_MODE_SINGLE_TEX,
     SHADER_MODE_MULTI_TEX,
+    SHADER_MODE_COUNT,
 } Shader_Mode;
 
 void log_shader_mode(Shader_Mode mode)
@@ -170,6 +178,63 @@ void log_shader_mode(Shader_Mode mode)
         nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
         break;
     }
+}
+
+bool load_texture(Image img, size_t img_idx)
+{
+    bool result = true;
+
+    /* create staging buffer for image */
+    Vk_Buffer stg_buff;
+    stg_buff.size  = img.width * img.height * format_to_size(img.format);
+    stg_buff.count = img.width * img.height;
+    if (!vk_stg_buff_init(&stg_buff, img.data, false)) return false;
+
+    /* create the image */
+    Vk_Image vk_img = {
+        .extent  = {img.width, img.height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = img.format,
+    };
+    result = vk_img_init(
+        &vk_img,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (!result) nob_return_defer(false);
+    result = transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    if (!result) nob_return_defer(false);
+    if (!vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent)) nob_return_defer(false);
+    result = transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+    if (!result) nob_return_defer(false);
+
+    /* create image view */
+    VkImageView img_view;
+    if (!vk_img_view_init(vk_img, &img_view)) nob_return_defer(false);
+
+    /* create sampler */
+    VkSampler sampler;
+    if (!vk_sampler_init(&sampler)) return false;
+
+    Vk_Texture texture = {
+        .view = img_view,
+        .sampler = sampler,
+        .img = vk_img,
+    };
+    textures[img_idx] = texture;
+
+defer:
+    vk_buff_destroy(stg_buff);
+    return result;
+
 }
 
 bool load_points(const char *file, Point_Cloud_Layer *pc)
@@ -222,6 +287,18 @@ Frame_Buffer alloc_frame_buff()
     return frame;
 }
 
+void alloc_tex_buff(Image img)
+{
+    tex_buff.buff.count = img.width * img.height;
+    tex_buff.buff.size = sizeof(uint32_t) * tex_buff.buff.count;
+    tex_buff.data = malloc(tex_buff.buff.size);
+    // uint32_t red = 0xff0000ff;
+    for (size_t i = 0; i < tex_buff.buff.count; i++) {
+        memcpy(tex_buff.data + i * sizeof(uint32_t), img.data + i * sizeof(uint32_t), sizeof(uint32_t));
+        // memcpy(tex_buff.data + i * sizeof(uint32_t), &red, sizeof(uint32_t));
+    }
+}
+
 bool setup_ds_layouts()
 {
     /* render.comp shader layout */
@@ -229,6 +306,11 @@ bool setup_ds_layouts()
         {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2, STORAGE_BUFFER, COMPUTE_BIT)},
+        // {DS_BINDING(3, STORAGE_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(4, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(5, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(6, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -260,10 +342,10 @@ bool setup_ds_layouts()
 bool setup_ds_pool()
 {
     VkDescriptorPoolSize pool_sizes[] = {
-        {DS_POOL(UNIFORM_BUFFER, 1)},
-        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},
-        {DS_POOL(COMBINED_IMAGE_SAMPLER, 1)},
-        {DS_POOL(STORAGE_IMAGE, 1)},
+        {DS_POOL(UNIFORM_BUFFER, 1)},                       // 1 in render.comp
+        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD + 1)},             // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, 1 + 4 * MAX_LOD)}, // 1 in sst.frag + 4 in render.comp * MAX_LOD
+        {DS_POOL(STORAGE_IMAGE, 1)},                        // 1 in resolve.comp
     };
 
     VkDescriptorPoolCreateInfo pool_ci = {
@@ -323,11 +405,26 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         .buffer = frame_buff.handle,
         .range  = frame_buff.size,
     };
+    VkDescriptorImageInfo img_infos[NUM_CCTVS] = {0};
+    for (size_t i = 0; i < NUM_CCTVS; i++) {
+        img_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_infos[i].imageView   = textures[i].view;
+        img_infos[i].sampler     = textures[i].sampler;
+    }
+    // VkDescriptorBufferInfo tex_buff_info = {
+    //     .buffer = tex_buff.buff.handle,
+    //     .range  = tex_buff.buff.size,
+    // };
     VkWriteDescriptorSet writes[] = {
         /* render.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
+        // {DS_WRITE_BUFF(3, STORAGE_BUFFER, pc_layers[lod].set, &tex_buff_info)},
+        {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
+        {DS_WRITE_IMG (4, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
+        {DS_WRITE_IMG (5, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
+        {DS_WRITE_IMG (6, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[3])},
     };
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
@@ -471,6 +568,20 @@ int main(int argc, char **argv)
     size_t lod = 0;
     if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
 
+    /* load images into memory */
+    Image imgs[NUM_CCTVS] = {0};
+    for (size_t i = 0; i < NUM_CCTVS; i++) {
+        const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
+        imgs[i] = load_image(img_name);
+        if (!imgs[i].data) {
+            nob_log(NOB_ERROR, "failed to load png file %s", img_name);
+            return 1;
+        } else {
+            nob_log(NOB_INFO, "    width %d height %d", imgs[i].width, imgs[i].height);
+        }
+    }
+    // alloc_tex_buff(imgs[0]);
+
     /* initialize window and Vulkan */
     if (argc > 4) {
         init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
@@ -488,8 +599,13 @@ int main(int argc, char **argv)
     Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
 
     /* upload resources to GPU */
+    for (size_t i = 0; i < NUM_CCTVS; i++) {
+       if (!load_texture(imgs[i], i)) return 1;
+       free(imgs[i].data);
+    }
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
+    // if (!vk_comp_buff_staged_upload(&tex_buff.buff, tex_buff.data))              return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
 
@@ -554,6 +670,7 @@ int main(int argc, char **argv)
             }
         }
         // if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) log_fps();
+        if (is_key_down(KEY_F)) log_fps();
         if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             record.collecting = true;
         if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
@@ -612,12 +729,15 @@ int main(int argc, char **argv)
 
     wait_idle();
     free(frame.data);
+    free(tex_buff.data);
     for (size_t i = 0; i < MAX_LOD; i++) {
         vk_buff_destroy(pc_layers[i].buff);
         free(pc_layers[i].items);
     }
+    for (size_t i = 0; i < NUM_CCTVS; i++) vk_unload_texture(&textures[i]);
     vk_buff_destroy(frame.buff);
     vk_buff_destroy(ubo.buff);
+    vk_buff_destroy(tex_buff.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(cs_render_ds_layout);
     vk_destroy_ds_layout(cs_resolve_ds_layout);
