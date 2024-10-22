@@ -111,7 +111,6 @@ void main()
         break;
     case 2:
         out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
-        //out_color = (cam_sees[ubo.cam_order_0] > 0) ? tex_buff[tex_id] : vert.color;
         break;
     case 3:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);

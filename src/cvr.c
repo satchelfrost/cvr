@@ -1127,7 +1127,7 @@ int get_average_fps()
     return fps;
 }
 
-int get_fps()
+int get_fps() // TODO: another function that looks at just ms
 {
     double frame_time = get_frame_time();
     if (frame_time == 0) return 0;

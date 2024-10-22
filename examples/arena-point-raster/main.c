@@ -513,6 +513,47 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     return true;
 }
 
+void log_controls()
+{
+    nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "| Keyboard |");
+    nob_log(NOB_INFO, "------------");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "    | Movement |");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "        [W] - Forward");
+    nob_log(NOB_INFO, "        [A] - Left");
+    nob_log(NOB_INFO, "        [S] - Back");
+    nob_log(NOB_INFO, "        [D] - Right");
+    nob_log(NOB_INFO, "        [E] - Up");
+    nob_log(NOB_INFO, "        [Q] - Down");
+    nob_log(NOB_INFO, "        [Shift] - Fast movement");
+    nob_log(NOB_INFO, "        Right Click + Mouse Movement = Rotation");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "    | Hot keys |");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "        [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
+    nob_log(NOB_INFO, "        [C] - Change piloted camera");
+    nob_log(NOB_INFO, "        [R] - Record FPS");
+    nob_log(NOB_INFO, "        [P] - Print camera info");
+    nob_log(NOB_INFO, "        [Space] - Reset cameras to default position");
+    nob_log(NOB_INFO, "-----------");
+    nob_log(NOB_INFO, "| Gamepad |");
+    nob_log(NOB_INFO, "-----------");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "    | Movement |");
+    nob_log(NOB_INFO, "    ------------");
+    nob_log(NOB_INFO, "        [Left Analog] - Translation");
+    nob_log(NOB_INFO, "        [Right Analog] - Rotation");
+    nob_log(NOB_INFO, "    ---------");
+    nob_log(NOB_INFO, "    | Other |");
+    nob_log(NOB_INFO, "    ---------");
+    nob_log(NOB_INFO, "        [Right Trigger] - shader mode");
+    nob_log(NOB_INFO, "        [Front Face Right Button] - Record FPS");
+    nob_log(NOB_INFO, "        [D Pad Left] - decrease point cloud LOD");
+    nob_log(NOB_INFO, "        [D Pad Right] - increase point cloud LOD");
+}
+
 Camera cameras[] = {
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
@@ -570,8 +611,6 @@ int main(int argc, char **argv)
         if (!imgs[i].data) {
             nob_log(NOB_ERROR, "failed to load png file %s", img_name);
             return 1;
-        } else {
-            nob_log(NOB_INFO, "    width %d height %d", imgs[i].width, imgs[i].height);
         }
     }
 
@@ -586,8 +625,9 @@ int main(int argc, char **argv)
     /* camera state tracking */
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
     int cam_view_idx = 0;
-    // int cam_move_idx = 0;
+    int cam_move_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
+    log_controls();
     int cam_order[4] = {0};
     Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
 
@@ -622,7 +662,7 @@ int main(int argc, char **argv)
     /* game loop */
     while (!window_should_close()) {
         /* input */
-        update_camera_free(camera); // TODO: use cam_move_idx when ready
+        update_camera_free(&cameras[cam_move_idx]);
 
         /* handle keyboard input */
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
@@ -661,13 +701,20 @@ int main(int argc, char **argv)
                 nob_log(NOB_INFO, "min lod %zu reached", lod);
             }
         }
-        // if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) log_fps();
         if (is_key_down(KEY_F)) log_fps();
         if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             record.collecting = true;
         if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
+        }
+        if (is_key_pressed(KEY_C)) {
+            cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
+            nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
+        }
+        if (is_key_pressed(KEY_SPACE)) {
+            nob_log(NOB_INFO, "resetting camera defaults");
+            copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
         }
 
         /* collect the frame rate */
