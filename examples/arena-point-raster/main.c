@@ -194,7 +194,7 @@ bool load_texture(Image img, size_t img_idx)
     Vk_Image vk_img = {
         .extent  = {img.width, img.height},
         .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = img.format,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
     };
     result = vk_img_init(
         &vk_img,
@@ -306,7 +306,6 @@ bool setup_ds_layouts()
         {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2, STORAGE_BUFFER, COMPUTE_BIT)},
-        // {DS_BINDING(3, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
         {DS_BINDING(4, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
         {DS_BINDING(5, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
@@ -411,16 +410,11 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         img_infos[i].imageView   = textures[i].view;
         img_infos[i].sampler     = textures[i].sampler;
     }
-    // VkDescriptorBufferInfo tex_buff_info = {
-    //     .buffer = tex_buff.buff.handle,
-    //     .range  = tex_buff.buff.size,
-    // };
     VkWriteDescriptorSet writes[] = {
         /* render.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
         {DS_WRITE_BUFF(2, STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
-        // {DS_WRITE_BUFF(3, STORAGE_BUFFER, pc_layers[lod].set, &tex_buff_info)},
         {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
         {DS_WRITE_IMG (4, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
         {DS_WRITE_IMG (5, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
@@ -580,7 +574,6 @@ int main(int argc, char **argv)
             nob_log(NOB_INFO, "    width %d height %d", imgs[i].width, imgs[i].height);
         }
     }
-    // alloc_tex_buff(imgs[0]);
 
     /* initialize window and Vulkan */
     if (argc > 4) {
@@ -605,7 +598,6 @@ int main(int argc, char **argv)
     }
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
-    // if (!vk_comp_buff_staged_upload(&tex_buff.buff, tex_buff.data))              return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
 

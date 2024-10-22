@@ -41,10 +41,6 @@ layout(std430, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 
-//layout(std430, binding = 3) buffer tex_data {
-//   uint tex_buff[ ];
-//};
-
 layout(binding = 3) uniform sampler2D tex_sampler_0;
 layout(binding = 4) uniform sampler2D tex_sampler_1;
 layout(binding = 5) uniform sampler2D tex_sampler_2;
@@ -54,11 +50,6 @@ vec4 tex_colors[4];
 int cam_sees[4];
 
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
-
-vec3 srgb_to_linear(vec3 srgb)
-{
-    return mix(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, srgb));
-}
 
 uint vec3_to_uint(vec3 color)
 {
@@ -90,13 +81,6 @@ void main()
     vec2 uv_1 = (ndc_1.xy * 0.5) + 0.5;
     vec2 uv_2 = (ndc_2.xy * 0.5) + 0.5;
     vec2 uv_3 = (ndc_3.xy * 0.5) + 0.5;
-
-    // width 3712 height 2784
-    //ivec2 tex_img_size = ivec2(3712, 2784);
-    //vec2 tex_img_pos = uv_0 * tex_img_size;
-    //ivec2 tex_coords = ivec2(tex_img_pos);
-    //int tex_id = tex_coords.x + tex_coords.y * tex_img_size.x;
-
     tex_colors[0] = textureLod(tex_sampler_0, uv_0, 0.0);
     tex_colors[1] = textureLod(tex_sampler_1, uv_1, 0.0);
     tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
