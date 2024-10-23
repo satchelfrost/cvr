@@ -342,7 +342,7 @@ bool setup_ds_pool()
 {
     VkDescriptorPoolSize pool_sizes[] = {
         {DS_POOL(UNIFORM_BUFFER, 1)},                       // 1 in render.comp
-        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD + 1)},             // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
+        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},             // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
         {DS_POOL(COMBINED_IMAGE_SAMPLER, 1 + 4 * MAX_LOD)}, // 1 in sst.frag + 4 in render.comp * MAX_LOD
         {DS_POOL(STORAGE_IMAGE, 1)},                        // 1 in resolve.comp
     };
@@ -429,7 +429,7 @@ bool build_compute_cmds(size_t highest_lod)
 {
     size_t group_x = 1, group_y = 1, group_z = 1;
     if (!vk_rec_compute()) return false;
-        /* loop through the lod layers of the point cloud */
+        /* loop through the lod layers of the point cloud (render.comp shader) */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
             /* submit batches of points to render compute shader */
             group_x = pc_layers[lod].count / SUBGROUP_SZ + 1;
@@ -443,9 +443,10 @@ bool build_compute_cmds(size_t highest_lod)
             }
         }
 
+        /* protect against read after write hazards on frame buffer */
         vk_compute_pl_barrier();
 
-        /* resolve the frame buffer */
+        /* resolve the frame buffer (resolve.comp shader) */
         group_x = group_y = FRAME_BUFF_SZ / 16;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
 
@@ -717,11 +718,11 @@ int main(int argc, char **argv)
             copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
         }
 
-        /* collect the frame rate */
+        /* start collecting frame rates to average */
         if (record.collecting) {
             nob_da_append(&record, get_fps());
+            /* calculate the average frame rate, print results, and reset */
             if (record.count >= record.max) {
-                /* print results and reset */
                 size_t sum = 0;
                 for (size_t i = 0; i < record.count; i++) sum += record.items[i];
                 float ave = (float) sum / record.count;
@@ -731,38 +732,22 @@ int main(int argc, char **argv)
             }
         }
 
-        /* render loop */
+        /* compute shader submission */
+        begin_mode_3d(*camera);
+            translate(0.0f, 0.0f, -100.0f);
+            rotate_x(-PI / 2);
+            get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
+            if (!vk_compute_fence_wait()) return 1;
+            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
+            if (!vk_submit_compute()) return 1;
+        end_mode_3d();
+
+        /* draw command for screen space triangle (sst) */
         start_timer();
         if (!vk_begin_drawing()) return 1;
-            /* create a barrier to ensure compute shaders are done before sampling */
-            VkImageMemoryBarrier barrier = {
-               .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-               .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-               .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-               .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-               .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-               .image = storage_tex.img.handle,
-               .subresourceRange = {
-                   .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                   .baseMipLevel = 0,
-                   .levelCount = 1,
-                   .baseArrayLayer = 0,
-                   .layerCount = 1,
-               },
-            };
-            vk_pl_barrier(barrier);
+            vk_raster_sampler_barrier(storage_tex.img.handle);
             vk_begin_render_pass(BLACK);
-            begin_mode_3d(*camera);
-                vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-
-                translate(0.0f, 0.0f, -100.0f);
-                rotate_x(-PI / 2);
-                get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
-                if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
-                if (!vk_submit_compute()) return 1;
-            end_mode_3d();
+            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
         end_drawing();
     }
 

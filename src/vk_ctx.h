@@ -150,6 +150,7 @@ void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_rec_compute();
 bool vk_submit_compute();
+bool vk_compute_fence_wait();
 bool vk_end_rec_compute();
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value);
@@ -176,6 +177,9 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size);
 
 bool vk_create_storage_img(Vk_Texture *texture);
 void vk_pl_barrier(VkImageMemoryBarrier barrier);
+
+/* custom barrier to ensure compute shaders are done before sampling image (useful for software rasterization) */
+void vk_raster_sampler_barrier(VkImage img);
 
 /* descriptor set macros */
 #define DS_POOL(DS_TYPE, COUNT)             \
@@ -1075,6 +1079,25 @@ bool vk_end_rec_compute()
 
 bool vk_submit_compute()
 {
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &ctx.compute_buff,
+        // .pSignalSemaphores = &ctx.compute_fin_sem,
+        // .signalSemaphoreCount = 1,
+    };
+
+    VkResult res = vkQueueSubmit(ctx.compute_queue, 1, &submit, ctx.compute_fence);
+    if (!VK_SUCCEEDED(res)) {
+        nob_log(NOB_ERROR, "failed to submit compute queue");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_compute_fence_wait()
+{
     /* first wait for compute fence */
     VkResult res = vkWaitForFences(ctx.device, 1, &ctx.compute_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
@@ -1084,19 +1107,6 @@ bool vk_submit_compute()
     res = vkResetFences(ctx.device, 1, &ctx.compute_fence);
     if (!VK_SUCCEEDED(res)) {
         nob_log(NOB_ERROR, "failed resetting compute fence");
-        return false;
-    }
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &ctx.compute_buff,
-        // .pSignalSemaphores = &ctx.compute_fin_sem,
-        // .signalSemaphoreCount = 1,
-    };
-
-    res = vkQueueSubmit(ctx.compute_queue, 1, &submit, ctx.compute_fence);
-    if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit compute queue");
         return false;
     }
 
@@ -2146,6 +2156,36 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
 
 void vk_pl_barrier(VkImageMemoryBarrier barrier)
 {
+    vkCmdPipelineBarrier(
+        ctx.gfx_buff,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_FLAGS_NONE,
+        0, NULL,
+        0, NULL,
+        1, &barrier
+    );
+}
+
+void vk_raster_sampler_barrier(VkImage img)
+{
+    VkImageMemoryBarrier barrier = {
+       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+       .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+       .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+       .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+       .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+       .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+       .image = img,
+       .subresourceRange = {
+           .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+           .baseMipLevel = 0,
+           .levelCount = 1,
+           .baseArrayLayer = 0,
+           .layerCount = 1,
+       },
+    };
     vkCmdPipelineBarrier(
         ctx.gfx_buff,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,

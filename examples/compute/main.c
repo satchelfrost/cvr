@@ -144,7 +144,7 @@ bool create_pipeline()
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init69(config, &gfx_pl)) return false;
+    if (!vk_basic_pl_init(config, &gfx_pl)) return false;
 
     return true;
 }
@@ -192,6 +192,7 @@ int main()
 
     float time = 0.0f;
     while (!window_should_close()) {
+        vk_compute_fence_wait();
         if (!vk_submit_compute()) return 1;
 
         begin_drawing(BLACK);
