@@ -104,14 +104,26 @@ typedef struct {
 Matrix mat_stack[MAX_MAT_STACK];
 size_t mat_stack_p = 0;
 Shape shapes[SHAPE_COUNT];
-Default_Pipelines pipelines = {0};
-Matrices matrices = {0};
-Point_Clouds point_clouds = {0};
-Keyboard keyboard = {0};
-Mouse mouse = {0};
-Gamepad gamepad = {0};
-Time cvr_time = {0};
-Window_Size win_size = {0};
+
+#ifndef PLATFORM_QUEST
+    Default_Pipelines pipelines = {0};
+    Matrices matrices = {0};
+    Point_Clouds point_clouds = {0};
+    Keyboard keyboard = {0};
+    Mouse mouse = {0};
+    Gamepad gamepad = {0};
+    Time cvr_time = {0};
+    Window_Size win_size = {0};
+#else // clang I hate you
+    Default_Pipelines pipelines = {};
+    Matrices matrices = {};
+    Point_Clouds point_clouds = {};
+    Keyboard keyboard = {};
+    Mouse mouse = {};
+    Gamepad gamepad = {};
+    Time cvr_time = {};
+    Window_Size win_size = {};
+#endif
 const char *core_title;
 
 bool alloc_shape_res(Shape_Type shape_type);
@@ -410,7 +422,6 @@ static void wait_time(double seconds)
 #if defined(_WIN32)
     Sleep((unsigned long)(sleep_secs * 1000.0));
 #endif
-
 
     /* partial busy wait loop */
     while (get_time() < destination_time) {}

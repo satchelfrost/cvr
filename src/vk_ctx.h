@@ -15,8 +15,10 @@
  * the dependencies on glfw, nob, and raymath.
  * */
 
-#define GLFW_INCLUDE_VULKAN // TODO: would like to move this into cvr.c
-#include <GLFW/glfw3.h>
+#ifndef PLATFORM_QUEST
+    #define GLFW_INCLUDE_VULKAN
+    #include <GLFW/glfw3.h>
+#endif
 
 #ifndef APP_NAME
     #define APP_NAME "app"
@@ -78,7 +80,9 @@ typedef struct {
 } Vk_Texture;
 
 typedef struct {
+#ifndef PLATFORM_QUEST
     GLFWwindow *window;
+#endif
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_msgr;
     VkPhysicalDevice phys_device;
@@ -392,10 +396,12 @@ bool vk_instance_init()
         .pApplicationInfo = &app_info,
     };
 
+#ifndef PLATFORM_QUEST
     uint32_t glfw_ext_count = 0;
     const char **glfw_exts = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
     for (size_t i = 0; i < glfw_ext_count; i++)
         nob_da_append(&instance_exts, glfw_exts[i]);
+#endif
 
 #ifdef ENABLE_VALIDATION
     instance_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
@@ -493,12 +499,16 @@ defer:
 
 bool vk_surface_init()
 {
+#ifndef PLATFORM_QUEST
     if (VK_SUCCEEDED(glfwCreateWindowSurface(ctx.instance, ctx.window, NULL, &ctx.surface))) {
         return true;
     } else {
         nob_log(NOB_ERROR, "failed to initialize glfw window surface");
         return false;
     }
+#else
+    return false; // TODO: for now this doesn't work on quest
+#endif
 }
 
 bool vk_swapchain_init()
@@ -1271,12 +1281,16 @@ bool vk_end_drawing()
 
 bool vk_recreate_swapchain()
 {
+#ifndef PLATFORM_QUEST
     int width = 0, height = 0;
     glfwGetFramebufferSize(ctx.window, &width, &height);
     while (width == 0 || height == 0) {
         glfwGetFramebufferSize(ctx.window, &width, &height);
         glfwWaitEvents();
     }
+#else
+    return false;
+#endif
 
     vkDeviceWaitIdle(ctx.device);
     cleanup_swapchain();
@@ -1539,7 +1553,13 @@ VkExtent2D choose_swp_extent()
         return capabilities.currentExtent;
     } else {
         int width, height;
+
+#ifndef PLATFORM_QUEST
         glfwGetFramebufferSize(ctx.window, &width, &height);
+#else
+        width = capabilities.currentExtent.width;
+        height = capabilities.currentExtent.width;
+#endif
 
         VkExtent2D extent = {
             .width = width,
