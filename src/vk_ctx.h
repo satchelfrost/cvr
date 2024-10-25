@@ -245,7 +245,6 @@ bool is_device_suitable(VkPhysicalDevice phys_device);
 bool pick_phys_device();
 void cleanup_swapchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
-void frame_buff_resized(GLFWwindow* window, int width, int height);
 
 #ifndef CVR_CAMERA
 typedef struct {

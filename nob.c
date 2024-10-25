@@ -412,7 +412,7 @@ bool build_glfw(Config config, const char *platform_path)
 }
 
 static const char *cvr[] = {
-    "cvr",
+    "core",
 };
 
 bool build_cvr_linux(const char *platform_path)
@@ -434,6 +434,7 @@ bool build_cvr_linux(const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, "cc");
+            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
@@ -486,6 +487,7 @@ bool build_cvr_win(const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
+            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
