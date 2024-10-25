@@ -349,37 +349,20 @@ int main()
         }
 
         /* submit compute commands */
-        if (!vk_submit_compute()) return 1;
-
-        /* render loop */
-        start_timer();
-        if (!vk_begin_drawing()) return 1;
-        /* create a barrier to ensure compute shaders are done before sampling */
-        VkImageMemoryBarrier barrier = {
-           .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-           .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-           .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-           .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-           .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-           .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-           .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-           .image = storage_tex.img.handle,
-           .subresourceRange = {
-               .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-               .baseMipLevel = 0,
-               .levelCount = 1,
-               .baseArrayLayer = 0,
-               .layerCount = 1,
-           },
-        };
-        vk_pl_barrier(barrier);
-        vk_begin_render_pass(BLACK);
         begin_mode_3d(camera);
-            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
             rotate_y(get_time() * 0.5);
+            vk_compute_fence_wait();
             if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
             else return 1;
+            if (!vk_submit_compute()) return 1;
         end_mode_3d();
+
+        /* draw command for screen space triangle (sst) */
+        start_timer();
+        if (!vk_begin_drawing()) return 1;
+            vk_raster_sampler_barrier(storage_tex.img.handle);
+            vk_begin_render_pass(BLACK);
+            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
         end_drawing();
     }
 

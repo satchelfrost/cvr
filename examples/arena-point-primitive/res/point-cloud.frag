@@ -29,22 +29,6 @@ void main()
     tex_colors[1] = textureLod(tex_sampler_1, uv_1, 0.0);
     tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
     tex_colors[3] = textureLod(tex_sampler_3, uv_3, 0.0);
-    if ((uv_0.x < 0.05 && uv_0.y < 0.05) ||
-        (uv_0.x > 0.95 && uv_0.y > 0.95) ||
-        (uv_0.x > 0.95 && uv_0.y < 0.05) ||
-        (uv_0.x < 0.05 && uv_0.y > 0.95)) tex_colors[0] = vec4(0.0, 1.0, 0.0, 1.0);
-    if ((uv_1.x < 0.05 && uv_1.y < 0.05) ||
-        (uv_1.x > 0.95 && uv_1.y > 0.95) ||
-        (uv_1.x > 0.95 && uv_1.y < 0.05) ||
-        (uv_1.x < 0.05 && uv_1.y > 0.95)) tex_colors[1] = vec4(0.0, 1.0, 0.0, 1.0);
-    if ((uv_2.x < 0.05 && uv_2.y < 0.05) ||
-        (uv_2.x > 0.95 && uv_2.y > 0.95) ||
-        (uv_2.x > 0.95 && uv_2.y < 0.05) ||
-        (uv_2.x < 0.05 && uv_2.y > 0.95)) tex_colors[2] = vec4(0.0, 1.0, 0.0, 1.0);
-    if ((uv_3.x < 0.05 && uv_3.y < 0.05) ||
-        (uv_3.x > 0.95 && uv_3.y > 0.95) ||
-        (uv_3.x > 0.95 && uv_3.y < 0.05) ||
-        (uv_3.x < 0.05 && uv_3.y > 0.95)) tex_colors[3] = vec4(0.0, 1.0, 0.0, 1.0);
 
     switch (shader_mode) {
     case 0:
