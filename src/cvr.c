@@ -98,7 +98,7 @@ typedef struct {
     VkPipelineLayout layouts[DEFAULT_PL_COUNT];
 } Default_Pipelines;
 
-/* State */
+/* core state */
 Default_Pipelines pipelines = {0};
 Matrices matrices = {0};
 Point_Clouds point_clouds = {0};

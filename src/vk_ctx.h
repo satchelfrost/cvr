@@ -110,6 +110,7 @@ bool vk_init();
 bool vk_destroy();
 bool vk_instance_init();
 bool vk_device_init();
+bool vk_wait_idle();
 bool vk_surface_init();
 bool vk_swapchain_init();
 bool vk_img_views_init();
@@ -2471,6 +2472,11 @@ bool vk_alloc_ds(VkDescriptorSetAllocateInfo alloc, VkDescriptorSet *sets)
 void vk_update_ds(size_t count, VkWriteDescriptorSet *writes)
 {
     vkUpdateDescriptorSets(ctx.device, (uint32_t)count, writes, 0, NULL);
+}
+
+bool vk_wait_idle()
+{
+    return VK_SUCCEEDED(vkDeviceWaitIdle(ctx.device));
 }
 
 #endif // VK_CTX_IMPLEMENTATION

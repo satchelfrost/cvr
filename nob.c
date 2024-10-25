@@ -26,7 +26,7 @@ typedef enum {
 const char *target_names[TARGET_COUNT] = {
     "linux",
     "windows",
-    "quest-devel", // in development but not currently supported
+    "quest",
 };
 
 typedef enum {
@@ -578,6 +578,8 @@ bool build_example_linux(Config config, const char *build_path)
 
     /* build example */
     for (size_t i = 0; i < example->c_files.count; i++) {
+        if (strcmp(c_files[i], "android_main") == 0) continue;
+
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
         const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
         nob_da_append(&obj_files, output_path);
@@ -635,6 +637,8 @@ bool build_example_win(Config config, const char *build_path)
 
     /* build example */
     for (size_t i = 0; i < example->c_files.count; i++) {
+        if (strcmp(c_files[i], "android_main") == 0) continue;
+
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
         const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
         nob_da_append(&obj_files, output_path);
