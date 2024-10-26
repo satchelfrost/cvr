@@ -1,32 +1,45 @@
 #include <GLFW/glfw3.h>
 
+typedef struct {
+    GLFWwindow *handle;
+} Platform_Data;
+
+static Platform_Data platform = {0};
+
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_offset);
 static void joystick_callback(int jid, int event);
 static void frame_buff_resized(GLFWwindow* window, int width, int height);
-void poll_input_events();
-float get_mouse_wheel_move();
 
 void init_platform()
 {
-    /* Initialize glfw stuff */
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    ctx.window = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
-    glfwSetWindowUserPointer(ctx.window, &ctx);
-    glfwSetFramebufferSizeCallback(ctx.window, frame_buff_resized);
-    glfwSetKeyCallback(ctx.window, key_callback);
-    glfwSetMouseButtonCallback(ctx.window, mouse_button_callback);
-    glfwSetCursorPosCallback(ctx.window, mouse_cursor_pos_callback);
-    glfwSetScrollCallback(ctx.window, mouse_scroll_callback);
+    platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
+    glfwSetWindowUserPointer(platform.handle, &vk_ctx);
+    glfwSetFramebufferSizeCallback(platform.handle, frame_buff_resized);
+    glfwSetKeyCallback(platform.handle, key_callback);
+    glfwSetMouseButtonCallback(platform.handle, mouse_button_callback);
+    glfwSetCursorPosCallback(platform.handle, mouse_cursor_pos_callback);
+    glfwSetScrollCallback(platform.handle, mouse_scroll_callback);
     glfwSetJoystickCallback(joystick_callback);
+}
+
+bool platform_surface_init()
+{
+    if (VK_SUCCEEDED(glfwCreateWindowSurface(vk_ctx.instance, platform.handle, NULL, &vk_ctx.surface))) {
+        return true;
+    } else {
+        nob_log(NOB_ERROR, "failed to initialize glfw window surface");
+        return false;
+    }
 }
 
 bool window_should_close()
 {
-    bool result = glfwWindowShouldClose(ctx.window);
+    bool result = glfwWindowShouldClose(platform.handle);
     glfwPollEvents();
     return result;
 }
@@ -51,16 +64,6 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
     }
 
     if ((key == keyboard.exit_key) && (action == GLFW_PRESS)) glfwSetWindowShouldClose(window, GLFW_TRUE);
-}
-
-float get_mouse_wheel_move()
-{
-    float result = 0.0f;
-
-    if (fabsf(mouse.curr_wheel_move.x) > fabsf(mouse.curr_wheel_move.y)) result = (float)mouse.curr_wheel_move.x;
-    else result = (float)mouse.curr_wheel_move.y;
-
-    return result;
 }
 
 void poll_input_events()
@@ -137,7 +140,7 @@ double get_time()
 
 void close_platform()
 {
-    glfwDestroyWindow(ctx.window);
+    glfwDestroyWindow(platform.handle);
     glfwTerminate();
 }
 
@@ -177,12 +180,12 @@ void set_window_size(int width, int height)
 {
     win_size.width = width;
     win_size.height = height;
-    glfwSetWindowSize(ctx.window, width, height);
+    glfwSetWindowSize(platform.handle, width, height);
 }
 
 void set_window_pos(int x, int y)
 {
-    glfwSetWindowPos(ctx.window, x, y);
+    glfwSetWindowPos(platform.handle, x, y);
 }
 
 void frame_buff_resized(GLFWwindow* window, int width, int height)
@@ -190,6 +193,25 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     (void)window;
     win_size.width = width;
     win_size.height = height;
-    ctx.swapchain.buff_resized = true;
+    vk_ctx.swapchain.buff_resized = true;
 }
 
+const char **get_platform_exts(uint32_t *platform_ext_count)
+{
+    return glfwGetRequiredInstanceExtensions(platform_ext_count);
+}
+
+void platform_wait_resize_frame_buffer()
+{
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(platform.handle, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(platform.handle, &width, &height);
+        glfwWaitEvents();
+    }
+}
+
+void platform_get_frame_buff_size(int *width, int *height)
+{
+    glfwGetFramebufferSize(platform.handle, width, height);
+}

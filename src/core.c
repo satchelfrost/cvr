@@ -153,7 +153,7 @@ bool init_window(int width, int height, const char *title)
 
 void close_window()
 {
-    vkDeviceWaitIdle(ctx.device);
+    vkDeviceWaitIdle(vk_ctx.device);
 
     for (size_t i = 0; i < DEFAULT_PL_COUNT; i++)
         vk_destroy_pl_res(pipelines.handles[i], pipelines.layouts[i]);
@@ -341,7 +341,7 @@ bool draw_shape_wireframe(Shape_Type shape_type)
 Matrix get_proj(Camera camera)
 {
     Matrix proj = {0};
-    double aspect = ctx.extent.width / (double) ctx.extent.height;
+    double aspect = vk_ctx.extent.width / (double) vk_ctx.extent.height;
     double top = camera.fovy / 2.0;
     double right = top * aspect;
     switch (camera.projection) {
@@ -850,7 +850,7 @@ bool upload_point_cloud(Buffer buff, size_t *id)
 
 void destroy_point_cloud(size_t id)
 {
-    vkDeviceWaitIdle(ctx.device);
+    vkDeviceWaitIdle(vk_ctx.device);
 
     bool found = false;
     for (size_t i = 0; i < point_clouds.count; i++) {
@@ -1077,7 +1077,7 @@ Window_Size get_window_size()
 
 void wait_idle() // TODO: this should be in vk_ctx.h
 {
-    vkDeviceWaitIdle(ctx.device);
+    vkDeviceWaitIdle(vk_ctx.device);
 }
 
 void log_fps()
@@ -1088,4 +1088,14 @@ void log_fps()
         nob_log(NOB_INFO, "FPS %d", curr_fps);
         fps = curr_fps;
     }
+}
+
+float get_mouse_wheel_move()
+{
+    float result = 0.0f;
+
+    if (fabsf(mouse.curr_wheel_move.x) > fabsf(mouse.curr_wheel_move.y)) result = (float)mouse.curr_wheel_move.x;
+    else result = (float)mouse.curr_wheel_move.y;
+
+    return result;
 }

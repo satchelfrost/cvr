@@ -542,7 +542,7 @@ bool check_android_tools(Config *config)
     if (config->android.home) {
         nob_log(NOB_INFO, "android home is %s", config->android.home);
     } else {
-        nob_log(NOB_ERROR, "ANDROID_NDK_ROOT not set");
+        nob_log(NOB_ERROR, "ANDROID_HOME not set");
         return false;
     }
 
@@ -682,8 +682,6 @@ bool build_example_linux(Config config, const char *build_path)
 
     /* build example */
     for (size_t i = 0; i < example->c_files.count; i++) {
-        if (strcmp(c_files[i], "android_main") == 0) continue;
-
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
         const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
         nob_da_append(&obj_files, output_path);
@@ -741,8 +739,6 @@ bool build_example_win(Config config, const char *build_path)
 
     /* build example */
     for (size_t i = 0; i < example->c_files.count; i++) {
-        if (strcmp(c_files[i], "android_main") == 0) continue;
-
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
         const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
         nob_da_append(&obj_files, output_path);
