@@ -62,6 +62,7 @@ typedef struct {
     int cam_order_1;
     int cam_order_2;
     int cam_order_3;
+    float closest_two_cams_ratio;
 } UBO_Data;
 
 typedef struct {
@@ -83,6 +84,7 @@ VkDescriptorPool pool;
 VkDescriptorSet cs_resolve_ds;
 VkDescriptorSet gfx_sst; // screen space triangle
 Vk_Texture textures[NUM_CCTVS];
+float ratio;
 
 Point_Cloud_Layer pc_layers[MAX_LOD] = {
     {.name = "res/arena_5060224_f32.vtx"},
@@ -144,6 +146,9 @@ void get_cam_order(const Camera *cameras, size_t count, int *cam_order, size_t c
     qsort(sqr_distances, NOB_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
     for (size_t i = 0; i < cam_order_count; i++)
         cam_order[i] = sqr_distances[i].idx;
+
+    if (sqr_distances[1].dist_sqr != 0.0f)
+        ratio = sqr_distances[0].dist_sqr / sqr_distances[1].dist_sqr;
 }
 
 void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
@@ -508,6 +513,7 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     ubo->data.cam_order_2 = cam_order[2];
     ubo->data.cam_order_3 = cam_order[3];
     ubo->data.shader_mode = shader_mode;
+    ubo->data.closest_two_cams_ratio = ratio;
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
 
