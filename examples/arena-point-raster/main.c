@@ -709,6 +709,10 @@ int main(int argc, char **argv)
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
         }
+        if (is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_TRIGGER_1)) {
+            shader_mode = (shader_mode - 1 + SHADER_MODE_COUNT) % SHADER_MODE_COUNT;
+            log_shader_mode(shader_mode);
+        }
         if (is_key_pressed(KEY_C)) {
             cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
             nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
