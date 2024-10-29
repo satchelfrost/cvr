@@ -62,7 +62,7 @@ typedef struct {
     int cam_order_1;
     int cam_order_2;
     int cam_order_3;
-    float closest_two_cams_ratio;
+    float blend_ratio;
 } UBO_Data;
 
 typedef struct {
@@ -84,7 +84,6 @@ VkDescriptorPool pool;
 VkDescriptorSet cs_resolve_ds;
 VkDescriptorSet gfx_sst; // screen space triangle
 Vk_Texture textures[NUM_CCTVS];
-float ratio;
 
 Point_Cloud_Layer pc_layers[MAX_LOD] = {
     {.name = "res/arena_5060224_f32.vtx"},
@@ -98,24 +97,6 @@ Point_Cloud_Layer pc_layers[MAX_LOD] = {
 
 typedef enum {DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
-
-int get_closest_camera(Camera *cameras, size_t count)
-{
-    Vector3 main_cam_pos = cameras[0].position;
-    float shortest = FLT_MAX;
-    int shortest_idx = -1;
-    for (size_t i = 1; i < count; i++) {
-        Vector3 cctv_pos = cameras[i].position;
-        float dist_sqr = Vector3DistanceSqr(main_cam_pos, cctv_pos);
-        if (dist_sqr < shortest) {
-            shortest_idx = i - 1;
-            shortest = dist_sqr;
-        }
-    }
-    if (shortest_idx < 0) nob_log(NOB_ERROR, "Unknown camera index");
-
-    return shortest_idx;
-}
 
 typedef struct {
     int idx;
@@ -146,9 +127,18 @@ void get_cam_order(const Camera *cameras, size_t count, int *cam_order, size_t c
     qsort(sqr_distances, NOB_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
     for (size_t i = 0; i < cam_order_count; i++)
         cam_order[i] = sqr_distances[i].idx;
+}
 
-    if (sqr_distances[1].dist_sqr != 0.0f)
-        ratio = sqr_distances[0].dist_sqr / sqr_distances[1].dist_sqr;
+float calc_blend_ratio(const Camera *cameras, const int *cam_order)
+{
+    Vector3 main_cam_pos = cameras[0].position;
+    Vector3 closest_cctv = cameras[cam_order[0] + 1].position;
+    Vector3 close_cctv   = cameras[cam_order[1] + 1].position;
+    Vector3 a = Vector3Subtract(main_cam_pos, closest_cctv);
+    Vector3 b = Vector3Subtract(close_cctv, closest_cctv);
+
+    /* normalized scalar projection of a onto b */
+    return Vector3DotProduct(a, b) / Vector3LengthSqr(b);
 }
 
 void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
@@ -161,6 +151,7 @@ typedef enum {
     SHADER_MODE_PROGRESSIVE_COLOR,
     SHADER_MODE_SINGLE_TEX,
     SHADER_MODE_MULTI_TEX,
+    SHADER_MODE_MULTI_TEX_BLEND,
     SHADER_MODE_COUNT,
 } Shader_Mode;
 
@@ -178,6 +169,9 @@ void log_shader_mode(Shader_Mode mode)
         break;
     case SHADER_MODE_MULTI_TEX:
         nob_log(NOB_INFO, "Shader mode: multi-texture");
+        break;
+    case SHADER_MODE_MULTI_TEX_BLEND:
+        nob_log(NOB_INFO, "Shader mode: multi-texture with blend");
         break;
     default:
         nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
@@ -488,7 +482,7 @@ bool create_pipelines()
     return true;
 }
 
-bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_Cloud_UBO *ubo)
+bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float blend_ratio, Point_Cloud_UBO *ubo)
 {
     /* update mvp for main viewing camera */
     if (!get_mvp_float16(&ubo->data.main_cam_mvp)) return false;
@@ -513,7 +507,7 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, Point_
     ubo->data.cam_order_2 = cam_order[2];
     ubo->data.cam_order_3 = cam_order[3];
     ubo->data.shader_mode = shader_mode;
-    ubo->data.closest_two_cams_ratio = ratio;
+    ubo->data.blend_ratio = blend_ratio;
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
 
@@ -743,8 +737,9 @@ int main(int argc, char **argv)
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
+            float blend_ratio = calc_blend_ratio(cameras, cam_order);
             if (!vk_compute_fence_wait()) return 1;
-            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
+            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
 
