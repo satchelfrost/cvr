@@ -100,15 +100,13 @@ void main()
     cam_sees[3] = int((-cam3_pos.w < cam3_pos.x && cam3_pos.x < cam3_pos.w) &&
                       (-cam3_pos.w < cam3_pos.y && cam3_pos.y < cam3_pos.w) &&
                       (-cam3_pos.w < cam3_pos.z && cam3_pos.z < cam3_pos.w));
-    int cam_see_count = cam_sees[0] + cam_sees[1] + cam_sees[2] + cam_sees[3];
 
     uint brightness = uint((cam_sees[0] * 0.25 + cam_sees[1] * 0.25 + cam_sees[2] * 0.25 + cam_sees[3] * 0.25) * 255.0);
-    uint out_color = 0;
+    uint out_color = vert.color;
     vec4 temp_mix;
     float ratio_color;
     switch (ubo.shader_mode) {
     case 0:
-        out_color = vert.color;
         break;
     case 1:
         out_color = brightness << 16 | brightness << 8 | brightness;
@@ -121,16 +119,16 @@ void main()
         if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
         if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);
         if (cam_sees[ubo.cam_order_0] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
-        if (cam_see_count == 0) out_color = vert.color;
         break;
     case 4:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
         if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
         if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);
-        ratio_color = smoothstep(0.15, 0.85, ubo.blend_ratio);
+        ratio_color = smoothstep(0.35, 0.65, ubo.blend_ratio);
         temp_mix = mix(tex_colors[ubo.cam_order_0], tex_colors[ubo.cam_order_1], ratio_color);
-        if (cam_sees[ubo.cam_order_0] > 0) out_color = vec3_to_uint(temp_mix.rgb);
-        if (cam_see_count == 0) out_color = vert.color;
+        if (cam_sees[ubo.cam_order_0] > 0) {
+            out_color = (cam_sees[ubo.cam_order_1] > 0) ? vec3_to_uint(temp_mix.rgb) : vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
+        }
         break;
     }
 
