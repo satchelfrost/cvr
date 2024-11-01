@@ -10,7 +10,8 @@
 #define WIDTH  (16 * FACTOR)
 #define HEIGHT (9 * FACTOR)
 #define DUAL_THREADED     // disabling reverts to a single thread
-#define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
+// #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
+// #define HIGH_RES          // high-res vs. low res videos
 
 typedef enum {
     VIDEO_PLANE_Y,
@@ -28,10 +29,17 @@ typedef enum {
 } Video_Idx;
 
 const char *video_names[] = {
-    "suite_e",
-    "suite_nw",
-    "suite_se",
-    "suite_w",
+#ifdef HIGH_RES
+    "suite_e_1280x960",
+    "suite_nw_1280x720",
+    "suite_se_1280x720",
+    "suite_w_1280x960",
+#else
+    "suite_e_960x720",
+    "suite_nw_960x540",
+    "suite_se_960x540",
+    "suite_w_960x720",
+#endif
 };
 
 typedef struct {
@@ -40,6 +48,7 @@ typedef struct {
     Image img[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
     plm_t *plms[VIDEO_IDX_COUNT];
     float aspects[VIDEO_IDX_COUNT];
+    plm_frame_t initial_frames[VIDEO_IDX_COUNT];
     VkDescriptorSet ds_sets[VIDEO_IDX_COUNT];
     VkDescriptorSetLayout ds_layout;
     VkDescriptorPool ds_pool;
@@ -64,21 +73,24 @@ Video_Queue video_queue = {0};
 
 bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
 
-void video_queue_init(plm_frame_t *frame)
+void video_queue_init()
 {
     pthread_mutex_init(&video_queue.mutex, NULL);
     pthread_cond_init(&video_queue.not_full, NULL);
     pthread_cond_init(&video_queue.not_empty, NULL);
 
     /* use a single frame to determine how much memory needs allocated for a decoded frame */
-    size_t y_size  = frame->y.width  * frame->y.height;
-    size_t cb_size = frame->cb.width * frame->cb.height;
-    size_t cr_size = frame->cr.width * frame->cr.height;
-    for (size_t i = 0; i < MAX_QUEUED_FRAMES * VIDEO_IDX_COUNT; i++) {
-        video_queue.frames[i] = *frame; // do a shallow copy first
-        video_queue.frames[i].y.data  = malloc(y_size);
-        video_queue.frames[i].cb.data = malloc(cb_size);
-        video_queue.frames[i].cr.data = malloc(cr_size);
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        for (size_t j = 0; j < MAX_QUEUED_FRAMES; j++) {
+            plm_frame_t *frame = &video_textures.initial_frames[i];
+            video_queue.frames[i + j * VIDEO_IDX_COUNT] = *frame; // shallow copy first
+            size_t y_size  = frame->y.width  * frame->y.height;
+            size_t cb_size = frame->cb.width * frame->cb.height;
+            size_t cr_size = frame->cr.width * frame->cr.height;
+            video_queue.frames[i + j * VIDEO_IDX_COUNT].y.data  = malloc(y_size);
+            video_queue.frames[i + j * VIDEO_IDX_COUNT].cb.data = malloc(cb_size);
+            video_queue.frames[i + j * VIDEO_IDX_COUNT].cr.data = malloc(cr_size);
+        }
     }
 }
 
@@ -386,8 +398,8 @@ int main()
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        // const char *file_name = nob_temp_sprintf("res/%s_snippet.mpg", video_names[i]);
-        const char *file_name = "res/bjork-all-is-full-of-love.mpg";
+        const char *file_name = nob_temp_sprintf("res/%s.mpg", video_names[i]);
+        // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
             nob_log(NOB_ERROR, "could not open file %s", file_name);
@@ -405,6 +417,13 @@ int main()
     plm_frame_t *frame = NULL;
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         frame = plm_decode_video(video_textures.plms[i]);
+        size_t y_size  = frame->y.width  * frame->y.height;
+        size_t cb_size = frame->cb.width * frame->cb.height;
+        size_t cr_size = frame->cr.width * frame->cr.height;
+        video_textures.initial_frames[i] = *frame; // do a shallow copy first
+        video_textures.initial_frames[i].y.data  = malloc(y_size);
+        video_textures.initial_frames[i].cb.data = malloc(cb_size);
+        video_textures.initial_frames[i].cr.data = malloc(cr_size);
         nob_log(NOB_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
         nob_log(NOB_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
         nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
@@ -419,7 +438,7 @@ int main()
     if (!setup_ds_sets())   return 1;
 
 #ifdef DUAL_THREADED
-    video_queue_init(frame);
+    video_queue_init();
     pthread_t prod_thread;
     pthread_create(&prod_thread, NULL, producer, NULL);
 #endif
@@ -463,7 +482,7 @@ int main()
                 for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
                     push_matrix();
                     scale(video_textures.aspects[i], 1.0f, 1.0f);
-                    translate(i - 1.0f, 0.0f, 0.0f);
+                    translate(0.0f, i - 1.0f, 0.0f);
                     if (!draw_shape_ex(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[i], SHAPE_QUAD))
                         return 1;
                     pop_matrix();
@@ -482,6 +501,9 @@ int main()
     wait_idle();
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         plm_destroy(video_textures.plms[i]);
+        free(video_textures.initial_frames[i].y.data);
+        free(video_textures.initial_frames[i].cb.data);
+        free(video_textures.initial_frames[i].cr.data);
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
             vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
             vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);

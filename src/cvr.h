@@ -323,14 +323,14 @@ typedef struct {
     int format;
 } Texture;
 
-/* Generic buffer */
 typedef struct {
     void *items;  // pointer to elements
     size_t size;  // size of the entire buffer
     size_t count; // number of items
-} Buffer;
+} Buffer; // TODO: I shouldn't need this anymore now that I'm okay with exposing vk_ctx.h to user space
 
 bool is_mouse_button_down(int button);
+float get_mouse_wheel_move();
 int get_last_btn_pressed();
 
 bool upload_point_cloud(Buffer buff, size_t *id);

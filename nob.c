@@ -26,7 +26,7 @@ typedef enum {
 const char *target_names[TARGET_COUNT] = {
     "linux",
     "windows",
-    "quest-devel", // in development but not currently supported
+    "quest",
 };
 
 typedef enum {
@@ -228,6 +228,7 @@ static Example examples[] = {
         },
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
+        .private = true,
     },
     {
         .name = "video",
@@ -246,6 +247,7 @@ static Example examples[] = {
         },
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
+        .private = true,
     },
 };
 
@@ -261,6 +263,15 @@ typedef struct {
     Host host;
     bool debug;
     bool renderdoc;
+    struct {
+        char *home;
+        char *ndk_root;
+        char *cc;
+        char *aapt;
+        char *jar;
+        char *signer;
+        char *zip_align;
+    } android;
 } Config;
 
 void log_usage(const char *program)
@@ -405,6 +416,9 @@ bool build_glfw(Config config, const char *platform_path)
         return build_glfw_linux(platform_path);
     } else if (config.target == TARGET_WINDOWS && config.host == HOST_LINUX) {
         return build_glfw_win(platform_path);
+    } else if (config.target == TARGET_QUEST && config.host == HOST_LINUX) {
+        nob_log(NOB_INFO, "skipping glfw build for target quest");
+        return true; // skip glfw build for quest
     } else {
         nob_log(NOB_ERROR, "glfw target %d not yet supported", config.target);
         return false;
@@ -412,7 +426,7 @@ bool build_glfw(Config config, const char *platform_path)
 }
 
 static const char *cvr[] = {
-    "cvr",
+    "core",
 };
 
 bool build_cvr_linux(const char *platform_path)
@@ -434,6 +448,7 @@ bool build_cvr_linux(const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, "cc");
+            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
@@ -486,6 +501,7 @@ bool build_cvr_win(const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
+            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
@@ -520,14 +536,102 @@ defer:
     return result;
 }
 
-bool build_cvr(Config config, const char *platform_path)
+bool check_android_tools(Config *config)
 {
-    if (config.target == TARGET_LINUX) {
-        return build_cvr_linux(platform_path);
-    } else if (config.target == TARGET_WINDOWS && config.host == HOST_LINUX) {
-        return build_cvr_win(platform_path);
+    config->android.home = getenv("ANDROID_HOME");
+    if (config->android.home) {
+        nob_log(NOB_INFO, "android home is %s", config->android.home);
     } else {
-        nob_log(NOB_ERROR, "cvr target %d not yet supported", config.target);
+        nob_log(NOB_ERROR, "ANDROID_HOME not set");
+        return false;
+    }
+
+    config->android.ndk_root = getenv("ANDROID_NDK_ROOT");
+    if (config->android.ndk_root) {
+        nob_log(NOB_INFO, "android ndk is %s", config->android.ndk_root);
+    } else {
+        nob_log(NOB_ERROR, "ANDROID_NDK_ROOT not set");
+        return false;
+    }
+
+    config->android.cc = nob_temp_sprintf("%s/toolchains/llvm/prebuilt/linux-x86_64/bin/clang", config->android.ndk_root);
+    config->android.aapt = nob_temp_sprintf("%s/build-tools/29.0.2/aapt", config->android.home);
+    config->android.jar = nob_temp_sprintf("%s/platforms/android-29/android.jar", config->android.home);
+    config->android.signer = nob_temp_sprintf("%s/build-tools/29.0.2/apksigner", config->android.home);
+    config->android.zip_align = nob_temp_sprintf("%s/build-tools/29.0.2/zipalign", config->android.home);
+
+    return true;
+}
+
+bool build_cvr_quest(Config config, const char *platform_path)
+{
+    bool result = true;
+
+    Nob_Cmd cmd = {0};
+    Nob_Procs procs = {0};
+    Nob_File_Paths obj_files = {0};
+
+    /* build modules */
+    const char *build_path = nob_temp_sprintf("%s/cvr", platform_path);
+    if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
+    for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
+        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
+        const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
+        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
+        nob_da_append(&obj_files, output_path);
+        if (nob_needs_rebuild(output_path, &input_path, 1) ||
+            nob_needs_rebuild(output_path, &header_path, 1)) {
+            cmd.count = 0;
+            nob_cmd_append(&cmd, config.android.cc);
+            nob_cmd_append(&cmd, "-DPLATFORM_QUEST");
+            nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
+            nob_cmd_append(&cmd, "-target", "aarch64-linux-android29");
+            nob_cmd_append(&cmd, "-I./src/ext");
+            nob_cmd_append(&cmd, "-I./src/ext/android");
+            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
+            nob_cmd_append(&cmd, "-c", input_path);
+            nob_cmd_append(&cmd, "-o", output_path);
+            Nob_Proc proc = nob_cmd_run_async(cmd);
+            nob_da_append(&procs, proc);
+        }
+    }
+
+    if (!nob_procs_wait(procs)) nob_return_defer(false);
+
+    nob_log(NOB_INFO, "quest obj files for cvr built successfully");
+    nob_return_defer(false);
+    /* create library */
+    // const char *libcvr_path = nob_temp_sprintf("%s/libcvr.a", build_path);
+    // if (nob_needs_rebuild(libcvr_path, obj_files.items, obj_files.count)) {
+    //     cmd.count = 0;
+    //     nob_cmd_append(&cmd, "ar", "-crs", libcvr_path);
+    //     for (size_t i = 0; i < obj_files.count; i++) {
+    //         const char *input_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
+    //         nob_cmd_append(&cmd, input_path);
+    //     }
+    //     nob_cmd_append(&cmd, nob_temp_sprintf("%s/glfw/glfw.o", platform_path));
+    //     if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    // }
+
+defer:
+    nob_cmd_free(cmd);
+    nob_cmd_free(procs);
+    nob_cmd_free(obj_files);
+    return result;
+}
+
+bool build_cvr(Config *config, const char *platform_path)
+{
+    if (config->target == TARGET_LINUX) {
+        return build_cvr_linux(platform_path);
+    } else if (config->target == TARGET_WINDOWS && config->host == HOST_LINUX) {
+        return build_cvr_win(platform_path);
+    } else if (config->target == TARGET_QUEST && config->host == HOST_LINUX) {
+        if (!check_android_tools(config)) return false;
+        return build_cvr_quest(*config, platform_path);
+    } else {
+        nob_log(NOB_ERROR, "cvr target %d not yet supported", config->target);
         return false;
     }
 }
@@ -777,7 +881,7 @@ int main(int argc, char **argv)
     const char *platform_path = nob_temp_sprintf("./build/%s", target_names[config.target]);
     if (!nob_mkdir_if_not_exists(platform_path)) return 1;
     if (!build_glfw(config, platform_path)) return 1;
-    if (!build_cvr(config, platform_path)) return 1;
+    if (!build_cvr(&config, platform_path)) return 1;
     if (!find_supported_example(&config)) return 1;
     const char *examples_build_path = nob_temp_sprintf("./build/%s/examples", target_names[config.target]);
     if (!nob_mkdir_if_not_exists(examples_build_path)) return 1;

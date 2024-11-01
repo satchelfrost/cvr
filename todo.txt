@@ -1,0 +1,9 @@
+* get basic hello world (android logging) android example running
+    - create a platform_quest.c
+    - add the dependencies for the compiler / tools to build for android
+    - create android_main.c for 3d-primitives
+* need to create an openxr header only file
+* need to pull out (or at least toggle) glfw dependency from vk_ctx.h
+* need ctx inside of vk_ctx.h to be renamed to vk_ctx, because
+  we will have an xr_ctx whose name shouldn't conflict.
+
