@@ -182,7 +182,13 @@ bool video_dequeue()
 void *producer(void *arg)
 {
     (void)arg;
-    while (video_enqueue());
+    while (true) {
+        if (!video_enqueue()) {
+            /* loop all videos even if just one has finished */
+            for (size_t i = 0; i < VIDEO_IDX_COUNT; i++)
+                plm_rewind(video_textures.plms[i]);
+        }
+    };
     nob_log(NOB_INFO, "producer finished");
     return NULL;
 }
@@ -448,17 +454,27 @@ int main()
 
     float vid_update_time = 0.0f;
     bool playback_finished = false;
+    bool playing = false;
 
     while(!window_should_close() && !playback_finished) {
         /* update */
         log_fps();
         update_camera_free(&camera);
-        vid_update_time += get_frame_time();
+
+        if (is_key_pressed(KEY_P)) playing = !playing;
+
+        if (playing) vid_update_time += get_frame_time();
 
         /* decode the next frame */
-        if (vid_update_time > 1.0f / 30.0f) {
+        if (vid_update_time > 1.0f / 30.0f && playing) {
 #ifdef DUAL_THREADED
-            if (video_dequeue()) vid_update_time = 0.0f;
+            if (video_dequeue()) {
+                vid_update_time = 0.0f;
+            } else {
+                playback_finished = true;
+                nob_log(NOB_INFO, "video could not dequeue, this shouldn't happen");
+                return 1;
+            }
 #else // On the fly decode, i.e. the slowest method
             for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
                 plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);

@@ -4,13 +4,19 @@
 #include "ext/raylib-5.0/raymath.h"
 #include <stdlib.h>
 #include <float.h>
+#include <pthread.h>
 
-#define FRAME_BUFF_SZ 1600
+#define PL_MPEG_IMPLEMENTATION
+#include "pl_mpeg.h"
+
+#define FRAME_BUFF_SZ 1600  // TODO: get rid of this
 #define MAX_FPS_REC 100
 #define SUBGROUP_SZ 1024    // Subgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
 #define MAX_LOD 7
 #define NUM_CCTVS 4
+// #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
+// #define HIGH_RES          // high-res vs. low res videos
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -70,6 +76,64 @@ typedef struct {
     UBO_Data data;
 } Point_Cloud_UBO;
 
+typedef enum {
+    VIDEO_PLANE_Y,
+    VIDEO_PLANE_CB,
+    VIDEO_PLANE_CR,
+    VIDEO_PLANE_COUNT,
+} Video_Plane_Type;
+
+typedef enum {
+    VIDEO_IDX_SUITE_E,
+    VIDEO_IDX_SUITE_W,
+    VIDEO_IDX_SUITE_NW,
+    VIDEO_IDX_SUITE_SE,
+    VIDEO_IDX_COUNT,
+} Video_Idx;
+
+const char *video_names[] = {
+#ifdef HIGH_RES
+    "suite_e_1280x960",
+    "suite_nw_1280x720",
+    "suite_se_1280x720",
+    "suite_w_1280x960",
+#else
+    "suite_e_960x720",
+    "suite_nw_960x540",
+    "suite_se_960x540",
+    "suite_w_960x720",
+#endif
+};
+
+typedef struct {
+    Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    Vk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    Image img[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    plm_t *plms[VIDEO_IDX_COUNT];
+    float aspects[VIDEO_IDX_COUNT];
+    plm_frame_t initial_frames[VIDEO_IDX_COUNT];
+    // VkDescriptorSet ds_sets[VIDEO_IDX_COUNT];
+    // VkDescriptorSetLayout ds_layout;
+    // VkDescriptorPool ds_pool;
+    // VkPipelineLayout pl_layout;
+    // VkPipeline gfx_pl;
+} Video_Textures;
+
+Video_Textures video_textures = {0};
+
+#define MAX_QUEUED_FRAMES 20
+typedef struct {
+    plm_frame_t frames[VIDEO_IDX_COUNT * MAX_QUEUED_FRAMES];
+    int head;
+    int tail;
+    int size;
+    pthread_mutex_t mutex;
+    pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+} Video_Queue;
+
+Video_Queue video_queue = {0};
+
 /* Vulkan state */
 VkDescriptorSetLayout cs_render_ds_layout;
 VkDescriptorSetLayout cs_resolve_ds_layout;
@@ -83,7 +147,6 @@ VkPipeline gfx_pl;
 VkDescriptorPool pool;
 VkDescriptorSet cs_resolve_ds;
 VkDescriptorSet gfx_sst; // screen space triangle
-Vk_Texture textures[NUM_CCTVS];
 
 Point_Cloud_Layer pc_layers[MAX_LOD] = {
     {.name = "res/arena_5060224_f32.vtx"},
@@ -97,6 +160,128 @@ Point_Cloud_Layer pc_layers[MAX_LOD] = {
 
 typedef enum {DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
+
+bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
+
+void video_queue_init()
+{
+    pthread_mutex_init(&video_queue.mutex, NULL);
+    pthread_cond_init(&video_queue.not_full, NULL);
+    pthread_cond_init(&video_queue.not_empty, NULL);
+
+    /* use a single frame to determine how much memory needs allocated for a decoded frame */
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        for (size_t j = 0; j < MAX_QUEUED_FRAMES; j++) {
+            plm_frame_t *frame = &video_textures.initial_frames[i];
+            video_queue.frames[i + j * VIDEO_IDX_COUNT] = *frame; // shallow copy first
+            size_t y_size  = frame->y.width  * frame->y.height;
+            size_t cb_size = frame->cb.width * frame->cb.height;
+            size_t cr_size = frame->cr.width * frame->cr.height;
+            video_queue.frames[i + j * VIDEO_IDX_COUNT].y.data  = malloc(y_size);
+            video_queue.frames[i + j * VIDEO_IDX_COUNT].cb.data = malloc(cb_size);
+            video_queue.frames[i + j * VIDEO_IDX_COUNT].cr.data = malloc(cr_size);
+        }
+    }
+}
+
+void video_queue_destroy()
+{
+    pthread_mutex_destroy(&video_queue.mutex);
+    pthread_cond_destroy(&video_queue.not_full);
+    pthread_cond_destroy(&video_queue.not_empty);
+
+    for (size_t i = 0; i < MAX_QUEUED_FRAMES * VIDEO_IDX_COUNT; i++) {
+        free(video_queue.frames[i].y.data);
+        free(video_queue.frames[i].cb.data);
+        free(video_queue.frames[i].cr.data);
+    }
+}
+
+bool video_enqueue()
+{
+#ifdef DEBUG_QUEUE_PRINT
+    char queue_str[MAX_QUEUED_FRAMES + 3];
+    queue_str[0] = '[';
+    queue_str[MAX_QUEUED_FRAMES + 1] = ']';
+    queue_str[MAX_QUEUED_FRAMES + 2] = 0;
+    for (int i = 0; i < MAX_QUEUED_FRAMES; i++)
+        queue_str[i + 1] = (i < video_queue.size) ? '*' : ' ';
+    nob_log(NOB_INFO, "%s", queue_str);
+#endif
+
+    /* first decode the frames */
+    plm_frame_t temp_frames[VIDEO_IDX_COUNT];
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
+        if (!frame) return false;
+
+        size_t y_size  = frame->y.width  * frame->y.height;
+        size_t cb_size = frame->cb.width * frame->cb.height;
+        size_t cr_size = frame->cr.width * frame->cr.height;
+        temp_frames[i] = *frame; // shallow copy first
+        memcpy(temp_frames[i].y.data , frame->y.data,  y_size);
+        memcpy(temp_frames[i].cb.data, frame->cb.data, cb_size);
+        memcpy(temp_frames[i].cr.data, frame->cr.data, cr_size);
+    }
+
+    pthread_mutex_lock(&video_queue.mutex);
+        /* if queue is full then wait for consumer */
+        if (video_queue.size == MAX_QUEUED_FRAMES)
+            pthread_cond_wait(&video_queue.not_full, &video_queue.mutex);
+
+        /* decode the next "VIDEO_IDX_COUNT" video frames and enqueue */
+        for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+            plm_frame_t *saved = &video_queue.frames[i + video_queue.head * VIDEO_IDX_COUNT];
+            size_t y_size  = temp_frames[i].y.width  * temp_frames[i].y.height;
+            size_t cb_size = temp_frames[i].cb.width * temp_frames[i].cb.height;
+            size_t cr_size = temp_frames[i].cr.width * temp_frames[i].cr.height;
+            memcpy(saved->y.data , temp_frames[i].y.data,  y_size);
+            memcpy(saved->cb.data, temp_frames[i].cb.data, cb_size);
+            memcpy(saved->cr.data, temp_frames[i].cr.data, cr_size);
+        }
+        video_queue.head = (video_queue.head + 1) % MAX_QUEUED_FRAMES;
+        video_queue.size++;
+        pthread_cond_signal(&video_queue.not_empty);
+    pthread_mutex_unlock(&video_queue.mutex);
+
+    return true;
+}
+
+bool video_dequeue()
+{
+    pthread_mutex_lock(&video_queue.mutex);
+        /* if queue is empty then wait for producer */
+        if (video_queue.size == 0)
+            pthread_cond_wait(&video_queue.not_empty, &video_queue.mutex);
+
+        /* dequeue the next four video frames */
+        for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+            plm_frame_t *saved = &video_queue.frames[i + video_queue.tail * VIDEO_IDX_COUNT];
+            if (!update_video_texture(saved->y.data, i, VIDEO_PLANE_Y))   return false;
+            if (!update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB)) return false;
+            if (!update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR)) return false;
+        }
+        video_queue.tail = (video_queue.tail + 1) % MAX_QUEUED_FRAMES;
+        video_queue.size--;
+        pthread_cond_signal(&video_queue.not_full);
+    pthread_mutex_unlock(&video_queue.mutex);
+
+    return true;
+}
+
+void *producer(void *arg)
+{
+    (void)arg;
+    while (true) {
+        if (!video_enqueue()) {
+            /* loop all videos even if just one has finished */
+            for (size_t i = 0; i < VIDEO_IDX_COUNT; i++)
+                plm_rewind(video_textures.plms[i]);
+        }
+    };
+    nob_log(NOB_INFO, "producer finished");
+    return NULL;
+}
 
 typedef struct {
     int idx;
@@ -179,63 +364,6 @@ void log_shader_mode(Shader_Mode mode)
     }
 }
 
-bool load_texture(Image img, size_t img_idx)
-{
-    bool result = true;
-
-    /* create staging buffer for image */
-    Vk_Buffer stg_buff;
-    stg_buff.size  = img.width * img.height * format_to_size(img.format);
-    stg_buff.count = img.width * img.height;
-    if (!vk_stg_buff_init(&stg_buff, img.data, false)) return false;
-
-    /* create the image */
-    Vk_Image vk_img = {
-        .extent  = {img.width, img.height},
-        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = VK_FORMAT_R8G8B8A8_UNORM,
-    };
-    result = vk_img_init(
-        &vk_img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    if (!result) nob_return_defer(false);
-    result = transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
-    if (!result) nob_return_defer(false);
-    if (!vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent)) nob_return_defer(false);
-    result = transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
-    if (!result) nob_return_defer(false);
-
-    /* create image view */
-    VkImageView img_view;
-    if (!vk_img_view_init(vk_img, &img_view)) nob_return_defer(false);
-
-    /* create sampler */
-    VkSampler sampler;
-    if (!vk_sampler_init(&sampler)) return false;
-
-    Vk_Texture texture = {
-        .view = img_view,
-        .sampler = sampler,
-        .img = vk_img,
-    };
-    textures[img_idx] = texture;
-
-defer:
-    vk_buff_destroy(stg_buff);
-    return result;
-
-}
-
 bool load_points(const char *file, Point_Cloud_Layer *pc)
 {
     bool result = true;
@@ -302,13 +430,22 @@ bool setup_ds_layouts()
 {
     /* render.comp shader layout */
     VkDescriptorSetLayoutBinding cs_render_bindings[] = {
-        {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(2, STORAGE_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(4, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(5, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(6, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(0,  UNIFORM_BUFFER,         COMPUTE_BIT)},
+        {DS_BINDING(1,  STORAGE_BUFFER,         COMPUTE_BIT)},
+        {DS_BINDING(2,  STORAGE_BUFFER,         COMPUTE_BIT)},
+        /* 3 samplers for each plane (y, cb, & cr) times four videos */
+        {DS_BINDING(3,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(4,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(5,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(6,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(7,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(8,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(9,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(10, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(11, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(12, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(13, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(14, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -339,11 +476,14 @@ bool setup_ds_layouts()
 
 bool setup_ds_pool()
 {
+     /* 1 in sst.frag + 12 in render.comp * MAX_LOD */
+    size_t sampler_count = 1 + VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT * MAX_LOD;
+
     VkDescriptorPoolSize pool_sizes[] = {
-        {DS_POOL(UNIFORM_BUFFER, 1)},                       // 1 in render.comp
-        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},             // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
-        {DS_POOL(COMBINED_IMAGE_SAMPLER, 1 + 4 * MAX_LOD)}, // 1 in sst.frag + 4 in render.comp * MAX_LOD
-        {DS_POOL(STORAGE_IMAGE, 1)},                        // 1 in resolve.comp
+        {DS_POOL(UNIFORM_BUFFER, 1)},                    // 1 in render.comp
+        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},          // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count},
+        {DS_POOL(STORAGE_IMAGE, 1)},                     // 1 in resolve.comp
     };
 
     VkDescriptorPoolCreateInfo pool_ci = {
@@ -403,25 +543,125 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         .buffer = frame_buff.handle,
         .range  = frame_buff.size,
     };
-    VkDescriptorImageInfo img_infos[NUM_CCTVS] = {0};
-    for (size_t i = 0; i < NUM_CCTVS; i++) {
-        img_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_infos[i].imageView   = textures[i].view;
-        img_infos[i].sampler     = textures[i].sampler;
+    VkDescriptorImageInfo img_infos[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT] = {0};
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        img_infos[VIDEO_PLANE_Y  + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_infos[VIDEO_PLANE_Y  + i * VIDEO_PLANE_COUNT].imageView   = video_textures[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].view;
+        img_infos[VIDEO_PLANE_Y  + i * VIDEO_PLANE_COUNT].sampler     = video_textures[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].sampler;
+        img_infos[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_infos[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].imageView   = video_textures[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].view;
+        img_infos[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].sampler     = video_textures[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].sampler;
+        img_infos[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        img_infos[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].imageView   = video_textures[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].view;
+        img_infos[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].sampler     = video_textures[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].sampler;
+    }
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
+            img_infos[j + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            img_infos[j + i * VIDEO_PLANE_COUNT].imageView   = video_textures[j + i * VIDEO_PLANE_COUNT].view;
+            img_infos[j + i * VIDEO_PLANE_COUNT].sampler     = video_textures[j + i * VIDEO_PLANE_COUNT].sampler;
+        }
     }
     VkWriteDescriptorSet writes[] = {
         /* render.comp */
-        {DS_WRITE_BUFF(0, UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
-        {DS_WRITE_BUFF(1, STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
-        {DS_WRITE_BUFF(2, STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
-        {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
-        {DS_WRITE_IMG (4, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
-        {DS_WRITE_IMG (5, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
-        {DS_WRITE_IMG (6, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[3])},
+        {DS_WRITE_BUFF(0,  UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
+        {DS_WRITE_BUFF(1,  STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
+        {DS_WRITE_BUFF(2,  STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
+        {DS_WRITE_IMG (3,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
+        {DS_WRITE_IMG (4,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
+        {DS_WRITE_IMG (5,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
+        {DS_WRITE_IMG (6,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[3])},
+        {DS_WRITE_IMG (7,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[4])},
+        {DS_WRITE_IMG (8,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[5])},
+        {DS_WRITE_IMG (9,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[6])},
+        {DS_WRITE_IMG (10, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[7])},
+        {DS_WRITE_IMG (11, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[8])},
+        {DS_WRITE_IMG (12, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[9])},
+        {DS_WRITE_IMG (13, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[10])},
+        {DS_WRITE_IMG (14, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[11])},
     };
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
     return true;
+}
+
+bool init_video_texture(void *data, int width, int height, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+{
+    bool result = true;
+
+    /* create staging buffer for image */
+    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
+    stg_buff->size  = width * height * format_to_size(VK_FORMAT_R8_UNORM);
+    stg_buff->count = width * height;
+    if (!vk_stg_buff_init(stg_buff, data, true)) return false;
+
+    /* create the image */
+    Vk_Image vk_img = {
+        .extent  = {width, height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = VK_FORMAT_R8_UNORM,
+    };
+    result = vk_img_init(
+        &vk_img,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (!result) return false;
+
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    /* create image view */
+    VkImageView img_view;
+    if (!vk_img_view_init(vk_img, &img_view)) {
+        nob_log(NOB_ERROR, "failed to create image view");
+        return false;
+    };
+
+    VkSampler sampler;
+    if (!vk_sampler_init(&sampler)) return false;
+
+    Vk_Texture plane = {
+        .view = img_view,
+        .sampler = sampler,
+        .img = vk_img,
+    };
+    video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT] = plane;
+
+    return true;
+}
+
+bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+{
+    bool result = true;
+
+    /* create staging buffer for image */
+    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
+    memcpy(stg_buff->mapped, data, stg_buff->size);
+
+    Vk_Image vk_img = video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT].img;
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
+    transition_img_layout(
+        vk_img.handle,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
+    return result;
 }
 
 bool build_compute_cmds(size_t highest_lod)
@@ -604,23 +844,47 @@ int main(int argc, char **argv)
     size_t lod = 0;
     if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
 
-    /* load images into memory */
-    Image imgs[NUM_CCTVS] = {0};
-    for (size_t i = 0; i < NUM_CCTVS; i++) {
-        const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
-        imgs[i] = load_image(img_name);
-        if (!imgs[i].data) {
-            nob_log(NOB_ERROR, "failed to load png file %s", img_name);
-            return 1;
-        }
-    }
-
     /* initialize window and Vulkan */
     if (argc > 4) {
         init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
         set_window_pos(atoi(argv[1]), atoi(argv[2]));
     } else {
         init_window(1600, 900, "arena point cloud rasterization");
+    }
+
+    /* load videos into plm */
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        const char *file_name = nob_temp_sprintf("res/%s.mpg", video_names[i]);
+        plm_t *plm = plm_create_with_filename(file_name);
+        if (!plm) {
+            nob_log(NOB_ERROR, "could not open file %s", file_name);
+            return 1;
+        } else {
+            video_textures.plms[i] = plm;
+            plm_set_audio_enabled(plm, FALSE);
+            int width  = plm_get_width(plm);
+            int height = plm_get_height(plm);
+            video_textures.aspects[i] = (float)width / height;
+        }
+    }
+
+    /* decode one frame initialize video textures */
+    plm_frame_t *frame = NULL;
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        frame = plm_decode_video(video_textures.plms[i]);
+        size_t y_size  = frame->y.width  * frame->y.height;
+        size_t cb_size = frame->cb.width * frame->cb.height;
+        size_t cr_size = frame->cr.width * frame->cr.height;
+        video_textures.initial_frames[i] = *frame; // do a shallow copy first
+        video_textures.initial_frames[i].y.data  = malloc(y_size);
+        video_textures.initial_frames[i].cb.data = malloc(cb_size);
+        video_textures.initial_frames[i].cr.data = malloc(cr_size);
+        nob_log(NOB_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
+        nob_log(NOB_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
+        nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
+        if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
+        if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
+        if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
     }
 
     /* camera state tracking */
@@ -632,11 +896,6 @@ int main(int argc, char **argv)
     int cam_order[4] = {0};
     Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
 
-    /* upload resources to GPU */
-    for (size_t i = 0; i < NUM_CCTVS; i++) {
-       if (!load_texture(imgs[i], i)) return 1;
-       free(imgs[i].data);
-    }
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
