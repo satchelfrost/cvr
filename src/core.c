@@ -20,7 +20,7 @@
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
 #define GAMEPAD_ROT_SENSITIVITY 1.0f
-#define CAMERA_ROTATION_SPEED 1.0f
+#define CAMERA_ROTATION_SPEED 0.1f
 #define MAX_MOUSE_BUTTONS 8
 #define MAX_GAMEPAD_BUTTONS 32
 #define MAX_GAMEPAD_AXIS 8
@@ -802,8 +802,8 @@ void update_camera_free(Camera *camera)
     if (lr <= -DEAD_ZONE) camera_move_right(camera,   -move_speed * lr_norm);
     if (fb >=  DEAD_ZONE) camera_move_forward(camera, -move_speed * fb_norm);
     if (lr >=  DEAD_ZONE) camera_move_right(camera,    move_speed * lr_norm);
-    if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed);
-    if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed);
+    if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed / 2.0f);
+    if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed / 2.0f);
 
     /* keyboard movement */
     if (is_key_down(KEY_LEFT_SHIFT)) move_speed *= 10.0f;

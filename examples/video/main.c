@@ -45,7 +45,6 @@ const char *video_names[] = {
 typedef struct {
     Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
     Vk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
-    Image img[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
     plm_t *plms[VIDEO_IDX_COUNT];
     float aspects[VIDEO_IDX_COUNT];
     plm_frame_t initial_frames[VIDEO_IDX_COUNT];

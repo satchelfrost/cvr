@@ -16,7 +16,7 @@
 #define MAX_LOD 7
 #define NUM_CCTVS 4
 // #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
-// #define HIGH_RES          // high-res vs. low res videos
+#define HIGH_RES          // high-res vs. low res videos
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -94,29 +94,23 @@ typedef enum {
 const char *video_names[] = {
 #ifdef HIGH_RES
     "suite_e_1280x960",
-    "suite_nw_1280x720",
-    "suite_se_1280x720",
     "suite_w_1280x960",
+    "suite_se_1280x720",
+    "suite_nw_1280x720",
 #else
     "suite_e_960x720",
-    "suite_nw_960x540",
-    "suite_se_960x540",
     "suite_w_960x720",
+    "suite_se_960x540",
+    "suite_nw_960x540",
 #endif
 };
 
 typedef struct {
     Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
     Vk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
-    Image img[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
     plm_t *plms[VIDEO_IDX_COUNT];
     float aspects[VIDEO_IDX_COUNT];
     plm_frame_t initial_frames[VIDEO_IDX_COUNT];
-    // VkDescriptorSet ds_sets[VIDEO_IDX_COUNT];
-    // VkDescriptorSetLayout ds_layout;
-    // VkDescriptorPool ds_pool;
-    // VkPipelineLayout pl_layout;
-    // VkPipeline gfx_pl;
 } Video_Textures;
 
 Video_Textures video_textures = {0};
@@ -430,22 +424,16 @@ bool setup_ds_layouts()
 {
     /* render.comp shader layout */
     VkDescriptorSetLayoutBinding cs_render_bindings[] = {
-        {DS_BINDING(0,  UNIFORM_BUFFER,         COMPUTE_BIT)},
-        {DS_BINDING(1,  STORAGE_BUFFER,         COMPUTE_BIT)},
-        {DS_BINDING(2,  STORAGE_BUFFER,         COMPUTE_BIT)},
-        /* 3 samplers for each plane (y, cb, & cr) times four videos */
-        {DS_BINDING(3,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(4,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(5,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(6,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(7,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(8,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(9,  COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(10, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(11, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(12, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(13, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
-        {DS_BINDING(14, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(0,  UNIFORM_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(1,  STORAGE_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(2,  STORAGE_BUFFER, COMPUTE_BIT)},
+        {
+            .binding = 3,
+            .descriptorCount = VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+
+        }
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -482,7 +470,7 @@ bool setup_ds_pool()
     VkDescriptorPoolSize pool_sizes[] = {
         {DS_POOL(UNIFORM_BUFFER, 1)},                    // 1 in render.comp
         {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},          // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
-        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count},
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count)},
         {DS_POOL(STORAGE_IMAGE, 1)},                     // 1 in resolve.comp
     };
 
@@ -545,21 +533,10 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
     };
     VkDescriptorImageInfo img_infos[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT] = {0};
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        img_infos[VIDEO_PLANE_Y  + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_infos[VIDEO_PLANE_Y  + i * VIDEO_PLANE_COUNT].imageView   = video_textures[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].view;
-        img_infos[VIDEO_PLANE_Y  + i * VIDEO_PLANE_COUNT].sampler     = video_textures[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].sampler;
-        img_infos[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_infos[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].imageView   = video_textures[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].view;
-        img_infos[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].sampler     = video_textures[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].sampler;
-        img_infos[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_infos[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].imageView   = video_textures[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].view;
-        img_infos[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].sampler     = video_textures[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].sampler;
-    }
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
             img_infos[j + i * VIDEO_PLANE_COUNT].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            img_infos[j + i * VIDEO_PLANE_COUNT].imageView   = video_textures[j + i * VIDEO_PLANE_COUNT].view;
-            img_infos[j + i * VIDEO_PLANE_COUNT].sampler     = video_textures[j + i * VIDEO_PLANE_COUNT].sampler;
+            img_infos[j + i * VIDEO_PLANE_COUNT].imageView   = video_textures.planes[j + i * VIDEO_PLANE_COUNT].view;
+            img_infos[j + i * VIDEO_PLANE_COUNT].sampler     = video_textures.planes[j + i * VIDEO_PLANE_COUNT].sampler;
         }
     }
     VkWriteDescriptorSet writes[] = {
@@ -567,18 +544,14 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         {DS_WRITE_BUFF(0,  UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
         {DS_WRITE_BUFF(1,  STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
         {DS_WRITE_BUFF(2,  STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
-        {DS_WRITE_IMG (3,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[0])},
-        {DS_WRITE_IMG (4,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[1])},
-        {DS_WRITE_IMG (5,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[2])},
-        {DS_WRITE_IMG (6,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[3])},
-        {DS_WRITE_IMG (7,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[4])},
-        {DS_WRITE_IMG (8,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[5])},
-        {DS_WRITE_IMG (9,  COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[6])},
-        {DS_WRITE_IMG (10, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[7])},
-        {DS_WRITE_IMG (11, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[8])},
-        {DS_WRITE_IMG (12, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[9])},
-        {DS_WRITE_IMG (13, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[10])},
-        {DS_WRITE_IMG (14, COMBINED_IMAGE_SAMPLER, pc_layers[lod].set, &img_infos[11])},
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = pc_layers[lod].set,
+            .dstBinding = 3,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT,
+            .pImageInfo = img_infos,
+        },
     };
     vk_update_ds(NOB_ARRAY_LEN(writes), writes);
 
@@ -775,6 +748,7 @@ void log_controls()
     nob_log(NOB_INFO, "    ------------");
     nob_log(NOB_INFO, "        [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
     nob_log(NOB_INFO, "        [C] - Change piloted camera");
+    nob_log(NOB_INFO, "        [P] - Play/Pause");
     nob_log(NOB_INFO, "        [R] - Record FPS");
     nob_log(NOB_INFO, "        [P] - Print camera info");
     nob_log(NOB_INFO, "        [Space] - Reset cameras to default position");
@@ -790,7 +764,8 @@ void log_controls()
     nob_log(NOB_INFO, "    | Other |");
     nob_log(NOB_INFO, "    ---------");
     nob_log(NOB_INFO, "        [Right Trigger] - shader mode");
-    nob_log(NOB_INFO, "        [Front Face Right Button] - Record FPS");
+    nob_log(NOB_INFO, "        [Right Face Right Button] - Play/Pause");
+    nob_log(NOB_INFO, "        [Right Face Down Button] - Record FPS");
     nob_log(NOB_INFO, "        [D Pad Left] - decrease point cloud LOD");
     nob_log(NOB_INFO, "        [D Pad Right] - increase point cloud LOD");
 }
@@ -838,7 +813,7 @@ Camera camera_defaults[4] = {0};
 int main(int argc, char **argv)
 {
     Vk_Texture storage_tex = {.img.extent = {1600, 900}};
-    Frame_Buffer frame = alloc_frame_buff();
+    Frame_Buffer frame_buff = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
     size_t lod = 0;
@@ -879,15 +854,12 @@ int main(int argc, char **argv)
         video_textures.initial_frames[i].y.data  = malloc(y_size);
         video_textures.initial_frames[i].cb.data = malloc(cb_size);
         video_textures.initial_frames[i].cr.data = malloc(cr_size);
-        nob_log(NOB_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
-        nob_log(NOB_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
-        nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
         if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
         if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
         if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
     }
 
-    /* camera state tracking */
+    /* general state tracking */
     copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
     int cam_view_idx = 0;
     int cam_move_idx = 0;
@@ -895,23 +867,30 @@ int main(int argc, char **argv)
     log_controls();
     int cam_order[4] = {0};
     Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
+    float vid_update_time = 0.0f;
+    bool playing = false;
 
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
-    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                    return 1;
+    if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))          return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
 
     /* setup descriptors */
-    if (!setup_ds_layouts())                     return 1;
-    if (!setup_ds_pool())                        return 1;
-    if (!setup_ds_sets(frame.buff, storage_tex)) return 1;
+    if (!setup_ds_layouts())                          return 1;
+    if (!setup_ds_pool())                             return 1;
+    if (!setup_ds_sets(frame_buff.buff, storage_tex)) return 1;
+
+    /* start the decoder thread */
+    video_queue_init();
+    pthread_t prod_thread;
+    pthread_create(&prod_thread, NULL, producer, NULL);
 
     /* allocate descriptor sets based on layouts */
     for (size_t i = 0; i < MAX_LOD; i++) {
         VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&cs_render_ds_layout, 1, pool)};
         if (!vk_alloc_ds(alloc, &pc_layers[i].set)) return false;
     }
-    if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
+    if (!update_render_ds_sets(ubo.buff, frame_buff.buff, lod))  return 1;
 
     /* create pipelines */
     if (!create_pipelines()) return 1;
@@ -933,7 +912,7 @@ int main(int argc, char **argv)
 
                     /* upload new buffer and update descriptor sets */
                     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
-                    if (!update_render_ds_sets(ubo.buff, frame.buff, lod))  return 1;
+                    if (!update_render_ds_sets(ubo.buff, frame_buff.buff, lod))  return 1;
                 }
 
                 /* log point count */
@@ -962,7 +941,7 @@ int main(int argc, char **argv)
             }
         }
         if (is_key_down(KEY_F)) log_fps();
-        if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
+        if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_DOWN))
             record.collecting = true;
         if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
@@ -980,6 +959,10 @@ int main(int argc, char **argv)
             nob_log(NOB_INFO, "resetting camera defaults");
             copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
         }
+        if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
+            playing = !playing;
+
+        if (playing) vid_update_time += get_frame_time();
 
         /* start collecting frame rates to average */
         if (record.collecting) {
@@ -992,6 +975,16 @@ int main(int argc, char **argv)
                 nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f", record.count, ave);
                 record.count = 0;
                 record.collecting = false;
+            }
+        }
+
+        /* grab the next video frames off of the queue */
+        if (vid_update_time > 1.0f / 30.0f && playing) {
+            if (video_dequeue()) {
+                vid_update_time = 0.0f;
+            } else {
+                nob_log(NOB_INFO, "video could not dequeue, this shouldn't happen");
+                return 1;
             }
         }
 
@@ -1016,14 +1009,23 @@ int main(int argc, char **argv)
     }
 
     wait_idle();
-    free(frame.data);
+    free(frame_buff.data);
     free(tex_buff.data);
     for (size_t i = 0; i < MAX_LOD; i++) {
         vk_buff_destroy(pc_layers[i].buff);
         free(pc_layers[i].items);
     }
-    for (size_t i = 0; i < NUM_CCTVS; i++) vk_unload_texture(&textures[i]);
-    vk_buff_destroy(frame.buff);
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        plm_destroy(video_textures.plms[i]);
+        free(video_textures.initial_frames[i].y.data);
+        free(video_textures.initial_frames[i].cb.data);
+        free(video_textures.initial_frames[i].cr.data);
+        for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
+            vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
+            vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
+        }
+    }
+    vk_buff_destroy(frame_buff.buff);
     vk_buff_destroy(ubo.buff);
     vk_buff_destroy(tex_buff.buff);
     vk_destroy_ds_pool(pool);
