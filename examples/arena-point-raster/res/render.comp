@@ -101,8 +101,8 @@ void main()
 
             /* determine if vertex can be seen by a particular cctv */
             cam_sees[i] = int((-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
-                    (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
-                    (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
+                              (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
+                              (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
         }
     }
 
