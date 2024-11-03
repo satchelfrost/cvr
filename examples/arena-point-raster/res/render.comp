@@ -21,6 +21,12 @@ struct Vertex {
     uint color;
 };
 
+#define MODE_BASE_MODEL        0
+#define MODE_PROGRESSIVE_COLOR 1
+#define MODE_SINGLE_TEX        2
+#define MODE_MULTI_TEX         3
+#define MODE_MULTI_TEX_BLEND   4
+
 /*
 * Shader Modes
 * -----
@@ -79,22 +85,25 @@ void main()
     if (pos.w <= 0 || ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0)
         return;
 
-    for (int i = 0; i < NUM_CCTVS; i++) {
-        /* convert the vertex into each cctvs clip coordinate space */
-        vec4 cam_clip = ubo.mvps[i] * vec4(vert.x, vert.y, vert.z, 1.0);
-        vec3 ndc = cam_clip.xyz / cam_clip.w;
-        vec2 uv = (ndc.xy * 0.5) + 0.5;
+    /* don't incur the cost of texture sampling if we are only interested in the colors from the model */
+    if (ubo.shader_mode != MODE_BASE_MODEL) {
+        for (int i = 0; i < NUM_CCTVS; i++) {
+            /* convert the vertex into each cctvs clip coordinate space */
+            vec4 cam_clip = ubo.mvps[i] * vec4(vert.x, vert.y, vert.z, 1.0);
+            vec3 ndc = cam_clip.xyz / cam_clip.w;
+            vec2 uv = (ndc.xy * 0.5) + 0.5;
 
-        /* calculate the final texture from the three video planes */
-        float y  = textureLod(samplers[0 + i * NUM_VIDEO_PLANES], uv, 0).r;
-        float cb = textureLod(samplers[1 + i * NUM_VIDEO_PLANES], uv, 0).r;
-        float cr = textureLod(samplers[2 + i * NUM_VIDEO_PLANES], uv, 0).r;
-        tex_colors[i] = vec4(y, cb, cr, 1.0) * rec601;
+            /* calculate the final texture from the three video planes */
+            float y  = textureLod(samplers[0 + i * NUM_VIDEO_PLANES], uv, 0).r;
+            float cb = textureLod(samplers[1 + i * NUM_VIDEO_PLANES], uv, 0).r;
+            float cr = textureLod(samplers[2 + i * NUM_VIDEO_PLANES], uv, 0).r;
+            tex_colors[i] = vec4(y, cb, cr, 1.0) * rec601;
 
-        /* determine if vertex can be seen by a particular cctv */
-        cam_sees[i] = int((-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
-                          (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
-                          (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
+            /* determine if vertex can be seen by a particular cctv */
+            cam_sees[i] = int((-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
+                    (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
+                    (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
+        }
     }
 
     uint brightness = uint((cam_sees[0] * 0.25 + cam_sees[1] * 0.25 + cam_sees[2] * 0.25 + cam_sees[3] * 0.25) * 255.0);
@@ -102,21 +111,21 @@ void main()
     vec4 temp_mix;
     float ratio_color;
     switch (ubo.shader_mode) {
-    case 0:
+    case MODE_BASE_MODEL:
         break;
-    case 1:
+    case MODE_PROGRESSIVE_COLOR:
         out_color = brightness << 16 | brightness << 8 | brightness;
         break;
-    case 2:
+    case MODE_SINGLE_TEX:
         out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
         break;
-    case 3:
+    case MODE_MULTI_TEX:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
         if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
         if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);
         if (cam_sees[ubo.cam_order_0] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
         break;
-    case 4:
+    case MODE_MULTI_TEX_BLEND:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
         if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
         if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);

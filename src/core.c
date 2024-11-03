@@ -20,7 +20,6 @@
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
 #define GAMEPAD_ROT_SENSITIVITY 1.0f
-#define CAMERA_ROTATION_SPEED 0.1f
 #define MAX_MOUSE_BUTTONS 8
 #define MAX_GAMEPAD_BUTTONS 32
 #define MAX_GAMEPAD_AXIS 8
@@ -776,13 +775,6 @@ void update_camera_free(Camera *camera)
     }
 
     float ft = get_frame_time();
-    float rot_speed = ft * CAMERA_ROTATION_SPEED;
-
-    if (is_key_down(KEY_K)) camera_pitch(camera, -rot_speed);
-    if (is_key_down(KEY_I)) camera_pitch(camera,  rot_speed);
-    if (is_key_down(KEY_L)) camera_yaw(camera,   -rot_speed);
-    if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
-
     float move_speed = CAMERA_MOVE_SPEED * ft;
 
     /* gamepad movement */

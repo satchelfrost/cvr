@@ -16,7 +16,10 @@
 #define MAX_LOD 7
 #define NUM_CCTVS 4
 // #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
-#define HIGH_RES          // high-res vs. low res videos
+
+/* which videos to use for texture sampling */
+// #define HIGH_RES
+#define MEDIUM_RES
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -91,8 +94,14 @@ typedef enum {
     VIDEO_IDX_COUNT,
 } Video_Idx;
 
+
 const char *video_names[] = {
-#ifdef HIGH_RES
+#if defined(HIGH_RES)
+    "suite_e_2560x1920",
+    "suite_w_2560x1920",
+    "suite_se_2560x1440",
+    "suite_nw_2560x1440",
+#elif defined(MEDIUM_RES)
     "suite_e_1280x960",
     "suite_w_1280x960",
     "suite_se_1280x720",
@@ -727,6 +736,21 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
     return true;
 }
 
+void log_cameras(Camera *cameras, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        Vector3 pos = cameras[i].position;
+        Vector3 up  = cameras[i].up;
+        Vector3 tg  = cameras[i].target;
+        float fov   = cameras[i].fovy;
+        nob_log(NOB_INFO, "Camera %d", i);
+        nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+        nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
+        nob_log(NOB_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
+        nob_log(NOB_INFO, "    fovy     %.2f", fov);
+    }
+}
+
 void log_controls()
 {
     nob_log(NOB_INFO, "------------");
@@ -771,6 +795,12 @@ void log_controls()
 }
 
 Camera cameras[] = {
+// cam0
+// .position = 23.33 8.50 36.84,
+// .up       = 0.00 1.00 0.00,
+// .target   = 18.39 7.75 35.86,
+// .fovy     = 45.00,
+
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -961,6 +991,7 @@ int main(int argc, char **argv)
         }
         if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             playing = !playing;
+        if (is_key_pressed(KEY_L)) log_cameras(&cameras[1], NUM_CCTVS);
 
         if (playing) vid_update_time += get_frame_time();
 
@@ -1007,6 +1038,11 @@ int main(int argc, char **argv)
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
         end_drawing();
     }
+
+    /* stop the video producer thread to avoid segfaults */
+    pthread_cancel(prod_thread);
+    pthread_join(prod_thread, NULL);
+    video_queue_destroy();
 
     wait_idle();
     free(frame_buff.data);
