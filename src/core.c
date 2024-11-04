@@ -361,6 +361,29 @@ Matrix get_proj(Camera camera)
     return proj;
 }
 
+Matrix get_proj_aspect(Camera camera, double aspect)
+{
+    Matrix proj = {0};
+    double top = camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
+
+    /* Vulkan */
+    proj.m5 *= -1.0f;
+
+    return proj;
+}
+
 void begin_mode_3d(Camera camera)
 {
     matrices.proj = get_proj(camera);

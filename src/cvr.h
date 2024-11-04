@@ -342,6 +342,7 @@ bool get_mvp_float16(float16 *mvp);
 Matrix get_view_proj();
 bool pc_sampler_init();
 Matrix get_proj(Camera camera);
+Matrix get_proj_aspect(Camera camera, double aspect);
 Color color_from_HSV(float hue, float saturation, float value);
 void wait_idle();
 void log_fps();

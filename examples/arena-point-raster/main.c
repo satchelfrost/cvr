@@ -9,7 +9,6 @@
 #define PL_MPEG_IMPLEMENTATION
 #include "pl_mpeg.h"
 
-#define FRAME_BUFF_SZ 1600  // TODO: get rid of this
 #define MAX_FPS_REC 100
 #define SUBGROUP_SZ 1024    // Subgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
@@ -72,6 +71,8 @@ typedef struct {
     int cam_order_2;
     int cam_order_3;
     float blend_ratio;
+    int frame_width;
+    int frame_height;
 } UBO_Data;
 
 typedef struct {
@@ -408,10 +409,10 @@ defer:
     return result;
 }
 
-Frame_Buffer alloc_frame_buff()
+Frame_Buffer alloc_frame_buff(size_t frame_buff_sz)
 {
     Frame_Buffer frame = {0};
-    frame.buff.count = FRAME_BUFF_SZ * FRAME_BUFF_SZ;
+    frame.buff.count = frame_buff_sz;
     frame.buff.size  = sizeof(uint64_t) * frame.buff.count;
     frame.data = malloc(frame.buff.size);
     return frame;
@@ -668,7 +669,9 @@ bool build_compute_cmds(size_t highest_lod)
         vk_compute_pl_barrier();
 
         /* resolve the frame buffer (resolve.comp shader) */
-        group_x = group_y = FRAME_BUFF_SZ / 16;
+        Window_Size win_size = get_window_size();
+        group_x = win_size.width / 16 + 1;
+        group_y = win_size.height / 16 + 1;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
 
     if (!vk_end_rec_compute()) return false;
@@ -718,7 +721,8 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
             four_cameras[i].target,
             four_cameras[i].up
         );
-        Matrix proj = get_proj(four_cameras[i]);
+        // Matrix proj = get_proj(four_cameras[i]);
+        Matrix proj = get_proj_aspect(four_cameras[i], 4.0 / 3.0);
         Matrix view_proj = MatrixMultiply(view, proj);
         Matrix mvp = MatrixMultiply(model, view_proj);
         ubo->data.cctv_mvps[i] = MatrixToFloatV(mvp);
@@ -730,6 +734,9 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
     ubo->data.cam_order_3 = cam_order[3];
     ubo->data.shader_mode = shader_mode;
     ubo->data.blend_ratio = blend_ratio;
+    Window_Size win_size = get_window_size();
+    ubo->data.frame_width = win_size.width;
+    ubo->data.frame_height = win_size.height;
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
 
@@ -801,6 +808,13 @@ Camera cameras[] = {
 // .target   = 18.39 7.75 35.86,
 // .fovy     = 45.00,
 
+// 4:3 aspect
+// position 35.41 18.88 40.50
+// up       0.00 1.00 0.00
+// target   30.62 17.51 39.46
+// fovy     45.00
+
+
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -808,10 +822,17 @@ Camera cameras[] = {
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
+    // { // cctv 1
+    //     .position   = {25.20, 9.68, 38.50},
+    //     .up         = {0.0f, 1.0f, 0.0f},
+    //     .target     = {20.30, 8.86, 37.39},
+    //     .fovy       = 45.0f,
+    //     .projection = PERSPECTIVE,
+    // },
     { // cctv 1
-        .position   = {25.20, 9.68, 38.50},
+        .position   = {35.41, 18.88, 40.50},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {20.30, 8.86, 37.39},
+        .target     = {30.62, 17.51, 39.46},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
@@ -842,8 +863,6 @@ Camera camera_defaults[4] = {0};
 
 int main(int argc, char **argv)
 {
-    Vk_Texture storage_tex = {.img.extent = {1600, 900}};
-    Frame_Buffer frame_buff = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     FPS_Record record = {.max = MAX_FPS_REC};
     size_t lod = 0;
@@ -854,8 +873,13 @@ int main(int argc, char **argv)
         init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
         set_window_pos(atoi(argv[1]), atoi(argv[2]));
     } else {
+        // init_window(1280, 960, "arena point cloud rasterization");
         init_window(1600, 900, "arena point cloud rasterization");
     }
+
+    Window_Size win_size = get_window_size();
+    Vk_Texture storage_tex = {.img.extent = {win_size.width, win_size.height}};
+    Frame_Buffer frame_buff = alloc_frame_buff(win_size.width * win_size.height);
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {

@@ -45,7 +45,8 @@ layout(binding = 0) uniform uniform_data {
     int cam_order_2;
     int cam_order_3; // index of furthest cctv from main viewing camera
     float blend_ratio;
-    //ivec3 image_size;
+    int frame_width;
+    int frame_height;
 } ubo;
 
 layout(std430, binding = 1) buffer vert_data {
@@ -138,7 +139,7 @@ void main()
     }
 
     /* determine the pixel coordinate and write to framebuffer */
-    ivec2 img_size = ivec2(1600, 900);
+    ivec2 img_size = ivec2(ubo.frame_width, ubo.frame_height);
     vec2 img_pos = (ndc.xy * 0.5 + 0.5) * img_size;
     ivec2 pixel_coords = ivec2(img_pos);
     int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
