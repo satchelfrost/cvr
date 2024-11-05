@@ -722,7 +722,7 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
             four_cameras[i].up
         );
         // Matrix proj = get_proj(four_cameras[i]);
-        Matrix proj = get_proj_aspect(four_cameras[i], 4.0 / 3.0);
+        Matrix proj = get_proj_aspect(four_cameras[i], video_textures.aspects[i]);
         Matrix view_proj = MatrixMultiply(view, proj);
         Matrix mvp = MatrixMultiply(model, view_proj);
         ubo->data.cctv_mvps[i] = MatrixToFloatV(mvp);
@@ -751,9 +751,9 @@ void log_cameras(Camera *cameras, size_t count)
         Vector3 tg  = cameras[i].target;
         float fov   = cameras[i].fovy;
         nob_log(NOB_INFO, "Camera %d", i);
-        nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
-        nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
-        nob_log(NOB_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
+        nob_log(NOB_INFO, "    position {%.2f, %.2f, %.2f}", pos.x, pos.y, pos.z);
+        nob_log(NOB_INFO, "    up       {%.2f, %.2f, %.2f}", up.x, up.y, up.z);
+        nob_log(NOB_INFO, "    target   {%.2f, %.2f, %.2f}", tg.x, tg.y, tg.z);
         nob_log(NOB_INFO, "    fovy     %.2f", fov);
     }
 }
@@ -802,19 +802,6 @@ void log_controls()
 }
 
 Camera cameras[] = {
-// cam0
-// .position = 23.33 8.50 36.84,
-// .up       = 0.00 1.00 0.00,
-// .target   = 18.39 7.75 35.86,
-// .fovy     = 45.00,
-
-// 4:3 aspect
-// position 35.41 18.88 40.50
-// up       0.00 1.00 0.00
-// target   30.62 17.51 39.46
-// fovy     45.00
-
-
     { // Camera to rule all cameras
         .position   = {38.54, 23.47, 42.09},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -822,38 +809,31 @@ Camera cameras[] = {
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    // { // cctv 1
-    //     .position   = {25.20, 9.68, 38.50},
-    //     .up         = {0.0f, 1.0f, 0.0f},
-    //     .target     = {20.30, 8.86, 37.39},
-    //     .fovy       = 45.0f,
-    //     .projection = PERSPECTIVE,
-    // },
-    { // cctv 1
+    { // cctv 1 - suite e
         .position   = {35.41, 18.88, 40.50},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {30.62, 17.51, 39.46},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // cctv 2
-        .position   = {-54.02, 12.14, 22.01},
+    { // cctv 2 - suite w
+        .position   = {-64.66, 18.69, 21.02},
         .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-44.42, 9.74, 23.87},
+        .target     = {-55.18, 15.71, 22.67},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // cctv 3
-        .position   = {12.24, 15.17, 69.39},
-        .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-6.66, 8.88, 64.07},
+    { // cctv 3 - suite se
+        .position   = {15.92, 20.52, 69.19},
+        .up         = {0.02, 1.00, -0.08},
+        .target     = {-3.21, 13.57, 65.88},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
-    { // cctv 4
-        .position   = {-38.50, 15.30, -14.38},
-        .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {-18.10, 8.71, -7.94},
+    { // cctv 4 - suite nw
+        .position   = {-43.64, 15.77, -4.89},
+        .up         = {-0.01, 1.00, 0.09},
+        .target     = {-22.14, 9.92, -2.76},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },

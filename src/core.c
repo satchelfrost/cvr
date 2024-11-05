@@ -19,6 +19,7 @@
 #define MAX_CHAR_PRESSED_QUEUE 16
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
+#define CAMERA_ROT_SENSITIVITY 0.1f
 #define GAMEPAD_ROT_SENSITIVITY 1.0f
 #define MAX_MOUSE_BUTTONS 8
 #define MAX_GAMEPAD_BUTTONS 32
@@ -771,6 +772,12 @@ void camera_yaw(Camera *camera, float angle)
     camera->target = Vector3Add(camera->position, target_pos);
 }
 
+void camera_roll(Camera *camera, float angle)
+{
+    Vector3 forward = get_camera_forward(camera);
+    camera->up = Vector3RotateByAxisAngle(camera->up, forward, angle);
+}
+
 void camera_pitch(Camera *camera, float angle)
 {
     Vector3 right = get_camera_right(camera);
@@ -828,6 +835,8 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_D)) camera_move_right(camera,    move_speed);
     if (is_key_down(KEY_E)) camera_move_up(camera,  move_speed);
     if (is_key_down(KEY_Q)) camera_move_up(camera, -move_speed);
+    if (is_key_down(KEY_LEFT))  camera_roll(camera, -CAMERA_ROT_SENSITIVITY * ft);
+    if (is_key_down(KEY_RIGHT)) camera_roll(camera,  CAMERA_ROT_SENSITIVITY * ft);
 
     camera_move_to_target(camera, -get_mouse_wheel_move());
 }
