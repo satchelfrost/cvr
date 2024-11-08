@@ -65,6 +65,8 @@ Texture_Buffer tex_buff = {0};
 typedef struct {
     float16 main_cam_mvp;
     float16 cctv_mvps[NUM_CCTVS];
+    Vector4 cctv_pos[NUM_CCTVS];
+    float16 model;
     int shader_mode;
     int cam_order_0;
     int cam_order_1;
@@ -341,6 +343,7 @@ typedef enum {
     SHADER_MODE_SINGLE_TEX,
     SHADER_MODE_MULTI_TEX,
     SHADER_MODE_MULTI_TEX_BLEND,
+    SHADER_MODE_VERTEX_CLOSEST,
     SHADER_MODE_COUNT,
 } Shader_Mode;
 
@@ -361,6 +364,9 @@ void log_shader_mode(Shader_Mode mode)
         break;
     case SHADER_MODE_MULTI_TEX_BLEND:
         nob_log(NOB_INFO, "Shader mode: multi-texture with blend");
+        break;
+    case SHADER_MODE_VERTEX_CLOSEST:
+        nob_log(NOB_INFO, "Shader mode: vertex closest");
         break;
     default:
         nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
@@ -721,13 +727,19 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
             four_cameras[i].target,
             four_cameras[i].up
         );
-        // Matrix proj = get_proj(four_cameras[i]);
         Matrix proj = get_proj_aspect(four_cameras[i], video_textures.aspects[i]);
         Matrix view_proj = MatrixMultiply(view, proj);
         Matrix mvp = MatrixMultiply(model, view_proj);
         ubo->data.cctv_mvps[i] = MatrixToFloatV(mvp);
+        ubo->data.cctv_pos[i] = (Vector4) {
+            four_cameras[i].position.x,
+            four_cameras[i].position.y,
+            four_cameras[i].position.z,
+            1.0,
+        };
     }
 
+    ubo->data.model = MatrixToFloatV(model);
     ubo->data.cam_order_0 = cam_order[0];
     ubo->data.cam_order_1 = cam_order[1];
     ubo->data.cam_order_2 = cam_order[2];

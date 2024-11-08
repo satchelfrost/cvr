@@ -9,6 +9,7 @@
 vec4 tex_colors[NUM_CCTVS];
 int cam_sees[NUM_CCTVS];
 vec4 cam_clip[NUM_CCTVS];
+float distances[NUM_CCTVS];
 
 layout(push_constant) uniform constants
 {
@@ -26,6 +27,7 @@ struct Vertex {
 #define MODE_SINGLE_TEX        2
 #define MODE_MULTI_TEX         3
 #define MODE_MULTI_TEX_BLEND   4
+#define MODE_VERTEX_CLOSEST    5
 
 /*
 * Shader Modes
@@ -38,7 +40,9 @@ struct Vertex {
 */
 layout(binding = 0) uniform uniform_data {
     mat4 mvp; // main viewing camera
-    mat4 mvps[NUM_CCTVS]; // cctvs
+    mat4 mvps[NUM_CCTVS];
+    vec4 cctv_pos[NUM_CCTVS]; // cctv position in world space
+    mat4 model; // model matrix in world space
     int shader_mode;
     int cam_order_0; // index of closest cctv to main viewing camera
     int cam_order_1;
@@ -104,6 +108,10 @@ void main()
             cam_sees[i] = int((-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
                               (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
                               (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
+
+            // TODO: possibly move this outside of the loop
+            /* calculate the distances from the vertex to the cctvs in world space */
+            distances[i] = distance(ubo.model * vec4(vert.x, vert.y, vert.z, 1.0), ubo.cctv_pos[i]);
         }
     }
 
@@ -135,6 +143,80 @@ void main()
         if (cam_sees[ubo.cam_order_0] > 0) {
             out_color = (cam_sees[ubo.cam_order_1] > 0) ? vec3_to_uint(temp_mix.rgb) : vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
         }
+        break;
+    case MODE_VERTEX_CLOSEST:
+        //if (distances[0] < distances[1] &&
+        //    distances[0] < distances[2] &&
+        //    distances[0] < distances[3])
+        //    out_color = vec3_to_uint(vec3(1.0, 0.0, 0.0));
+        //if (distances[1] < distances[0] &&
+        //    distances[1] < distances[2] &&
+        //    distances[1] < distances[3])
+        //    out_color = vec3_to_uint(vec3(0.0, 1.0, 0.0));
+        //if (distances[2] < distances[0] &&
+        //    distances[2] < distances[1] &&
+        //    distances[2] < distances[3])
+        //    out_color = vec3_to_uint(vec3(0.0, 0.0, 1.0));
+        //if (distances[3] < distances[0] &&
+        //    distances[3] < distances[1] &&
+        //    distances[3] < distances[2])
+        //    out_color = vec3_to_uint(vec3(1.0, 1.0, 0.0));
+
+        if (distances[0] < distances[1] && distances[0] < distances[2] && distances[0] < distances[3]) {
+            if (cam_sees[0] > 0) out_color = vec3_to_uint(vec3(1.0, 0.0, 0.0));
+            else                 out_color = vec3_to_uint(vec3(0.5, 0.0, 0.0));
+        }
+        if (distances[1] < distances[0] && distances[1] < distances[2] && distances[1] < distances[3]) {
+            if (cam_sees[1] > 0) out_color = vec3_to_uint(vec3(0.0, 1.0, 0.0));
+            else                 out_color = vec3_to_uint(vec3(0.0, 0.5, 0.0));
+        }
+        if (distances[2] < distances[0] && distances[2] < distances[1] && distances[2] < distances[3]) {
+            if (cam_sees[2] > 0) out_color = vec3_to_uint(vec3(0.0, 0.0, 1.0));
+            else                 out_color = vec3_to_uint(vec3(0.0, 0.0, 0.5));
+        }
+        if (distances[3] < distances[0] && distances[3] < distances[1] && distances[3] < distances[2]) {
+            if (cam_sees[3] > 0) out_color = vec3_to_uint(vec3(1.0, 1.0, 0.0));
+            else                 out_color = vec3_to_uint(vec3(0.5, 0.5, 0.0));
+        }
+
+        //if (distances[0] < distances[1] &&
+        //    distances[0] < distances[2] &&
+        //    distances[0] < distances[3] &&
+        //    cam_sees[0] > 0)
+        //    out_color = vec3_to_uint(tex_colors[0].rgb);
+        //if (distances[1] < distances[0] &&
+        //    distances[1] < distances[2] &&
+        //    distances[1] < distances[3] &&
+        //    cam_sees[1] > 0)
+        //    out_color = vec3_to_uint(tex_colors[1].rgb);
+        //if (distances[2] < distances[0] &&
+        //    distances[2] < distances[1] &&
+        //    distances[2] < distances[3] &&
+        //    cam_sees[2] > 0)
+        //    out_color = vec3_to_uint(tex_colors[2].rgb);
+        //if (distances[3] < distances[0] &&
+        //    distances[3] < distances[1] &&
+        //    distances[3] < distances[2] &&
+        //    cam_sees[3] > 0)
+        //    out_color = vec3_to_uint(tex_colors[3].rgb);
+
+        //if (distances[0] < distances[1] && distances[0] < distances[2] && distances[0] < distances[3]) {
+        //    if (cam_sees[0] > 0) out_color = vec3_to_uint(tex_colors[0].rgb);
+        //    else                 out_color = vec3_to_uint(tex_colors[1].rgb);
+        //}
+        //if (distances[1] < distances[0] && distances[1] < distances[2] && distances[1] < distances[3]) {
+        //    if (cam_sees[1] > 0) out_color = vec3_to_uint(tex_colors[1].rgb);
+        //    else                 out_color = vec3_to_uint(tex_colors[2].rgb);
+        //}
+        //if (distances[2] < distances[0] && distances[2] < distances[1] && distances[2] < distances[3]) {
+        //    if (cam_sees[2] > 0) out_color = vec3_to_uint(tex_colors[2].rgb);
+        //    else                 out_color = vec3_to_uint(tex_colors[0].rgb);
+        //}
+        //if (distances[3] < distances[0] && distances[3] < distances[1] && distances[3] < distances[2]) {
+        //    if (cam_sees[3] > 0) out_color = vec3_to_uint(tex_colors[3].rgb);
+        //    else                 out_color = vec3_to_uint(tex_colors[1].rgb);
+        //}
+
         break;
     }
 
