@@ -175,7 +175,7 @@ void video_queue_init()
     pthread_cond_init(&video_queue.not_full, NULL);
     pthread_cond_init(&video_queue.not_empty, NULL);
 
-    /* use a single frame to determine how much memory needs allocated for a decoded frame */
+    /* use a initial frame to determine memory requirements */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         for (size_t j = 0; j < MAX_QUEUED_FRAMES; j++) {
             plm_frame_t *frame = &video_textures.initial_frames[i];
@@ -338,35 +338,43 @@ void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
 }
 
 typedef enum {
-    SHADER_MODE_BASE_MODEL,
-    SHADER_MODE_PROGRESSIVE_COLOR,
-    SHADER_MODE_SINGLE_TEX,
-    SHADER_MODE_MULTI_TEX,
-    SHADER_MODE_MULTI_TEX_BLEND,
-    SHADER_MODE_VERTEX_CLOSEST,
+    SHADER_MODE_MODEL,
+    SHADER_MODE_FRUSTUM_OVERLAP,
+    SHADER_MODE_SINGLE_VID_TEX,
+    SHADER_MODE_MULTI_VID_TEX,
+    SHADER_MODE_MULTI_VID_TEX_BLEND,
+    SHADER_MODE_VERT_COLORED_BY_CCTV,
+    SHADER_MODE_VERT_CLOSEST_CCTV_TEX,
+    SHADER_MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK,
     SHADER_MODE_COUNT,
 } Shader_Mode;
 
 void log_shader_mode(Shader_Mode mode)
 {
     switch (mode) {
-    case SHADER_MODE_BASE_MODEL:
-        nob_log(NOB_INFO, "Shader mode: base model");
+    case SHADER_MODE_MODEL:
+        nob_log(NOB_INFO, "Shader mode: just the point cloud model");
         break;
-    case SHADER_MODE_PROGRESSIVE_COLOR:
-        nob_log(NOB_INFO, "Shader mode: progressive color");
+    case SHADER_MODE_FRUSTUM_OVERLAP:
+        nob_log(NOB_INFO, "Shader mode: cctv frustum overlap view");
         break;
-    case SHADER_MODE_SINGLE_TEX:
-        nob_log(NOB_INFO, "Shader mode: single texture");
+    case SHADER_MODE_SINGLE_VID_TEX:
+        nob_log(NOB_INFO, "Shader mode: single video texture");
         break;
-    case SHADER_MODE_MULTI_TEX:
-        nob_log(NOB_INFO, "Shader mode: multi-texture");
+    case SHADER_MODE_MULTI_VID_TEX:
+        nob_log(NOB_INFO, "Shader mode: multiple video textures");
         break;
-    case SHADER_MODE_MULTI_TEX_BLEND:
-        nob_log(NOB_INFO, "Shader mode: multi-texture with blend");
+    case SHADER_MODE_MULTI_VID_TEX_BLEND:
+        nob_log(NOB_INFO, "Shader mode: multiple video textures with smooth blend");
         break;
-    case SHADER_MODE_VERTEX_CLOSEST:
-        nob_log(NOB_INFO, "Shader mode: vertex closest");
+    case SHADER_MODE_VERT_COLORED_BY_CCTV:
+        nob_log(NOB_INFO, "Shader mode: vertex colored by closest cctv (darker regions cannot be seen by closest cctv)");
+        break;
+    case SHADER_MODE_VERT_CLOSEST_CCTV_TEX:
+        nob_log(NOB_INFO, "Shader mode: vertex gets texture color from closest cctv");
+        break;
+    case SHADER_MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK:
+        nob_log(NOB_INFO, "Shader mode: vertex gets texture color from closest cctv, and fallback texture (next closest)");
         break;
     default:
         nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
@@ -422,18 +430,6 @@ Frame_Buffer alloc_frame_buff(size_t frame_buff_sz)
     frame.buff.size  = sizeof(uint64_t) * frame.buff.count;
     frame.data = malloc(frame.buff.size);
     return frame;
-}
-
-void alloc_tex_buff(Image img)
-{
-    tex_buff.buff.count = img.width * img.height;
-    tex_buff.buff.size = sizeof(uint32_t) * tex_buff.buff.count;
-    tex_buff.data = malloc(tex_buff.buff.size);
-    // uint32_t red = 0xff0000ff;
-    for (size_t i = 0; i < tex_buff.buff.count; i++) {
-        memcpy(tex_buff.data + i * sizeof(uint32_t), img.data + i * sizeof(uint32_t), sizeof(uint32_t));
-        // memcpy(tex_buff.data + i * sizeof(uint32_t), &red, sizeof(uint32_t));
-    }
 }
 
 bool setup_ds_layouts()
@@ -789,7 +785,8 @@ void log_controls()
     nob_log(NOB_INFO, "    ------------");
     nob_log(NOB_INFO, "    | Hot keys |");
     nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "        [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
+    nob_log(NOB_INFO, "        [M] - Next shader mode");
+    nob_log(NOB_INFO, "        [Shift + M] - Previous shader mode");
     nob_log(NOB_INFO, "        [C] - Change piloted camera");
     nob_log(NOB_INFO, "        [P] - Play/Pause");
     nob_log(NOB_INFO, "        [R] - Record FPS");
@@ -806,7 +803,8 @@ void log_controls()
     nob_log(NOB_INFO, "    ---------");
     nob_log(NOB_INFO, "    | Other |");
     nob_log(NOB_INFO, "    ---------");
-    nob_log(NOB_INFO, "        [Right Trigger] - shader mode");
+    nob_log(NOB_INFO, "        [Right Trigger] - Next shader mode");
+    nob_log(NOB_INFO, "        [Left Trigger] - Previous shader mode");
     nob_log(NOB_INFO, "        [Right Face Right Button] - Play/Pause");
     nob_log(NOB_INFO, "        [Right Face Down Button] - Record FPS");
     nob_log(NOB_INFO, "        [D Pad Left] - decrease point cloud LOD");
@@ -865,7 +863,6 @@ int main(int argc, char **argv)
         init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
         set_window_pos(atoi(argv[1]), atoi(argv[2]));
     } else {
-        // init_window(1280, 960, "arena point cloud rasterization");
         init_window(1600, 900, "arena point cloud rasterization");
     }
 
@@ -889,7 +886,7 @@ int main(int argc, char **argv)
         }
     }
 
-    /* decode one frame initialize video textures */
+    /* decode one frame initialize from each video */
     plm_frame_t *frame = NULL;
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         frame = plm_decode_video(video_textures.plms[i]);
@@ -912,7 +909,7 @@ int main(int argc, char **argv)
     Camera *camera = &cameras[cam_view_idx];
     log_controls();
     int cam_order[4] = {0};
-    Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
+    Shader_Mode shader_mode = SHADER_MODE_MODEL;
     float vid_update_time = 0.0f;
     bool playing = false;
 
@@ -989,11 +986,13 @@ int main(int argc, char **argv)
         if (is_key_down(KEY_F)) log_fps();
         if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_DOWN))
             record.collecting = true;
-        if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
+        if ((is_key_pressed(KEY_M) && !is_key_down(KEY_LEFT_SHIFT)) ||
+             is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
         }
-        if (is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_TRIGGER_1)) {
+        if ((is_key_pressed(KEY_M) && is_key_down(KEY_LEFT_SHIFT)) ||
+             is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_TRIGGER_1)) {
             shader_mode = (shader_mode - 1 + SHADER_MODE_COUNT) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
         }
