@@ -19,8 +19,8 @@
 #define MAX_CHAR_PRESSED_QUEUE 16
 #define CAMERA_MOVE_SPEED 10.0f
 #define CAMERA_MOUSE_MOVE_SENSITIVITY 0.001f
+#define CAMERA_ROT_SENSITIVITY 0.1f
 #define GAMEPAD_ROT_SENSITIVITY 1.0f
-#define CAMERA_ROTATION_SPEED 1.0f
 #define MAX_MOUSE_BUTTONS 8
 #define MAX_GAMEPAD_BUTTONS 32
 #define MAX_GAMEPAD_AXIS 8
@@ -342,6 +342,29 @@ Matrix get_proj(Camera camera)
 {
     Matrix proj = {0};
     double aspect = vk_ctx.extent.width / (double) vk_ctx.extent.height;
+    double top = camera.fovy / 2.0;
+    double right = top * aspect;
+    switch (camera.projection) {
+    case PERSPECTIVE:
+        proj  = MatrixPerspective(camera.fovy * DEG2RAD, aspect, Z_NEAR, Z_FAR);
+        break;
+    case ORTHOGRAPHIC:
+        proj  = MatrixOrtho(-right, right, -top, top, -Z_FAR, Z_FAR);
+        break;
+    default:
+        assert(0 && "unrecognized camera mode");
+        break;
+    }
+
+    /* Vulkan */
+    proj.m5 *= -1.0f;
+
+    return proj;
+}
+
+Matrix get_proj_aspect(Camera camera, double aspect)
+{
+    Matrix proj = {0};
     double top = camera.fovy / 2.0;
     double right = top * aspect;
     switch (camera.projection) {
@@ -749,6 +772,12 @@ void camera_yaw(Camera *camera, float angle)
     camera->target = Vector3Add(camera->position, target_pos);
 }
 
+void camera_roll(Camera *camera, float angle)
+{
+    Vector3 forward = get_camera_forward(camera);
+    camera->up = Vector3RotateByAxisAngle(camera->up, forward, angle);
+}
+
 void camera_pitch(Camera *camera, float angle)
 {
     Vector3 right = get_camera_right(camera);
@@ -776,13 +805,6 @@ void update_camera_free(Camera *camera)
     }
 
     float ft = get_frame_time();
-    float rot_speed = ft * CAMERA_ROTATION_SPEED;
-
-    if (is_key_down(KEY_K)) camera_pitch(camera, -rot_speed);
-    if (is_key_down(KEY_I)) camera_pitch(camera,  rot_speed);
-    if (is_key_down(KEY_L)) camera_yaw(camera,   -rot_speed);
-    if (is_key_down(KEY_J)) camera_yaw(camera,    rot_speed);
-
     float move_speed = CAMERA_MOVE_SPEED * ft;
 
     /* gamepad movement */
@@ -802,8 +824,8 @@ void update_camera_free(Camera *camera)
     if (lr <= -DEAD_ZONE) camera_move_right(camera,   -move_speed * lr_norm);
     if (fb >=  DEAD_ZONE) camera_move_forward(camera, -move_speed * fb_norm);
     if (lr >=  DEAD_ZONE) camera_move_right(camera,    move_speed * lr_norm);
-    if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed);
-    if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed);
+    if (is_gamepad_button_down(GAMEPAD_BUTTON_RIGHT_TRIGGER_2)) camera_move_up(camera, move_speed / 2.0f);
+    if (is_gamepad_button_down(GAMEPAD_BUTTON_LEFT_TRIGGER_2))  camera_move_up(camera, -move_speed / 2.0f);
 
     /* keyboard movement */
     if (is_key_down(KEY_LEFT_SHIFT)) move_speed *= 10.0f;
@@ -813,6 +835,8 @@ void update_camera_free(Camera *camera)
     if (is_key_down(KEY_D)) camera_move_right(camera,    move_speed);
     if (is_key_down(KEY_E)) camera_move_up(camera,  move_speed);
     if (is_key_down(KEY_Q)) camera_move_up(camera, -move_speed);
+    if (is_key_down(KEY_LEFT))  camera_roll(camera, -CAMERA_ROT_SENSITIVITY * ft);
+    if (is_key_down(KEY_RIGHT)) camera_roll(camera,  CAMERA_ROT_SENSITIVITY * ft);
 
     camera_move_to_target(camera, -get_mouse_wheel_move());
 }

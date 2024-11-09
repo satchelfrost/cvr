@@ -3,6 +3,14 @@
 #extension GL_ARB_gpu_shader_int64 : enable
 #extension GL_EXT_shader_atomic_int64 : enable
 
+#define NUM_CCTVS 4
+#define NUM_VIDEO_PLANES 3
+
+vec4 tex_colors[NUM_CCTVS];
+int cam_sees[NUM_CCTVS];
+vec4 cam_clip[NUM_CCTVS];
+float distances[NUM_CCTVS];
+
 layout(push_constant) uniform constants
 {
     uint offset;
@@ -14,25 +22,29 @@ struct Vertex {
     uint color;
 };
 
-/*
-* Shader Modes
-* -----
-* 0 - Base model mode
-* 1 - Progressive color based on number of cameras that can see a point
-* 2 - Single texture mode, i.e. texture from single cctv
-* 3 - Multi-texture mode
-* 4 - Multi-texture mode with blend
-*/
+/* shader modes described in more detail in log_shader_mode() */
+#define MODE_MODEL                            0
+#define MODE_FRUSTUM_OVERLAP                  1
+#define MODE_SINGLE_VID_TEX                   2
+#define MODE_MULTI_VID_TEX                    3
+#define MODE_MULTI_VID_TEX_BLEND              4
+#define MODE_VERT_COLORED_BY_CCTV             5
+#define MODE_VERT_CLOSEST_CCTV_TEX            6
+#define MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK 7
+
 layout(binding = 0) uniform uniform_data {
-    mat4 mvp; // main viewing camera
-    mat4 mvps[4]; // cctvs
+    mat4 mvp;                 // main viewing camera's view-proj w/ model
+    mat4 mvps[NUM_CCTVS];     // cctv camera's view-proj w/ model
+    vec4 cctv_pos[NUM_CCTVS]; // cctv position in world space
+    mat4 model;               // model matrix in world space
     int shader_mode;
-    int cam_order_0; // index of closest cctv to main viewing camera
+    int cam_order_0;          // index of closest cctv to main viewing camera
     int cam_order_1;
     int cam_order_2;
-    int cam_order_3; // index of furthest cctv from main viewing camera
-    float blend_ratio;
-    //ivec3 image_size;
+    int cam_order_3;          // index of furthest cctv from main viewing camera
+    float blend_ratio;        // blend ratio for two closest cctvs to main viewing camera
+    int frame_width;
+    int frame_height;
 } ubo;
 
 layout(std430, binding = 1) buffer vert_data {
@@ -43,19 +55,21 @@ layout(std430, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 
-layout(binding = 3) uniform sampler2D tex_sampler_0;
-layout(binding = 4) uniform sampler2D tex_sampler_1;
-layout(binding = 5) uniform sampler2D tex_sampler_2;
-layout(binding = 6) uniform sampler2D tex_sampler_3;
+/* uses binding 3 -> 14 */
+layout(binding = 3) uniform sampler2D samplers[NUM_CCTVS * NUM_VIDEO_PLANES];
 
-vec4 tex_colors[4];
-int cam_sees[4];
+mat4 rec601 = mat4(
+    1.16438,  0.00000,  1.59603, -0.87079,
+    1.16438, -0.39176, -0.81297,  0.52959,
+    1.16438,  2.01723,  0.00000, -1.08139,
+    0, 0, 0, 1
+);
 
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
 uint vec3_to_uint(vec3 color)
 {
-    color = color * 255;
+    color = min(color * 255, 255);
     return uint(color.b) << 16 | uint(color.g) << 8 | uint(color.r);
 }
 
@@ -70,57 +84,51 @@ void main()
     if (pos.w <= 0 || ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0)
         return;
 
-    /* determine the color of the point cloud (model, debug, single-texture, or multi-texture) */
-    vec4 cam0_pos = ubo.mvps[0] * vec4(vert.x, vert.y, vert.z, 1.0);
-    vec4 cam1_pos = ubo.mvps[1] * vec4(vert.x, vert.y, vert.z, 1.0);
-    vec4 cam2_pos = ubo.mvps[2] * vec4(vert.x, vert.y, vert.z, 1.0);
-    vec4 cam3_pos = ubo.mvps[3] * vec4(vert.x, vert.y, vert.z, 1.0);
-    vec3 ndc_0 = cam0_pos.xyz / cam0_pos.w;
-    vec3 ndc_1 = cam1_pos.xyz / cam1_pos.w;
-    vec3 ndc_2 = cam2_pos.xyz / cam2_pos.w;
-    vec3 ndc_3 = cam3_pos.xyz / cam3_pos.w;
-    vec2 uv_0 = (ndc_0.xy * 0.5) + 0.5;
-    vec2 uv_1 = (ndc_1.xy * 0.5) + 0.5;
-    vec2 uv_2 = (ndc_2.xy * 0.5) + 0.5;
-    vec2 uv_3 = (ndc_3.xy * 0.5) + 0.5;
-    tex_colors[0] = textureLod(tex_sampler_0, uv_0, 0.0);
-    tex_colors[1] = textureLod(tex_sampler_1, uv_1, 0.0);
-    tex_colors[2] = textureLod(tex_sampler_2, uv_2, 0.0);
-    tex_colors[3] = textureLod(tex_sampler_3, uv_3, 0.0);
+    /* don't incur the cost of texture sampling if we are only interested in the colors from the model */
+    if (ubo.shader_mode != MODE_MODEL) {
+        for (int i = 0; i < NUM_CCTVS; i++) {
+            /* convert the vertex into each cctvs clip coordinate space */
+            vec4 cam_clip = ubo.mvps[i] * vec4(vert.x, vert.y, vert.z, 1.0);
+            vec3 ndc = cam_clip.xyz / cam_clip.w;
+            vec2 uv = (ndc.xy * 0.5) + 0.5;
 
-    cam_sees[0] = int((-cam0_pos.w < cam0_pos.x && cam0_pos.x < cam0_pos.w) &&
-                      (-cam0_pos.w < cam0_pos.y && cam0_pos.y < cam0_pos.w) &&
-                      (-cam0_pos.w < cam0_pos.z && cam0_pos.z < cam0_pos.w));
-    cam_sees[1] = int((-cam1_pos.w < cam1_pos.x && cam1_pos.x < cam1_pos.w) &&
-                      (-cam1_pos.w < cam1_pos.y && cam1_pos.y < cam1_pos.w) &&
-                      (-cam1_pos.w < cam1_pos.z && cam1_pos.z < cam1_pos.w));
-    cam_sees[2] = int((-cam2_pos.w < cam2_pos.x && cam2_pos.x < cam2_pos.w) &&
-                      (-cam2_pos.w < cam2_pos.y && cam2_pos.y < cam2_pos.w) &&
-                      (-cam2_pos.w < cam2_pos.z && cam2_pos.z < cam2_pos.w));
-    cam_sees[3] = int((-cam3_pos.w < cam3_pos.x && cam3_pos.x < cam3_pos.w) &&
-                      (-cam3_pos.w < cam3_pos.y && cam3_pos.y < cam3_pos.w) &&
-                      (-cam3_pos.w < cam3_pos.z && cam3_pos.z < cam3_pos.w));
+            /* calculate the final texture from the three video planes */
+            float y  = textureLod(samplers[0 + i * NUM_VIDEO_PLANES], uv, 0).r;
+            float cb = textureLod(samplers[1 + i * NUM_VIDEO_PLANES], uv, 0).r;
+            float cr = textureLod(samplers[2 + i * NUM_VIDEO_PLANES], uv, 0).r;
+            tex_colors[i] = vec4(y, cb, cr, 1.0) * rec601;
+
+            /* determine if vertex can be seen by a particular cctv */
+            cam_sees[i] = int((-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
+                              (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
+                              (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
+
+            // TODO: possibly move this outside of the loop
+            /* calculate the distances from the vertex to the cctvs in world space */
+            distances[i] = distance(ubo.model * vec4(vert.x, vert.y, vert.z, 1.0), ubo.cctv_pos[i]);
+        }
+    }
 
     uint brightness = uint((cam_sees[0] * 0.25 + cam_sees[1] * 0.25 + cam_sees[2] * 0.25 + cam_sees[3] * 0.25) * 255.0);
     uint out_color = vert.color;
     vec4 temp_mix;
     float ratio_color;
     switch (ubo.shader_mode) {
-    case 0:
+    case MODE_MODEL:
         break;
-    case 1:
+    case MODE_FRUSTUM_OVERLAP:
         out_color = brightness << 16 | brightness << 8 | brightness;
         break;
-    case 2:
+    case MODE_SINGLE_VID_TEX:
         out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
         break;
-    case 3:
+    case MODE_MULTI_VID_TEX:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
         if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
         if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);
         if (cam_sees[ubo.cam_order_0] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
         break;
-    case 4:
+    case MODE_MULTI_VID_TEX_BLEND:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
         if (cam_sees[ubo.cam_order_2] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_2].rgb);
         if (cam_sees[ubo.cam_order_1] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_1].rgb);
@@ -130,10 +138,64 @@ void main()
             out_color = (cam_sees[ubo.cam_order_1] > 0) ? vec3_to_uint(temp_mix.rgb) : vec3_to_uint(tex_colors[ubo.cam_order_0].rgb);
         }
         break;
+    case MODE_VERT_COLORED_BY_CCTV:
+        if (distances[0] < distances[1] && distances[0] < distances[2] && distances[0] < distances[3]) {
+            if (cam_sees[0] > 0) out_color = vec3_to_uint(vec3(1.0, 0.0, 0.0));
+            else                 out_color = vec3_to_uint(vec3(0.5, 0.0, 0.0));
+        }
+        if (distances[1] < distances[0] && distances[1] < distances[2] && distances[1] < distances[3]) {
+            if (cam_sees[1] > 0) out_color = vec3_to_uint(vec3(0.0, 1.0, 0.0));
+            else                 out_color = vec3_to_uint(vec3(0.0, 0.5, 0.0));
+        }
+        if (distances[2] < distances[0] && distances[2] < distances[1] && distances[2] < distances[3]) {
+            if (cam_sees[2] > 0) out_color = vec3_to_uint(vec3(0.0, 0.0, 1.0));
+            else                 out_color = vec3_to_uint(vec3(0.0, 0.0, 0.5));
+        }
+        if (distances[3] < distances[0] && distances[3] < distances[1] && distances[3] < distances[2]) {
+            if (cam_sees[3] > 0) out_color = vec3_to_uint(vec3(1.0, 1.0, 0.0));
+            else                 out_color = vec3_to_uint(vec3(0.5, 0.5, 0.0));
+        }
+        break;
+    case MODE_VERT_CLOSEST_CCTV_TEX:
+        if (distances[0] < distances[1] && distances[0] < distances[2] && distances[0] < distances[3]) {
+            if (cam_sees[0] > 0) out_color = vec3_to_uint(tex_colors[0].rgb);
+            else                 out_color = vec3_to_uint(vec3(0.5, 0.0, 0.0));
+        }
+        if (distances[1] < distances[0] && distances[1] < distances[2] && distances[1] < distances[3]) {
+            if (cam_sees[1] > 0) out_color = vec3_to_uint(tex_colors[1].rgb);
+            else                 out_color = vec3_to_uint(vec3(0.0, 0.5, 0.0));
+        }
+        if (distances[2] < distances[0] && distances[2] < distances[1] && distances[2] < distances[3]) {
+            if (cam_sees[2] > 0) out_color = vec3_to_uint(tex_colors[2].rgb);
+            else                 out_color = vec3_to_uint(vec3(0.0, 0.0, 0.5));
+        }
+        if (distances[3] < distances[0] && distances[3] < distances[1] && distances[3] < distances[2]) {
+            if (cam_sees[3] > 0) out_color = vec3_to_uint(tex_colors[3].rgb);
+            else                 out_color = vec3_to_uint(vec3(0.5, 0.5, 0.0));
+        }
+        break;
+    case MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK:
+        if (distances[0] < distances[1] && distances[0] < distances[2] && distances[0] < distances[3]) {
+            if (cam_sees[0] > 0) out_color = vec3_to_uint(tex_colors[0].rgb);
+            else                 out_color = vec3_to_uint(tex_colors[1].rgb);
+        }
+        if (distances[1] < distances[0] && distances[1] < distances[2] && distances[1] < distances[3]) {
+            if (cam_sees[1] > 0) out_color = vec3_to_uint(tex_colors[1].rgb);
+            else                 out_color = vec3_to_uint(tex_colors[2].rgb);
+        }
+        if (distances[2] < distances[0] && distances[2] < distances[1] && distances[2] < distances[3]) {
+            if (cam_sees[2] > 0) out_color = vec3_to_uint(tex_colors[2].rgb);
+            else                 out_color = vec3_to_uint(tex_colors[0].rgb);
+        }
+        if (distances[3] < distances[0] && distances[3] < distances[1] && distances[3] < distances[2]) {
+            if (cam_sees[3] > 0) out_color = vec3_to_uint(tex_colors[3].rgb);
+            else                 out_color = vec3_to_uint(tex_colors[1].rgb);
+        }
+        break;
     }
 
     /* determine the pixel coordinate and write to framebuffer */
-    ivec2 img_size = ivec2(1600, 900);
+    ivec2 img_size = ivec2(ubo.frame_width, ubo.frame_height);
     vec2 img_pos = (ndc.xy * 0.5 + 0.5) * img_size;
     ivec2 pixel_coords = ivec2(img_pos);
     int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
