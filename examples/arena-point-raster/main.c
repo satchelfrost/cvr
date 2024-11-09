@@ -865,11 +865,11 @@ int main(int argc, char **argv)
         init_window(atoi(argv[3]), atoi(argv[4]), "Arena Point Cloud Rasterization (LED Wall)");
         set_window_pos(atoi(argv[1]), atoi(argv[2]));
     } else if (argc == 2) {
-        if (strcmp(argv[1], "full") == 0) {
+        if (strcmp(argv[1], "fullscreen") == 0) {
             enable_full_screen();
             init_window(0, 0, "Arena Point Cloud Rasterization");
         } else {
-            nob_log(NOB_ERROR, "unrecognized argument %s", argv[1]);
+            nob_log(NOB_ERROR, "unrecognized argument \"%s\"", argv[1]);
             return 1;
         }
     } else {

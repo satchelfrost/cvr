@@ -254,6 +254,8 @@ static Example examples[] = {
 typedef struct {
     int argc;
     char **argv;
+    int forwarded_argc;
+    char **forwarded_argv;
     char *program;
     char *supplied_name;
     Example *example;
@@ -284,9 +286,33 @@ void log_usage(const char *program)
     nob_log(NOB_INFO, "    -t specify build target (linux, windows, quest)");
     nob_log(NOB_INFO, "    -g debug launch (gf2)"); // https://github.com/nakst/gf
     nob_log(NOB_INFO, "    -r renderdoc launch");
+    nob_log(NOB_INFO, "    -a forward command line args (e.g. -a 'arg1 arg2 ...')");
 }
 
 void print_examples();
+
+bool parse_sub_args(const char *arg_str, char ***forwarded_argv, int *forwarded_argc)
+{
+    Nob_String_View sv = nob_sv_from_cstr(arg_str);
+    int argc = 0;
+
+    do {
+        nob_sv_chop_by_delim(&sv, ' ');
+        argc++;
+    } while (sv.count);
+
+    *forwarded_argc = argc;
+
+    char **argv = (*forwarded_argv) = malloc(argc * sizeof(char *));
+    sv = nob_sv_from_cstr(arg_str);
+    for (int i = 0; i < argc; i++) {
+        Nob_String_View tmp_sv = nob_sv_chop_by_delim(&sv, ' ');
+        const char *cstring = nob_temp_sv_to_cstr(tmp_sv);
+        argv[i] = nob_temp_strdup(cstring);
+    }
+
+    return true;
+}
 
 bool handle_usr_args(Config *config)
 {
@@ -344,6 +370,11 @@ bool handle_usr_args(Config *config)
                 break;
             case 'r':
                 config->renderdoc = true;
+                break;
+            case 'a':
+                if (!parse_sub_args(config->argv[0], &config->forwarded_argv, &config->forwarded_argc))
+                    nob_return_defer(false);
+                nob_shift_args(&config->argc, &config->argv);
                 break;
             default:
                 nob_log(NOB_ERROR, "unrecognized flag %c", flag);
@@ -945,6 +976,9 @@ int main(int argc, char **argv)
             }
         } else {
             nob_cmd_append(&cmd, bin);
+            for (int i = 0; i < config.forwarded_argc; i++) {
+                nob_cmd_append(&cmd, config.forwarded_argv[i]);
+            }
             if (!nob_cmd_run_sync(cmd)) return 1;
         }
         if (!cd("../../../../")) return 1;
