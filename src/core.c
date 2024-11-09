@@ -114,6 +114,7 @@ Shape shapes[SHAPE_COUNT];
     Gamepad gamepad = {0};
     Time cvr_time = {0};
     Window_Size win_size = {0};
+    bool full_screen = false;
 #else // clang I hate you
     Default_Pipelines pipelines = {};
     Matrices matrices = {};
@@ -123,6 +124,7 @@ Shape shapes[SHAPE_COUNT];
     Gamepad gamepad = {};
     Time cvr_time = {};
     Window_Size win_size = {};
+    bool full_screen = false;
 #endif
 const char *core_title;
 
@@ -163,6 +165,10 @@ void close_window()
     close_platform();
 }
 
+void enable_full_screen()
+{
+    full_screen = true;
+}
 
 bool default_pl_fill_init()
 {

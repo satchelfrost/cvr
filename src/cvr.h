@@ -258,6 +258,7 @@ typedef struct {
 
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
+void enable_full_screen();
 bool window_should_close();                                 /* Check if window should close and poll events */
 Window_Size get_window_size();
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */

@@ -167,6 +167,10 @@ Point_Cloud_Layer pc_layers[MAX_LOD] = {
 typedef enum {DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
 VkDescriptorSet ds_sets[DS_COUNT] = {0};
 
+/* we store the initial window size so we don't have to deal with resizing the frame buffer (compute buffer),
+ * as a consequence, resizing the window means we are either over/under-resolving */
+Window_Size initial_win_size = {0};
+
 bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
 
 void video_queue_init()
@@ -671,9 +675,8 @@ bool build_compute_cmds(size_t highest_lod)
         vk_compute_pl_barrier();
 
         /* resolve the frame buffer (resolve.comp shader) */
-        Window_Size win_size = get_window_size();
-        group_x = win_size.width / 16 + 1;
-        group_y = win_size.height / 16 + 1;
+        group_x = initial_win_size.width / 16 + 1;
+        group_y = initial_win_size.height / 16 + 1;
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
 
     if (!vk_end_rec_compute()) return false;
@@ -742,9 +745,8 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
     ubo->data.cam_order_3 = cam_order[3];
     ubo->data.shader_mode = shader_mode;
     ubo->data.blend_ratio = blend_ratio;
-    Window_Size win_size = get_window_size();
-    ubo->data.frame_width = win_size.width;
-    ubo->data.frame_height = win_size.height;
+    ubo->data.frame_width  = initial_win_size.width;
+    ubo->data.frame_height = initial_win_size.height;
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
 
@@ -860,15 +862,24 @@ int main(int argc, char **argv)
 
     /* initialize window and Vulkan */
     if (argc > 4) {
-        init_window(atoi(argv[3]), atoi(argv[4]), "point cloud");
+        init_window(atoi(argv[3]), atoi(argv[4]), "Arena Point Cloud Rasterization (LED Wall)");
         set_window_pos(atoi(argv[1]), atoi(argv[2]));
+    } else if (argc == 2) {
+        if (strcmp(argv[1], "full") == 0) {
+            enable_full_screen();
+            init_window(0, 0, "Arena Point Cloud Rasterization");
+        } else {
+            nob_log(NOB_ERROR, "unrecognized argument %s", argv[1]);
+            return 1;
+        }
     } else {
-        init_window(1600, 900, "arena point cloud rasterization");
+        init_window(1600, 900, "Arena Point Cloud Rasterization");
     }
 
-    Window_Size win_size = get_window_size();
-    Vk_Texture storage_tex = {.img.extent = {win_size.width, win_size.height}};
-    Frame_Buffer frame_buff = alloc_frame_buff(win_size.width * win_size.height);
+    initial_win_size = get_window_size();
+    nob_log(NOB_INFO, "initial window size %d %d", initial_win_size.width, initial_win_size.height);
+    Vk_Texture storage_tex = {.img.extent =   {initial_win_size.width,  initial_win_size.height}};
+    Frame_Buffer frame_buff = alloc_frame_buff(initial_win_size.width * initial_win_size.height);
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
@@ -1003,6 +1014,7 @@ int main(int argc, char **argv)
         if (is_key_pressed(KEY_SPACE)) {
             nob_log(NOB_INFO, "resetting camera defaults");
             copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
+            cam_move_idx = 0;
         }
         if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             playing = !playing;

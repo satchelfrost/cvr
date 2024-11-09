@@ -17,7 +17,33 @@ void init_platform()
 {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
+
+    if (full_screen) {
+        int monitor_count = 0;
+        int largest_monitor_idx = 0;
+        int highest_pixel_count = 0;
+        GLFWmonitor **monitors = glfwGetMonitors(&monitor_count);
+        for (int i = 0; i < monitor_count; i++) {
+            const GLFWvidmode *mode = glfwGetVideoMode(monitors[i]);
+            int pixel_count = mode->width * mode->height;
+            if (i == 0) {
+                highest_pixel_count = pixel_count;
+            } else if (pixel_count > highest_pixel_count) {
+                largest_monitor_idx = i;
+                highest_pixel_count = pixel_count;
+            }
+        }
+        GLFWmonitor *largest_monitor = monitors[largest_monitor_idx];
+        const char *name = glfwGetMonitorName(largest_monitor);
+        const GLFWvidmode *mode = glfwGetVideoMode(largest_monitor);
+        win_size.width = mode->width;
+        win_size.height = mode->height;
+        nob_log(NOB_INFO, "full screen mode enabled", mode->width, mode->height);
+        nob_log(NOB_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
+        platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
+    } else {
+        platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
+    }
     glfwSetWindowUserPointer(platform.handle, &vk_ctx);
     glfwSetFramebufferSizeCallback(platform.handle, frame_buff_resized);
     glfwSetKeyCallback(platform.handle, key_callback);
@@ -39,7 +65,7 @@ bool platform_surface_init()
 
 bool window_should_close()
 {
-    bool result = glfwWindowShouldClose(platform.handle);
+    bool result = glfwWindowShouldClose(platform.handle) || is_key_down(KEY_ESCAPE);
     glfwPollEvents();
     return result;
 }
