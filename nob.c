@@ -804,7 +804,7 @@ bool build_example_win(Config config, const char *build_path)
         }
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
         nob_cmd_append(&cmd, cvr_path, "-l:libcvr.dll");
-        nob_cmd_append(&cmd, "-L./lib", "-l:vulkan-1.lib", "-lwinmm", "-lgdi32");
+        nob_cmd_append(&cmd, "-L./lib", "-l:vulkan-1.lib", "-lwinmm", "-lgdi32", "-lpthread");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
 
