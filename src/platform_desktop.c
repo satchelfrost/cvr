@@ -13,9 +13,9 @@ static void mouse_scroll_callback(GLFWwindow *window, double x_offset, double y_
 static void joystick_callback(int jid, int event);
 static void frame_buff_resized(GLFWwindow* window, int width, int height);
 
-void init_platform()
+bool init_platform()
 {
-    glfwInit();
+    if (!glfwInit()) return false;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     if (full_screen) {
@@ -41,8 +41,10 @@ void init_platform()
         nob_log(NOB_INFO, "full screen mode enabled", mode->width, mode->height);
         nob_log(NOB_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
         platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
+        if (!platform.handle) return false;
     } else {
         platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
+        if (!platform.handle) return false;
     }
     glfwSetWindowUserPointer(platform.handle, &vk_ctx);
     glfwSetFramebufferSizeCallback(platform.handle, frame_buff_resized);
@@ -51,6 +53,8 @@ void init_platform()
     glfwSetCursorPosCallback(platform.handle, mouse_cursor_pos_callback);
     glfwSetScrollCallback(platform.handle, mouse_scroll_callback);
     glfwSetJoystickCallback(joystick_callback);
+
+    return true;
 }
 
 bool platform_surface_init()

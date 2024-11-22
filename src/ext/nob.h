@@ -630,6 +630,26 @@ char *nob_shift_args(int *argc, char ***argv)
 
 void nob_log(Nob_Log_Level level, const char *fmt, ...)
 {
+#ifdef PLATFORM_QUEST
+#include <android/log.h>
+#ifndef APP_NAME
+#define APP_NAME "threaded_app"
+#endif // APP_NAME
+#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO,  APP_NAME, __VA_ARGS__))
+#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN,  APP_NAME, __VA_ARGS__))
+#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, APP_NAME, __VA_ARGS__))
+    switch (level) {
+    case NOB_INFO:
+        LOGI("[INFO] %s",fmt);
+        break;
+    case NOB_WARNING:
+        LOGW("[WARNING] %s", fmt);
+        break;
+    case NOB_ERROR:
+        LOGE("[ERROR] %s", fmt);
+        break;
+    }
+#else
     switch (level) {
     case NOB_INFO:
         fprintf(stderr, "[INFO] ");
@@ -649,6 +669,7 @@ void nob_log(Nob_Log_Level level, const char *fmt, ...)
     vfprintf(stderr, fmt, args);
     va_end(args);
     fprintf(stderr, "\n");
+#endif // PLATFORM_QUEST
 }
 
 bool nob_read_entire_dir(const char *parent, Nob_File_Paths *children)

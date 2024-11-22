@@ -146,7 +146,7 @@ bool init_window(int width, int height, const char *title)
     win_size.height = height;
     core_title = title;
 
-    init_platform();
+    if (!init_platform()) return false;
 
     /* initialize vulkan */
     if (!vk_init()) return false;
