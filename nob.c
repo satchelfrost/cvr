@@ -620,7 +620,7 @@ bool build_cvr_quest(Config config, const char *platform_path)
             nob_cmd_append(&cmd, "-target", "aarch64-linux-android29");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/android");
-            // nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
             // nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
@@ -834,26 +834,26 @@ bool build_example_quest(Config config, const char *build_path)
     Nob_Procs procs = {0};
     Nob_File_Paths obj_files = {0};
 
-    /* build example */
-    for (size_t i = 0; i < example->c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
-        nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
-            cmd.count = 0;
-            nob_cmd_append(&cmd, config.android.cc);
-            nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-target", "aarch64-linux-android29");
-            nob_cmd_append(&cmd, "-I./src");
-            nob_cmd_append(&cmd, "-fPIC");
-            nob_cmd_append(&cmd, "-c", input_path);
-            nob_cmd_append(&cmd, "-o", output_path);
-            Nob_Proc proc = nob_cmd_run_async(cmd);
-            nob_da_append(&procs, proc);
-        }
-    }
-
-    if (!nob_procs_wait(procs)) nob_return_defer(false);
+    // /* build example */
+    // for (size_t i = 0; i < example->c_files.count; i++) {
+    //     const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
+    //     const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
+    //     nob_da_append(&obj_files, output_path);
+    //     if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
+    //         cmd.count = 0;
+    //         nob_cmd_append(&cmd, config.android.cc);
+    //         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
+    //         nob_cmd_append(&cmd, "-target", "aarch64-linux-android29");
+    //         nob_cmd_append(&cmd, "-I./src");
+    //         // nob_cmd_append(&cmd, "-fPIC");
+    //         nob_cmd_append(&cmd, "-c", input_path);
+    //         nob_cmd_append(&cmd, "-o", output_path);
+    //         Nob_Proc proc = nob_cmd_run_async(cmd);
+    //         nob_da_append(&procs, proc);
+    //     }
+    // }
+    //
+    // if (!nob_procs_wait(procs)) nob_return_defer(false);
 
     /* link with libraries */
     const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.a", target_names[config.target]);
@@ -863,25 +863,34 @@ bool build_example_quest(Config config, const char *build_path)
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, config.android.cc);
-        // nob_cmd_append(&cmd, "-DPLATFORM_ANDROID");
+        nob_cmd_append(&cmd, "-DPLATFORM_QUEST");
         nob_cmd_append(&cmd, "-target", "aarch64-linux-android-29");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-        nob_cmd_append(&cmd, "-I./src/ext/android");
+        nob_cmd_append(&cmd, "-I./src/ext");
         nob_cmd_append(&cmd, "-I./src");
+        nob_cmd_append(&cmd, "-I./src/ext/android");
         nob_cmd_append(&cmd, "-shared", "-uANativeActivity_onCreate");
         nob_cmd_append(&cmd, "-o", app_path);
         nob_cmd_append(&cmd, "./src/ext/android/android_native_app_glue.c");
         nob_cmd_append(&cmd, "-fPIC");
-        for (size_t i = 0; i < obj_files.count; i++) {
-            const char *input_path = nob_temp_sprintf("%s", obj_files.items[i]);
+        for (size_t i = 0; i < example->c_files.count; i++) {
+            const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
             nob_cmd_append(&cmd, input_path);
         }
+        // for (size_t i = 0; i < obj_files.count; i++) {
+        //     const char *input_path = nob_temp_sprintf("%s", obj_files.items[i]);
+        //     nob_cmd_append(&cmd, input_path);
+        // }
         nob_cmd_append(&cmd, "./lib/arm64-v8a/Debug/libopenxr_loader.so");
-        const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
-        nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
-        const char *ndk = nob_temp_sprintf("-L%s/platforms/android-29/arch-arm64/usr/lib", config.android.ndk_root);
+        // const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
+        // nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
+        nob_cmd_append(&cmd, "./src/core.c");
+        // const char *ndk = nob_temp_sprintf("-L%s/platforms/android-29/arch-arm64/usr/lib", config.android.ndk_root);
+        // nob_cmd_append(&cmd, ndk);
+        const char *ndk = nob_temp_sprintf("-L%s/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/29", config.android.ndk_root);
         nob_cmd_append(&cmd, ndk);
-        const char *ndk_other = nob_temp_sprintf("-B%s/platforms/android-29/arch-arm64/usr/lib", config.android.ndk_root);
+        // const char *ndk_other = nob_temp_sprintf("-B%s/platforms/android-29/arch-arm64/usr/lib", config.android.ndk_root);
+        const char *ndk_other = nob_temp_sprintf("-B%s/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/29", config.android.ndk_root);
         nob_cmd_append(&cmd, ndk_other);
         nob_cmd_append(&cmd, "-lvulkan", "-landroid", "-llog", "-lm");
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);

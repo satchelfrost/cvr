@@ -16,6 +16,8 @@ int main()
     // };
     //
     init_window(800, 600, "Spinning Shapes");
+    // push_matrix();
+    // pop_matrix();
     //
     // while (!window_should_close()) {
     //     if (is_key_pressed(KEY_SPACE)) shape = (shape + 1) % SHAPE_COUNT;
