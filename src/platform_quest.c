@@ -23,7 +23,7 @@ typedef struct {
 } Platform_Data;
 
 static Platform_Data platform = {0};
-
+static const char *platform_exts[] = {"REPLACE THIS WITH AN ACTUAL EXTENSION"};
 static void app_handle_cmd(struct android_app *app, int32_t cmd);
 static int32_t app_handle_input(struct android_app *app, AInputEvent *event);
 
@@ -153,3 +153,31 @@ int32_t app_handle_input(struct android_app *app, AInputEvent *event)
     return 0;
 }
 
+const char **get_platform_exts(uint32_t *platform_ext_count)
+{
+    *platform_ext_count = NOB_ARRAY_LEN(platform_exts);
+    return platform_exts;
+}
+
+double get_time()
+{
+    return 0;
+}
+
+bool platform_surface_init()
+{
+    return false;
+}
+
+void platform_frame_buff_size(int *width, int *height)
+{
+    // TODO: not sure where this is coming from yet, maybe OpenXR?
+    *width = 0;
+    *height = 0;
+}
+
+void platform_wait_resize_frame_buffer()
+{
+    // TODO: I'm not really sure it makes sense for a framebuffer resize to happen since we
+    // TODO: are not dealing with a typical window
+}

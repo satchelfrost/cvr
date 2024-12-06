@@ -1,12 +1,12 @@
 #include "cvr.h"
-#include "ext/raylib-5.0/raymath.h"
+// #include "ext/raylib-5.0/raymath.h"
 #include "ext/nob.h"
 
 // Shape_Type shape = SHAPE_CUBE;
 
 int main()
 {
-    nob_log(NOB_INFO, "Hello Quest");
+    nob_log(NOB_INFO, "Hello From CVR on the Quest!");
     // Camera camera = {
     //     .position   = {0.0f, 2.0f, 5.0f},
     //     .target     = {0.0f, 0.0f, 0.0f},
@@ -15,7 +15,7 @@ int main()
     //     .projection = PERSPECTIVE,
     // };
     //
-    init_window(800, 600, "Spinning Shapes");
+    // init_window(800, 600, "Spinning Shapes");
     // push_matrix();
     // pop_matrix();
     //

@@ -590,9 +590,10 @@ bool check_android_tools(Config *config)
         return false;
     }
 
+    // TODO: for the build tools I think I'm okay to just pick the first directory
     config->android.cc = nob_temp_sprintf("%s/toolchains/llvm/prebuilt/linux-x86_64/bin/clang", config->android.ndk_root);
     config->android.aapt = nob_temp_sprintf("%s/build-tools/29.0.2/aapt", config->android.home);
-    config->android.jar = nob_temp_sprintf("%s/platforms/android-29/android.jar", config->android.home);
+    config->android.jar = nob_temp_sprintf("%s/platforms/android-" ANDROID_VERSION "/android.jar", config->android.home);
     config->android.signer = nob_temp_sprintf("%s/build-tools/29.0.2/apksigner", config->android.home);
     config->android.zip_align = nob_temp_sprintf("%s/build-tools/29.0.2/zipalign", config->android.home);
 
@@ -938,21 +939,16 @@ void print_examples()
 
 bool cd(const char *dir)
 {
-    bool result = true;
-
     if (chdir(dir) != 0) {
         nob_log(NOB_ERROR, "failed to change directory to %s", dir);
-        nob_return_defer(false);
+        return false;
     }
 
-defer:
-    return result;
+    return true;
 }
 
 bool find_supported_example(Config *config)
 {
-    bool result = true;
-
     bool name_found = false;
     for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
         if (strcmp(config->supplied_name, examples[i].name) == 0) {
@@ -963,15 +959,276 @@ bool find_supported_example(Config *config)
     }
     if (!name_found) {
         nob_log(NOB_ERROR, "no such example found: %s", config->supplied_name);
-        nob_return_defer(false);
+        return false;
     }
     if (!config->example->supported_targets[config->target]) {
         nob_log(NOB_ERROR, "target %s not supported for example %s", target_names[config->target], config->example->name);
         nob_log(NOB_INFO, "try listing examples `./nob -l`");
-        nob_return_defer(false);
+        return false;
     }
 
+    return true;
+}
+
+bool copy_resources(const char *example_build_path, Config config)
+{
+    /* copy everything over into the resources folder */
+    const char *example_res = nob_temp_sprintf("examples/%s/res", config.example->name);
+    const char *build_res   = nob_temp_sprintf("%s/res", example_build_path);
+    if (!nob_mkdir_if_not_exists(build_res)) return false;
+    Nob_File_Paths paths = {0};
+    if (!nob_read_entire_dir(example_res, &paths)) return false;
+    for (size_t i = 0; i < paths.count; i++) {
+        const char *file_name = paths.items[i];
+        /* note: we ignore shaders since they are copied in shader build step
+         * this is because they may need to be copied again if the shader needs to be recompiled */
+        if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0 ||
+            strstr(file_name, ".frag")  || strstr(file_name, ".vert") ||
+            strstr(file_name, ".comp"))
+            continue;
+
+        const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
+        const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
+
+        int ret = nob_file_exists(dst_path);
+        switch (ret) {
+        case FILE_DOES_NOT_EXIST:
+            if (!nob_copy_file(src_path, dst_path)) return false;
+            break;
+        case FILE_CHK_ERR:
+            return false;
+        case FILE_EXISTS:
+        default:
+        }
+    }
+
+    /* if we are targeting quest then we will also need the openxr loader */
+    if (config.target == TARGET_QUEST) {
+        const char *src_lib_path = "lib/arm64-v8a/Debug/libopenxr_loader.so";
+        const char *dst_lib_path = nob_temp_sprintf("%s/lib/arm64-v8a/libopenxr_loader.so", example_build_path);
+        if (!nob_mkdir_if_not_exists(nob_temp_sprintf("%s/lib", example_build_path))) return false;
+        if (!nob_mkdir_if_not_exists(nob_temp_sprintf("%s/lib/arm64-v8a", example_build_path))) return false;
+
+        int ret = nob_file_exists(dst_lib_path);
+        switch (ret) {
+        case FILE_DOES_NOT_EXIST:
+            if (!nob_copy_file(src_lib_path, dst_lib_path)) return false;
+            break;
+        case FILE_CHK_ERR: return false;
+        case FILE_EXISTS:
+        default:
+        }
+    }
+
+    return true;
+}
+
+bool run_example_linux(Config config, const char *example_build_path)
+{
+    bool result = true;
+
+    Nob_Cmd cmd = {0};
+    nob_log(NOB_INFO, "running example %s", config.example->name);
+    if (!cd(example_build_path)) nob_return_defer(false);
+    const char *bin = nob_temp_sprintf("./%s", config.example->name);
+    if (config.debug) {
+        nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
+        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    } else if (config.renderdoc) {
+        /* open renderdoc to take a capture */
+        nob_cmd_append(&cmd, "renderdoccmd", "capture", "-c", "snapshot", "-w", bin);
+        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+        cmd.count = 0;
+        Nob_File_Paths paths = {0};
+        nob_read_entire_dir(".", &paths);
+        for (size_t i = 0; i < paths.count; i++) {
+            const char *file_name = paths.items[i];
+            if (strstr(file_name, ".rdc")) {
+                /* once capture is take, automatically open it for analysis */
+                nob_log(NOB_INFO, file_name);
+                nob_cmd_append(&cmd, "renderdoc", file_name);
+                if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+                /* cleanup capture file */
+                cmd.count = 0;
+                nob_cmd_append(&cmd, "rm", file_name);
+                if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+                break;
+            }
+        }
+    } else {
+        nob_cmd_append(&cmd, bin);
+        for (int i = 0; i < config.forwarded_argc; i++) {
+            nob_cmd_append(&cmd, config.forwarded_argv[i]);
+        }
+        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    }
+    if (!cd("../../../../")) nob_return_defer(false);
+
 defer:
+    nob_cmd_free(cmd);
+    return result;
+}
+
+bool run_example_win(Config config, const char *example_build_path)
+{
+    bool result = true;
+
+    Nob_Cmd cmd = {0};
+    nob_log(NOB_INFO, "running windows example %s", config.example->name);
+    if (!cd(example_build_path)) nob_return_defer(false);
+    const char *bin = nob_temp_sprintf("./%s.exe", config.example->name);
+    nob_cmd_append(&cmd, "wine", bin);
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    if (!cd("../../../../")) nob_return_defer(false);
+
+defer:
+    nob_cmd_free(cmd);
+    return result;
+}
+
+bool deploy_example_quest(Config config, const char *example_build_path)
+{
+
+}
+
+bool run_or_deploy(Config config, const char *example_build_path)
+{
+    if (config.host != HOST_LINUX) {
+        nob_log(NOB_ERROR, "currently examples only run on linux");
+        return false;
+    }
+
+    switch (config.target) {
+    case TARGET_LINUX:
+        if (!run_example_linux(config, example_build_path)) return false;
+        break;
+    case TARGET_WINDOWS:
+        if (!run_example_win(config, example_build_path)) return false;
+        break;
+    case TARGET_QUEST:
+    default:
+        nob_log(NOB_ERROR, "Target %s not yet supported for running or deploying", target_names[config.target]);
+        return false;
+    }
+
+    return true;
+}
+
+bool create_android_manifest(Config config, const char *manifest_path)
+{
+    Nob_String_Builder sb = {0};
+    /* header */
+    nob_sb_append_cstr(&sb, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+
+    /* package */
+    nob_sb_append_cstr(&sb, "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n");
+    nob_sb_append_cstr(&sb, "\tpackage=\"com.wamwadstudios.blarg\"\n");
+    nob_sb_append_cstr(&sb, "\tandroid:versionCode=\"1\"\n");
+    nob_sb_append_cstr(&sb, "\tandroid:versionName=\"1.0\" android:installLocation=\"auto\" >\n");
+
+    /* permissions */
+    nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\" />\n");
+    nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"android.permission.INTERNET\" />\n");
+    nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"android.hardware.vr.headtracking\" android:required=\"true\" />\n");
+    nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"oculus.software.handtracking\" android:required=\"false\" />\n");
+    nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"com.oculus.permission.HAND_TRACKING\" />\n");
+    nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"com.oculus.feature.PASSTHROUGH\" android:required=\"true\" />\n");
+    nob_sb_append_cstr(&sb, nob_temp_sprintf("\t<application android:allowBackup=\"false\" android:label=\"%s\" >\n", config.example->name));
+    nob_sb_append_cstr(&sb, "\t<uses-sdk android:minSdkVersion=\"" ANDROID_VERSION "\"\n");
+    nob_sb_append_cstr(&sb, "\t\tandroid:targetSdkVersion=\"" ANDROID_VERSION "\" />\n");
+
+    /* metadata */
+    nob_sb_append_cstr(&sb, "\t<meta-data android:name=\"com.oculus.supportedDevices\" android:value=\"all\" />\n");
+    nob_sb_append_cstr(&sb, "\t\t<activity\n");
+    nob_sb_append_cstr(&sb, "\t\t\tandroid:name=\"android.app.NativeActivity\"\n");
+    nob_sb_append_cstr(&sb, "\t\t\tandroid:theme=\"@android:style/Theme.Black.NoTitleBar.Fullscreen\"\n");
+    nob_sb_append_cstr(&sb, "\t\t\tandroid:launchMode=\"singleTask\"\n");
+    nob_sb_append_cstr(&sb, "\t\t\tandroid:screenOrientation=\"landscape\"\n");
+    nob_sb_append_cstr(&sb, "\t\t\tandroid:configChanges=\"screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode\">\n");
+    nob_sb_append_cstr(&sb, nob_temp_sprintf("\t\t\t<meta-data android:name=\"android.app.lib_name\" android:value=\"%s\" />\n", config.example->name));
+    nob_sb_append_cstr(&sb, "\t\t\t<intent-filter>\n");
+    nob_sb_append_cstr(&sb, "\t\t\t\t<action android:name=\"android.intent.action.MAIN\" />\n");
+    nob_sb_append_cstr(&sb, "\t\t\t\t<category android:name=\"com.oculus.intent.category.VR\" />\n");
+    nob_sb_append_cstr(&sb, "\t\t\t\t<category android:name=\"android.intent.category.LAUNCHER\" />\n");
+    nob_sb_append_cstr(&sb, "\t\t\t</intent-filter>\n");
+    nob_sb_append_cstr(&sb, "\t\t</activity>\n");
+    nob_sb_append_cstr(&sb, "\t</application>\n");
+
+    /* footer*/
+    nob_sb_append_cstr(&sb, "</manifest>");
+
+    return nob_write_entire_file(manifest_path, sb.items, sb.count);
+}
+
+bool package_apk(Config config, const char *example_build_path)
+{
+    bool result = true;
+
+    const char *manifest_path = nob_temp_sprintf("%s/AndroidManifest.xml", example_build_path);
+    int ret = nob_file_exists(manifest_path);
+    switch (ret) {
+    case FILE_DOES_NOT_EXIST:
+        if (!create_android_manifest(config, manifest_path))
+            nob_return_defer(false);
+        break;
+    case FILE_CHK_ERR:
+        nob_return_defer(false);
+    case FILE_EXISTS:
+    default:
+    }
+
+    if (!cd(example_build_path)) nob_return_defer(false);
+
+    Nob_Cmd cmd = {0};
+    nob_cmd_append(&cmd, config.android.aapt);
+    nob_cmd_append(&cmd, "package", "-f");
+    nob_cmd_append(&cmd, "-F", "temp.apk");
+    nob_cmd_append(&cmd, "-I", config.android.jar);
+    nob_cmd_append(&cmd, "-M", "./AndroidManifest.xml");
+
+    if (!nob_mkdir_if_not_exists("assets")) nob_return_defer(false);
+    nob_cmd_append(&cmd, "-A", "assets");
+    // nob_cmd_append(&cmd, "-S", "./res"); // TODO: I think this might be a different resources path
+    nob_cmd_append(&cmd, "-v");
+    nob_cmd_append(&cmd, "--target-sdk-version", ANDROID_VERSION);
+
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    /* unpack apk, compress assets & shared libs, then align*/
+    cmd.count = 0;
+    if (!nob_mkdir_if_not_exists("sub-build")) nob_return_defer(false);
+    nob_cmd_append(&cmd, "unzip", "-o", "temp.apk", "-d", "./sub-build");
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    if (!cd("sub-build")) nob_return_defer(false);
+
+    cmd.count = 0;
+    nob_cmd_append(&cmd, "zip", "-D4r", "../makecapk.apk", ".");
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    cmd.count = 0;
+    nob_cmd_append(&cmd, "zip", "-D0r", "../makecapk.apk", "./AndroidManifest.xml");
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    if (!cd("..")) nob_return_defer(false);
+
+    cmd.count = 0;
+    nob_cmd_append(&cmd, "rm", "-f", nob_temp_sprintf("%s.apk", config.example->name));
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+    cmd.count = 0;
+    nob_cmd_append(&cmd, config.android.zip_align, "-v", "4", "makecapk.apk", nob_temp_sprintf("%s.apk", config.example->name));
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    /* clean up any loose files */
+    cmd.count = 0;
+    nob_cmd_append(&cmd, "rm", "temp.apk", "makecapk.apk");
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    // TODO: may need to cd back to parent directory
+
+defer:
+    nob_cmd_free(cmd);
     return result;
 }
 
@@ -999,77 +1256,10 @@ int main(int argc, char **argv)
     if (!nob_mkdir_if_not_exists(example_build_path)) return 1;
     if (!build_example(example_build_path, config)) return 1;
     if (!compile_shaders(config)) return 1;
-
-    /* copy resources over if the files do not exist */
-    const char *example_res = nob_temp_sprintf("examples/%s/res", config.example->name);
-    const char *build_res   = nob_temp_sprintf("%s/res", example_build_path);
-    nob_mkdir_if_not_exists(build_res);
-    Nob_File_Paths paths = {0};
-    nob_read_entire_dir(example_res, &paths);
-    for (size_t i = 0; i < paths.count; i++) {
-        const char *file_name = paths.items[i];
-        if (strcmp(file_name, ".") == 0 || strcmp(file_name, "..") == 0 ||
-            strstr(file_name, ".frag")  || strstr(file_name, ".vert") ||
-            strstr(file_name, ".comp"))
-            continue;
-
-        const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
-        const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
-
-        int ret = nob_file_exists(dst_path);
-        if (ret == FILE_DOES_NOT_EXIST) {
-            if (!nob_copy_file(src_path, dst_path))
-                return 1;
-        } else if (ret == FILE_CHK_ERR) {
-            return 1;
-        }
-    }
-
-    /* run example after building */
-    if (config.host == HOST_LINUX && config.target == TARGET_LINUX) {
-        cmd.count = 0;
-        nob_log(NOB_INFO, "running example %s", config.example->name);
-        if (!cd(example_build_path)) return 1;
-        const char *bin = nob_temp_sprintf("./%s", config.example->name);
-        if (config.debug) {
-            nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
-            if (!nob_cmd_run_sync(cmd)) return 1;
-        } else if (config.renderdoc) {
-            nob_cmd_append(&cmd, "renderdoccmd", "capture", "-c", "snapshot", "-w", bin);
-            if (!nob_cmd_run_sync(cmd)) return 1;
-
-            cmd.count = 0;
-            Nob_File_Paths paths = {0};
-            nob_read_entire_dir(".", &paths);
-            for (size_t i = 0; i < paths.count; i++) {
-                const char *file_name = paths.items[i];
-                if (strstr(file_name, ".rdc")) {
-                    nob_log(NOB_INFO, file_name);
-                    nob_cmd_append(&cmd, "renderdoc", file_name);
-                    if (!nob_cmd_run_sync(cmd)) return 1;
-                    cmd.count = 0;
-                    nob_cmd_append(&cmd, "rm", file_name);
-                    if (!nob_cmd_run_sync(cmd)) return 1;
-                    break;
-                }
-            }
-        } else {
-            nob_cmd_append(&cmd, bin);
-            for (int i = 0; i < config.forwarded_argc; i++) {
-                nob_cmd_append(&cmd, config.forwarded_argv[i]);
-            }
-            if (!nob_cmd_run_sync(cmd)) return 1;
-        }
-        if (!cd("../../../../")) return 1;
-    } else if (config.host == HOST_LINUX && config.target == TARGET_WINDOWS) {
-        cmd.count = 0;
-        nob_log(NOB_INFO, "running windows example %s", config.example->name);
-        if (!cd(example_build_path)) return 1;
-        const char *bin = nob_temp_sprintf("./%s.exe", config.example->name);
-        nob_cmd_append(&cmd, "wine", bin);
-        if (!nob_cmd_run_sync(cmd)) return 1;
-        if (!cd("../../../../")) return 1;
-    }
+    if (!copy_resources(example_build_path, config)) return 1;
+    if (config.target == TARGET_QUEST)
+        if (!package_apk(config, example_build_path)) return 1;
+    if (!run_or_deploy(config, example_build_path)) return 1;
 
     nob_cmd_free(cmd);
     return 0;

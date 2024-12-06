@@ -241,7 +241,7 @@ void platform_wait_resize_frame_buffer()
     }
 }
 
-void platform_get_frame_buff_size(int *width, int *height)
+void platform_frame_buff_size(int *width, int *height)
 {
     glfwGetFramebufferSize(platform.handle, width, height);
 }

@@ -121,11 +121,16 @@ void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 
 /* platform specific functions that must be defined */
 /* This isn't very "header-only", however I haven't tried more than one platform yet,
- * so, I don't know how to properly generalize yet */
+ * so, I don't know how to properly generalize yet 
+ *
+ * ...yeah I still don't know how to generalize it, but this is incredibly inconvenient.
+ * perhaps the default should be glfw, and then maybe define a symbol that lets you override them?
+ * Whatever I come up with, I don't like this current solution.
+ * */
 extern bool platform_surface_init();
 extern const char **get_platform_exts(uint32_t *platform_ext_count);
 extern void platform_wait_resize_frame_buffer();
-extern void platform_get_frame_buff_size(int *width, int *height);
+extern void platform_frame_buff_size(int *width, int *height);
 
 typedef struct {
     VkPipelineLayout pl_layout;
@@ -1527,7 +1532,7 @@ VkExtent2D choose_swp_extent()
         return capabilities.currentExtent;
     } else {
         int width, height;
-        platform_get_frame_buff_size(&width, &height);
+        platform_frame_buff_size(&width, &height);
 
         VkExtent2D extent = {
             .width = width,
