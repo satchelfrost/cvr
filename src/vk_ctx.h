@@ -10,6 +10,8 @@
 #include "ext/nob.h"
 #include "nob_ext.h"
 
+// TODO: check for return_defer usage and double free corruption errors
+
 /*
  * Note: if I ever get around to making this a proper header-only library then I will want to remove
  * the dependencies on nob, and raymath.

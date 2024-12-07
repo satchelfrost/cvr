@@ -322,8 +322,8 @@ bool parse_sub_args(const char *arg_str, char ***forwarded_argv, int *forwarded_
 bool handle_usr_args(Config *config)
 {
     bool result = true;
-
     Nob_Cmd cmd = {0};
+
     config->program = nob_shift_args(&config->argc, &config->argv);
     bool target_exists = false;
 
@@ -682,17 +682,26 @@ bool compile_shaders(Config config)
     Shaders shaders = example->shaders;
     const char *example_path = nob_temp_sprintf("examples/%s", example->name);
     nob_log(NOB_INFO, "checking shaders for %s", example_path);
-    const char *output_folder = nob_temp_sprintf("./build/%s/%s/res", target_names[config.target], example_path);
-    if (!nob_mkdir_if_not_exists(output_folder)) nob_return_defer(false);
-    const char *input_folder = nob_temp_sprintf("%s/res", example_path);
+
+    char *dst = NULL;
+    if (config.target == TARGET_QUEST)
+        dst = nob_temp_sprintf("./build/%s/%s/pre-apk/assets/res", target_names[config.target], example_path);
+    else
+        dst = nob_temp_sprintf("./build/%s/%s/res", target_names[config.target], example_path);
+    if (!dst) {
+        nob_log(NOB_ERROR, "could create destination folder for shaders");
+        nob_return_defer(false);
+    }
+    if (!nob_mkdir_if_not_exists(dst)) nob_return_defer(false);
+    const char *src = nob_temp_sprintf("%s/res", example_path);
 
     for (size_t i = 0; i < shaders.count; i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.spv", output_folder, shaders.names[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s", input_folder, shaders.names[i]);
+        const char *shader_dst = nob_temp_sprintf("%s/%s.spv", dst, shaders.names[i]);
+        const char *shader_src = nob_temp_sprintf("%s/%s", src, shaders.names[i]);
 
-        if (nob_needs_rebuild(output_path, &input_path, 1)) {
+        if (nob_needs_rebuild(shader_dst, &shader_src, 1)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, "glslc", input_path, "-o", output_path);
+            nob_cmd_append(&cmd, "glslc", shader_src, "-o", shader_dst);
             Nob_Proc proc = nob_cmd_run_async(cmd);
             nob_da_append(&procs, proc);
         }
@@ -762,6 +771,21 @@ defer:
     return result;
 }
 
+/* specifically if the destination file does not exists */
+bool copy_file_if_not_exists(const char *src, const char *dst)
+{
+    switch (nob_file_exists(dst)) {
+    case FILE_DOES_NOT_EXIST:
+        if (!nob_copy_file(src, dst)) return false;
+        else return true;
+    case FILE_CHK_ERR:
+        return false;
+    case FILE_EXISTS:
+    default:
+        return true;
+    }
+}
+
 bool build_example_win(Config config, const char *build_path)
 {
     const char **c_files = config.example->c_files.names;
@@ -814,14 +838,7 @@ bool build_example_win(Config config, const char *build_path)
 
     /* copy cvr dll to examples folder */
     const char *dll_dst = nob_temp_sprintf("%s/libcvr.dll", build_path);
-    int ret = nob_file_exists(dll_dst);
-    if (ret == FILE_DOES_NOT_EXIST) {
-        if (!nob_copy_file(libcvr_path, dll_dst))
-            nob_return_defer(false);
-    } else if (ret == FILE_CHK_ERR) {
-        nob_return_defer(false);
-    }
-
+    if (!copy_file_if_not_exists(libcvr_path, dll_dst)) return false;
     
 defer:
     nob_cmd_free(cmd);
@@ -830,11 +847,11 @@ defer:
     return result;
 }
 
-bool build_example_quest(Config config, const char *build_path)
+bool build_example_quest(Config config, const char *example_build_path, const char *lib_arch_path)
 {
     const char **c_files = config.example->c_files.names;
     const Example *example = config.example;
-    const char *example_path = nob_temp_sprintf("examples/%s", example->name);
+    const char *example_src_path = nob_temp_sprintf("examples/%s", example->name);
     bool result = true;
     Nob_Cmd cmd = {0};
     Nob_Procs procs = {0};
@@ -842,8 +859,8 @@ bool build_example_quest(Config config, const char *build_path)
 
     /* build example */
     for (size_t i = 0; i < example->c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
+        const char *output_path = nob_temp_sprintf("%s/%s.o", example_build_path, c_files[i]);
+        const char *input_path = nob_temp_sprintf("%s/%s.c", example_src_path, c_files[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
             cmd.count = 0;
@@ -863,7 +880,7 @@ bool build_example_quest(Config config, const char *build_path)
 
     /* link with libraries */
     const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.a", target_names[config.target]);
-    const char *app_path = nob_temp_sprintf("%s/lib%s.so", build_path, example->name);
+    const char *app_path = nob_temp_sprintf("%s/lib%s.so", lib_arch_path, example->name);
     bool obj_updated = nob_needs_rebuild(app_path, obj_files.items, obj_files.count);
     bool cvrlib_updated = nob_needs_rebuild(app_path, &libcvr_path, 1);
     if (obj_updated || cvrlib_updated) {
@@ -900,14 +917,27 @@ defer:
     return result;
 }
 
-bool build_example(const char *build_path, Config config)
+bool build_example(const char *example_build_path, Config config)
 {
     if (config.target == TARGET_LINUX) {
-        return build_example_linux(config, build_path);
+        return build_example_linux(config, example_build_path);
     } else if (config.target == TARGET_WINDOWS && config.host == HOST_LINUX) {
-        return build_example_win(config, build_path);
+        return build_example_win(config, example_build_path);
     } else if (config.target == TARGET_QUEST && config.host == HOST_LINUX) {
-        return build_example_quest(config, build_path);
+        /* pre-apk is the folder is where we put everything we want to zip into the apk */
+        const char *pre_apk_path     = nob_temp_sprintf("%s/pre-apk",   example_build_path);
+        const char *lib_path         = nob_temp_sprintf("%s/lib",       pre_apk_path);
+        const char *lib_arch_path    = nob_temp_sprintf("%s/arm64-v8a", lib_path);
+        const char *assets_path      = nob_temp_sprintf("%s/assets",    pre_apk_path);
+        const char *cvr_res_path     = nob_temp_sprintf("%s/res",       assets_path);
+        const char *android_res_path = nob_temp_sprintf("%s/res",       pre_apk_path);
+        if (!nob_mkdir_if_not_exists(pre_apk_path))     return false;
+        if (!nob_mkdir_if_not_exists(lib_path))         return false;
+        if (!nob_mkdir_if_not_exists(lib_arch_path))    return false;
+        if (!nob_mkdir_if_not_exists(assets_path))      return false; 
+        if (!nob_mkdir_if_not_exists(cvr_res_path))     return false; 
+        if (!nob_mkdir_if_not_exists(android_res_path)) return false; 
+        return build_example_quest(config, example_build_path, lib_arch_path);
     } else {
         if (0 <= config.target && config.target < NOB_ARRAY_LEN(target_names))
             nob_log(NOB_ERROR, "failed to build example for target %s", target_names[config.target]);
@@ -972,12 +1002,22 @@ bool find_supported_example(Config *config)
 
 bool copy_resources(const char *example_build_path, Config config)
 {
+    /* get the source and destination resource folder names */
+    const char *src_res = nob_temp_sprintf("examples/%s/res", config.example->name);
+    char *dst_res = NULL;
+    if (config.target == TARGET_QUEST)
+        dst_res = nob_temp_sprintf("%s/pre-apk/assets/res", example_build_path);
+    else
+        dst_res = nob_temp_sprintf("%s/res", example_build_path);
+    if (!dst_res) {
+        nob_log(NOB_ERROR, "could create destination folder for resources");
+        return false;
+    }
+    if (!nob_mkdir_if_not_exists(dst_res)) return false;
+
     /* copy everything over into the resources folder */
-    const char *example_res = nob_temp_sprintf("examples/%s/res", config.example->name);
-    const char *build_res   = nob_temp_sprintf("%s/res", example_build_path);
-    if (!nob_mkdir_if_not_exists(build_res)) return false;
     Nob_File_Paths paths = {0};
-    if (!nob_read_entire_dir(example_res, &paths)) return false;
+    if (!nob_read_entire_dir(src_res, &paths)) return false;
     for (size_t i = 0; i < paths.count; i++) {
         const char *file_name = paths.items[i];
         /* note: we ignore shaders since they are copied in shader build step
@@ -987,37 +1027,16 @@ bool copy_resources(const char *example_build_path, Config config)
             strstr(file_name, ".comp"))
             continue;
 
-        const char *src_path = nob_temp_sprintf("%s/%s", example_res, file_name);
-        const char *dst_path = nob_temp_sprintf("%s/%s", build_res, file_name);
-
-        int ret = nob_file_exists(dst_path);
-        switch (ret) {
-        case FILE_DOES_NOT_EXIST:
-            if (!nob_copy_file(src_path, dst_path)) return false;
-            break;
-        case FILE_CHK_ERR:
-            return false;
-        case FILE_EXISTS:
-        default:
-        }
+        const char *src_path = nob_temp_sprintf("%s/%s", src_res, file_name);
+        const char *dst_path = nob_temp_sprintf("%s/%s", dst_res, file_name);
+        if (!copy_file_if_not_exists(src_path, dst_path)) return false;
     }
 
     /* if we are targeting quest then we will also need the openxr loader */
     if (config.target == TARGET_QUEST) {
-        const char *src_lib_path = "lib/arm64-v8a/Debug/libopenxr_loader.so";
-        const char *dst_lib_path = nob_temp_sprintf("%s/lib/arm64-v8a/libopenxr_loader.so", example_build_path);
-        if (!nob_mkdir_if_not_exists(nob_temp_sprintf("%s/lib", example_build_path))) return false;
-        if (!nob_mkdir_if_not_exists(nob_temp_sprintf("%s/lib/arm64-v8a", example_build_path))) return false;
-
-        int ret = nob_file_exists(dst_lib_path);
-        switch (ret) {
-        case FILE_DOES_NOT_EXIST:
-            if (!nob_copy_file(src_lib_path, dst_lib_path)) return false;
-            break;
-        case FILE_CHK_ERR: return false;
-        case FILE_EXISTS:
-        default:
-        }
+        const char *openxr_src = "lib/arm64-v8a/Debug/libopenxr_loader.so";
+        const char *openxr_dst = nob_temp_sprintf("%s/pre-apk/lib/arm64-v8a/libopenxr_loader.so", example_build_path);
+        if (!copy_file_if_not_exists(openxr_src, openxr_dst)) return false;
     }
 
     return true;
@@ -1165,6 +1184,7 @@ bool create_android_manifest(Config config, const char *manifest_path)
 bool package_apk(Config config, const char *example_build_path)
 {
     bool result = true;
+    Nob_Cmd cmd = {0};
 
     const char *manifest_path = nob_temp_sprintf("%s/AndroidManifest.xml", example_build_path);
     int ret = nob_file_exists(manifest_path);
@@ -1181,16 +1201,13 @@ bool package_apk(Config config, const char *example_build_path)
 
     if (!cd(example_build_path)) nob_return_defer(false);
 
-    Nob_Cmd cmd = {0};
     nob_cmd_append(&cmd, config.android.aapt);
     nob_cmd_append(&cmd, "package", "-f");
     nob_cmd_append(&cmd, "-F", "temp.apk");
     nob_cmd_append(&cmd, "-I", config.android.jar);
     nob_cmd_append(&cmd, "-M", "./AndroidManifest.xml");
-
-    if (!nob_mkdir_if_not_exists("assets")) nob_return_defer(false);
-    nob_cmd_append(&cmd, "-A", "assets");
-    // nob_cmd_append(&cmd, "-S", "./res"); // TODO: I think this might be a different resources path
+    // nob_cmd_append(&cmd, "-A", "./pre-apk/assets");
+    // nob_cmd_append(&cmd, "-S", "./pre-apk/res");
     nob_cmd_append(&cmd, "-v");
     nob_cmd_append(&cmd, "--target-sdk-version", ANDROID_VERSION);
 
@@ -1198,11 +1215,10 @@ bool package_apk(Config config, const char *example_build_path)
 
     /* unpack apk, compress assets & shared libs, then align*/
     cmd.count = 0;
-    if (!nob_mkdir_if_not_exists("sub-build")) nob_return_defer(false);
-    nob_cmd_append(&cmd, "unzip", "-o", "temp.apk", "-d", "./sub-build");
+    nob_cmd_append(&cmd, "unzip", "-o", "temp.apk", "-d", "./pre-apk");
     if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
 
-    if (!cd("sub-build")) nob_return_defer(false);
+    if (!cd("pre-apk")) nob_return_defer(false);
 
     cmd.count = 0;
     nob_cmd_append(&cmd, "zip", "-D4r", "../makecapk.apk", ".");
@@ -1217,7 +1233,8 @@ bool package_apk(Config config, const char *example_build_path)
     nob_cmd_append(&cmd, "rm", "-f", nob_temp_sprintf("%s.apk", config.example->name));
     if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     cmd.count = 0;
-    nob_cmd_append(&cmd, config.android.zip_align, "-v", "4", "makecapk.apk", nob_temp_sprintf("%s.apk", config.example->name));
+    const char *final_apk = nob_temp_sprintf("%s.apk", config.example->name);
+    nob_cmd_append(&cmd, config.android.zip_align, "-v", "4", "makecapk.apk", final_apk);
     if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
 
     /* clean up any loose files */
@@ -1225,7 +1242,56 @@ bool package_apk(Config config, const char *example_build_path)
     nob_cmd_append(&cmd, "rm", "temp.apk", "makecapk.apk");
     if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
 
-    // TODO: may need to cd back to parent directory
+    /* cd back to parent directory */
+    if (!cd("../../../../")) nob_return_defer(false);
+
+defer:
+    nob_cmd_free(cmd);
+    return result;
+}
+
+bool make_key_if_not_exists(const char *key_path)
+{
+    bool result = true;
+    Nob_Cmd cmd = {0};
+
+    switch (nob_file_exists(key_path)) {
+    case FILE_DOES_NOT_EXIST:
+        break;
+    case FILE_CHK_ERR:
+        nob_return_defer(false);
+    case FILE_EXISTS:
+    default:
+        nob_return_defer(true);
+    }
+
+    nob_cmd_append(&cmd, "keytool", "-genkey", "-v", "-keystore");
+    nob_cmd_append(&cmd, key_path, "-alias", "standkey");
+	nob_cmd_append(&cmd, "-keyalg", "RSA", "-keysize", "2048");
+    nob_cmd_append(&cmd, "-validity", "10000");
+    nob_cmd_append(&cmd, "-storepass", "password", "-keypass", "password");
+    nob_cmd_append(&cmd, "-dname", "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB");
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+defer:
+    nob_cmd_free(cmd);
+    return result;
+}
+
+bool sign_apk(Config config, const char *example_build_path)
+{
+    bool result = true;
+    Nob_Cmd cmd = {0};
+
+    const char *key_path = nob_temp_sprintf("%s/my-release-key.keystore", example_build_path);
+    if (!make_key_if_not_exists(key_path)) nob_return_defer(false);
+
+    cmd.count = 0;
+    nob_cmd_append(&cmd, config.android.signer);
+    nob_cmd_append(&cmd, "sign", "--ks", key_path);
+    nob_cmd_append(&cmd, "--key-pass", "pass:password", "--ks-pass", "pass:password");
+    nob_cmd_append(&cmd, nob_temp_sprintf("%s/%s.apk", example_build_path, config.example->name));
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
 
 defer:
     nob_cmd_free(cmd);
@@ -1257,8 +1323,10 @@ int main(int argc, char **argv)
     if (!build_example(example_build_path, config)) return 1;
     if (!compile_shaders(config)) return 1;
     if (!copy_resources(example_build_path, config)) return 1;
-    if (config.target == TARGET_QUEST)
+    if (config.target == TARGET_QUEST) {
         if (!package_apk(config, example_build_path)) return 1;
+        if (!sign_apk(config, example_build_path)) return 1;
+    }
     if (!run_or_deploy(config, example_build_path)) return 1;
 
     nob_cmd_free(cmd);
