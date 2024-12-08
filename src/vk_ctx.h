@@ -1113,6 +1113,7 @@ bool vk_compute_fence_wait()
     return true;
 }
 
+#ifndef PLATFORM_QUEST
 void vk_compute_pl_barrier()
 {
     VkMemoryBarrier2KHR barrier = {
@@ -1130,6 +1131,7 @@ void vk_compute_pl_barrier()
     };
     vkCmdPipelineBarrier2(vk_ctx.compute_buff, &dependency);
 }
+#endif // PLATFORM_QUEST
 
 void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {

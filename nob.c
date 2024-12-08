@@ -6,8 +6,6 @@
 #define FILE_EXISTS 1
 #define FILE_CHK_ERR -1 
 
-/* we need 33 for latest vulkan stuff
- * specifically vkCmdPipelineBarrier2 */
 #define ANDROID_VERSION "33"
 
 typedef struct {
@@ -334,6 +332,7 @@ bool handle_usr_args(Config *config)
             switch (flag) {
             case 'c':
                 nob_log(NOB_INFO, "clean build requested, removing build folder");
+                // TODO: I want this to remove only the build/target not the main build
                 nob_cmd_append(&cmd, "rm", "build", "res", "-rf");
                 if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
                 break;
@@ -904,6 +903,7 @@ bool build_example_quest(Config config, const char *example_build_path, const ch
         nob_cmd_append(&cmd, "./lib/arm64-v8a/Debug/libopenxr_loader.so");
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
         nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
+
         const char *ndk = nob_temp_sprintf("%s/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/" ANDROID_VERSION, config.android.ndk_root);
         nob_cmd_append(&cmd, nob_temp_sprintf("-L%s", ndk), nob_temp_sprintf("-B%s", ndk));
         nob_cmd_append(&cmd, "-lvulkan", "-landroid", "-llog", "-lm");
@@ -1109,7 +1109,18 @@ defer:
 
 bool deploy_example_quest(Config config, const char *example_build_path)
 {
+    bool result = true;
+    Nob_Cmd cmd = {0};
 
+    const char *apk_path = nob_temp_sprintf("%s/%s.apk", example_build_path, config.example->name);
+    nob_cmd_append(&cmd, "adb", "install", "-r", apk_path);
+    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+
+    // adb shell am start -n com.wamwadstudios.blarg/android.app.NativeActivity && adb logcat
+
+defer:
+    nob_cmd_free(cmd);
+    return result;
 }
 
 bool run_or_deploy(Config config, const char *example_build_path)
@@ -1127,6 +1138,8 @@ bool run_or_deploy(Config config, const char *example_build_path)
         if (!run_example_win(config, example_build_path)) return false;
         break;
     case TARGET_QUEST:
+        if (!deploy_example_quest(config, example_build_path)) return false;
+        break;
     default:
         nob_log(NOB_ERROR, "Target %s not yet supported for running or deploying", target_names[config.target]);
         return false;
@@ -1154,7 +1167,7 @@ bool create_android_manifest(Config config, const char *manifest_path)
     nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"oculus.software.handtracking\" android:required=\"false\" />\n");
     nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"com.oculus.permission.HAND_TRACKING\" />\n");
     nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"com.oculus.feature.PASSTHROUGH\" android:required=\"true\" />\n");
-    nob_sb_append_cstr(&sb, nob_temp_sprintf("\t<application android:allowBackup=\"false\" android:label=\"%s\" >\n", config.example->name));
+    nob_sb_append_cstr(&sb, nob_temp_sprintf("\t<application android:allowBackup=\"false\" android:label=\"%s\" android:hasCode=\"false\">\n", config.example->name));
     nob_sb_append_cstr(&sb, "\t<uses-sdk android:minSdkVersion=\"" ANDROID_VERSION "\"\n");
     nob_sb_append_cstr(&sb, "\t\tandroid:targetSdkVersion=\"" ANDROID_VERSION "\" />\n");
 
@@ -1162,6 +1175,7 @@ bool create_android_manifest(Config config, const char *manifest_path)
     nob_sb_append_cstr(&sb, "\t<meta-data android:name=\"com.oculus.supportedDevices\" android:value=\"all\" />\n");
     nob_sb_append_cstr(&sb, "\t\t<activity\n");
     nob_sb_append_cstr(&sb, "\t\t\tandroid:name=\"android.app.NativeActivity\"\n");
+    nob_sb_append_cstr(&sb, "\t\t\tandroid:exported=\"true\"\n");
     nob_sb_append_cstr(&sb, "\t\t\tandroid:theme=\"@android:style/Theme.Black.NoTitleBar.Fullscreen\"\n");
     nob_sb_append_cstr(&sb, "\t\t\tandroid:launchMode=\"singleTask\"\n");
     nob_sb_append_cstr(&sb, "\t\t\tandroid:screenOrientation=\"landscape\"\n");
