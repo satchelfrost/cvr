@@ -1115,7 +1115,7 @@ void log_fps()
     static int fps = -1;
     int curr_fps = get_fps();
     if (curr_fps != fps) {
-        nob_log(NOB_INFO, "FPS %d", curr_fps);
+        nob_log(NOB_INFO, "FPS %d (%.3f)", curr_fps, get_frame_time());
         fps = curr_fps;
     }
 }

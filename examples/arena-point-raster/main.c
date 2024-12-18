@@ -43,12 +43,17 @@ typedef struct {
 } Point_Cloud_Layer;
 
 typedef struct {
-    size_t *items;
+    size_t fps;
+    float ms;
+} Time_Record;
+
+typedef struct {
+    Time_Record *items;
     size_t count;
     size_t capacity;
     const size_t max;
     bool collecting;
-} FPS_Record;
+} Time_Records;
 
 typedef struct {
     Vk_Buffer buff;
@@ -75,6 +80,7 @@ typedef struct {
     float blend_ratio;
     int frame_width;
     int frame_height;
+    int fake_occlusion;
 } UBO_Data;
 
 typedef struct {
@@ -350,6 +356,7 @@ typedef enum {
     SHADER_MODE_VERT_COLORED_BY_CCTV,
     SHADER_MODE_VERT_CLOSEST_CCTV_TEX,
     SHADER_MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK,
+    SHADER_MODE_SEAM_BLEND,
     SHADER_MODE_COUNT,
 } Shader_Mode;
 
@@ -379,6 +386,9 @@ void log_shader_mode(Shader_Mode mode)
         break;
     case SHADER_MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK:
         nob_log(NOB_INFO, "Shader mode: vertex gets texture color from closest cctv, and fallback texture (next closest)");
+        break;
+    case SHADER_MODE_SEAM_BLEND:
+        nob_log(NOB_INFO, "Shader mode: same as MULTI_VID_TEX_BLEND but with seam blending");
         break;
     default:
         nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
@@ -712,7 +722,8 @@ bool create_pipelines()
     return true;
 }
 
-bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float blend_ratio, Point_Cloud_UBO *ubo)
+bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float blend_ratio, Point_Cloud_UBO *ubo,
+                   bool fake_occlusion)
 {
     /* update mvp for main viewing camera */
     if (!get_mvp_float16(&ubo->data.main_cam_mvp)) return false;
@@ -744,6 +755,7 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
     ubo->data.cam_order_2 = cam_order[2];
     ubo->data.cam_order_3 = cam_order[3];
     ubo->data.shader_mode = shader_mode;
+    ubo->data.fake_occlusion = (fake_occlusion) ? 1 : 0;
     ubo->data.blend_ratio = blend_ratio;
     ubo->data.frame_width  = initial_win_size.width;
     ubo->data.frame_height = initial_win_size.height;
@@ -856,7 +868,7 @@ Camera camera_defaults[4] = {0};
 int main(int argc, char **argv)
 {
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
-    FPS_Record record = {.max = MAX_FPS_REC};
+    Time_Records records = {.max = MAX_FPS_REC};
     size_t lod = 0;
     if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
 
@@ -923,6 +935,7 @@ int main(int argc, char **argv)
     Shader_Mode shader_mode = SHADER_MODE_MODEL;
     float vid_update_time = 0.0f;
     bool playing = false;
+    bool fake_occlusion = false;
 
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))          return 1;
@@ -996,7 +1009,7 @@ int main(int argc, char **argv)
         }
         if (is_key_down(KEY_F)) log_fps();
         if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_DOWN))
-            record.collecting = true;
+            records.collecting = true;
         if ((is_key_pressed(KEY_M) && !is_key_down(KEY_LEFT_SHIFT)) ||
              is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
@@ -1019,20 +1032,32 @@ int main(int argc, char **argv)
         if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             playing = !playing;
         if (is_key_pressed(KEY_L)) log_cameras(&cameras[1], NUM_CCTVS);
+        if (is_key_pressed(KEY_O)) fake_occlusion = !fake_occlusion;
 
         if (playing) vid_update_time += get_frame_time();
 
         /* start collecting frame rates to average */
-        if (record.collecting) {
-            nob_da_append(&record, get_fps());
+        if (records.collecting) {
+            Time_Record record = {
+                .fps = get_fps(),
+                .ms = get_frame_time() * 1000.0f,
+            };
+            nob_da_append(&records, record);
             /* calculate the average frame rate, print results, and reset */
-            if (record.count >= record.max) {
-                size_t sum = 0;
-                for (size_t i = 0; i < record.count; i++) sum += record.items[i];
-                float ave = (float) sum / record.count;
-                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f", record.count, ave);
-                record.count = 0;
-                record.collecting = false;
+            if (records.count >= records.max) {
+                /* average fps */
+                size_t fps_sum = 0;
+                for (size_t i = 0; i < records.count; i++) fps_sum += records.items[i].fps;
+                float fps_ave = (float) fps_sum / records.count;
+
+                /* average milliseconds */
+                size_t ms_sum = 0;
+                for (size_t i = 0; i < records.count; i++) ms_sum += records.items[i].ms;
+                float ms_ave = (float) ms_sum / records.count;
+
+                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f (%.2f ms)", records.count, fps_ave, ms_ave);
+                records.count = 0;
+                records.collecting = false;
             }
         }
 
@@ -1053,7 +1078,7 @@ int main(int argc, char **argv)
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
             float blend_ratio = calc_blend_ratio(cameras, cam_order);
             if (!vk_compute_fence_wait()) return 1;
-            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo)) return 1;
+            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, fake_occlusion)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
 
