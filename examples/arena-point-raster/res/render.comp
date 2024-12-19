@@ -88,7 +88,7 @@ void main()
         return;
 
     /* fake occlusion by limiting the height to a little under the stadium floor */
-    int shader_mode = (ubo.fake_occlusion == 1 && vert.z < -2.0) ? MODE_MODEL : ubo.shader_mode;
+    int shader_mode = (ubo.fake_occlusion == 1 && vert.z < -1.5) ? MODE_MODEL : ubo.shader_mode;
 
     /* don't incur the cost of texture sampling if we are only interested in the colors from the model */
     if (shader_mode != MODE_MODEL) {
