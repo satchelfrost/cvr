@@ -245,33 +245,13 @@ void main()
 
         if (cam_sees[ubo.cam_order_0] > 0) {
             if (cam_sees[ubo.cam_order_1] > 0) {
-
                 dist_blend_ratio = 1.0 - smoothstep(0.35, 0.65, ubo.blend_ratio);
-
-                //temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], dist_blend_ratio * seam_blend_ratios[ubo.cam_order_0]);
-
-#define DEBUG_COLOR_RATIO 1.0
-                if (seam_blend_ratios[ubo.cam_order_1] < 1.0 && dist_blend_ratio < seam_blend_ratios[ubo.cam_order_1]) {
-                    temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], dist_blend_ratio * seam_blend_ratios[ubo.cam_order_1]);
-                    temp_mix = mix(vec4(1.0, 0.0, 1.0, 1.0), temp_mix, dist_blend_ratio);
-                } else if (seam_blend_ratios[ubo.cam_order_1] < 1.0) {
-                    temp_mix = mix(tex_colors[ubo.cam_order_0], tex_colors[ubo.cam_order_1], dist_blend_ratio * seam_blend_ratios[ubo.cam_order_1]);
-                    temp_mix = mix(vec4(1.0, 0.0, 0.0, 1.0), temp_mix, dist_blend_ratio);
+                if (seam_blend_ratios[ubo.cam_order_1] < 1.0) {
+                    temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], max(dist_blend_ratio, (1.0 - seam_blend_ratios[ubo.cam_order_1])));
                 } else {
-                    temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], dist_blend_ratio * seam_blend_ratios[ubo.cam_order_0]);
-                    //temp_mix = mix(vec4(0.0, 1.0, 0.0, 1.0), temp_mix, dist_blend_ratio);
+                    temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], min(dist_blend_ratio , seam_blend_ratios[ubo.cam_order_0]));
                 }
-
-                //if (seam_blend_ratios[ubo.cam_order_1] < 1.0 && dist_blend_ratio < seam_blend_ratios[ubo.cam_order_1]) {
-                //    temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], dist_blend_ratio * seam_blend_ratios[ubo.cam_order_1]);
-                //    temp_mix = mix(vec4(1.0, 0.0, 0.0, 1.0), temp_mix, dist_blend_ratio);
-                //} else {
-                //    temp_mix = mix(tex_colors[ubo.cam_order_1], tex_colors[ubo.cam_order_0], dist_blend_ratio * seam_blend_ratios[ubo.cam_order_0]);
-                //    temp_mix = mix(vec4(0.0, 1.0, 0.0, 1.0), temp_mix, DEBUG_COLOR_RATIO);
-                //}
-
                 out_color = vec3_to_uint(temp_mix.rgb);
-
             } else if (cam_sees[ubo.cam_order_2] > 0) {
                 temp_mix = mix(tex_colors[ubo.cam_order_2], tex_colors[ubo.cam_order_0], seam_blend_ratios[ubo.cam_order_0]);
                 out_color = vec3_to_uint(temp_mix.rgb);
