@@ -1,7 +1,9 @@
 # Cool Vulkan Renderer (Paper Submission Snapshot)
 
 This is a snapshot of the project exactly as it was before submitting the paper. The specific source code used in
-the paper can be found [here](examples/arena-point-raster).
+the paper can be found [here](examples/arena-point-raster). Please keep in mind that while the source code is open,
+the point cloud and videos for the arena are not. In theory, they aren't necessary to replicate the process.
+The code for taking a LAS file and generating the LODs can be found [here](https://github.com/satchelfrost/lasgrabr/blob/main/main.c).
 
 ## Building from Source on Linux
 
