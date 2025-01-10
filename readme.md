@@ -1,6 +1,7 @@
-# Cool Vulkan Renderer
+# Cool Vulkan Renderer (Paper Submission Snapshot)
 
-Cool Vulkan Renderer (or simply cvr) is a project initially inspired by [raylib](https://github.com/raysan5/raylib), but with a Vulkan twist (i.e. more verbose, less beginner friendly, and overall less feature rich). For now this project is public for my own convenience, however, it might help others interested in C programming with Vulkan. The eventual goal is to make `vk_ctx.h` a proper header-only library, but currently it still has a few dependencies. Note that some examples may have private data because they are for my research; these examples (should) have a little note attached in each folder to let you know the data is private.
+This is a snapshot of the project exactly as it was before submitting the paper. The specific source code used in
+the paper can be found [here](examples/arena-point-raster).
 
 ## Building from Source on Linux
 
