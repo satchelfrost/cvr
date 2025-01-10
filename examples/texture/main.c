@@ -25,7 +25,8 @@ typedef struct {
     float aspect;
 } Texture;
 
-Texture textures[] = {
+#define TEXTURE_COUNT 2
+Texture textures[TEXTURE_COUNT] = {
     {.file_name = "res/matrix.png"},
     {.file_name = "res/statue.jpg"}
 };
@@ -88,7 +89,7 @@ bool setup_ds_sets()
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
 
     /* update descriptor sets based on layouts */
-    for (size_t i = 0; i < NOB_ARRAY_LEN(textures); i++) {
+    for (size_t i = 0; i < TEXTURE_COUNT; i++) {
         VkDescriptorImageInfo img_info = {
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .imageView   = textures[i].handle.view,
@@ -165,7 +166,7 @@ int main()
 
     init_window(500, 500, "Load texture");
 
-    for (size_t i = 0; i < NOB_ARRAY_LEN(textures); i++)
+    for (size_t i = 0; i < TEXTURE_COUNT; i++)
         if (!upload_texture(&textures[i])) return 1;
 
     /* setup descriptors */
