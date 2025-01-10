@@ -32,7 +32,7 @@ struct Vertex {
 #define MODE_VERT_COLORED_BY_CCTV             5
 #define MODE_VERT_CLOSEST_CCTV_TEX            6
 #define MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK 7
-#define MODE_SEAM_BLEND                       8
+#define MODE_SEAM_AND_VIEW_BLEND              8
 
 layout(binding = 0) uniform uniform_data {
     mat4 mvp;                 // main viewing camera's view-proj w/ model
@@ -47,7 +47,7 @@ layout(binding = 0) uniform uniform_data {
     float blend_ratio;        // blend ratio for two closest cctvs to main viewing camera
     int frame_width;
     int frame_height;
-    int fake_occlusion;
+    int elevation_based_occlusion;
 } ubo;
 
 layout(std430, binding = 1) buffer vert_data {
@@ -88,7 +88,7 @@ void main()
         return;
 
     /* fake occlusion by limiting the height to a little under the stadium floor */
-    int shader_mode = (ubo.fake_occlusion == 1 && vert.z < -1.5) ? MODE_MODEL : ubo.shader_mode;
+    int shader_mode = (ubo.elevation_based_occlusion == 1 && vert.z < -1.5) ? MODE_MODEL : ubo.shader_mode;
 
     /* don't incur the cost of texture sampling if we are only interested in the colors from the model */
     if (shader_mode != MODE_MODEL) {
@@ -219,7 +219,7 @@ void main()
             else                 out_color = vec3_to_uint(tex_colors[1].rgb);
         }
         break;
-    case MODE_SEAM_BLEND:
+    case MODE_SEAM_AND_VIEW_BLEND:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
 
         if (cam_sees[ubo.cam_order_2] > 0) {

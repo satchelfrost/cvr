@@ -10,7 +10,7 @@
 #include "pl_mpeg.h"
 
 #define MAX_FPS_REC 100
-#define SUBGROUP_SZ 1024    // Subgroup size for render.comp
+#define WORK_GROUP_SZ 1024    // Subgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
 #define MAX_LOD 7
 #define NUM_CCTVS 4
@@ -80,7 +80,7 @@ typedef struct {
     float blend_ratio;
     int frame_width;
     int frame_height;
-    int fake_occlusion;
+    int elevation_based_occlusion;
 } UBO_Data;
 
 typedef struct {
@@ -670,10 +670,10 @@ bool build_compute_cmds(size_t highest_lod)
         /* loop through the lod layers of the point cloud (render.comp shader) */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
             /* submit batches of points to render compute shader */
-            group_x = pc_layers[lod].count / SUBGROUP_SZ + 1;
+            group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
             size_t batch_size = group_x / NUM_BATCHES;
             for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
-                uint32_t offset = batch * batch_size * SUBGROUP_SZ;
+                uint32_t offset = batch * batch_size * WORK_GROUP_SZ;
                 uint32_t count = pc_layers[lod].count;
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
                 vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
@@ -723,7 +723,7 @@ bool create_pipelines()
 }
 
 bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float blend_ratio, Point_Cloud_UBO *ubo,
-                   bool fake_occlusion)
+                   bool elevation_based_occlusion)
 {
     /* update mvp for main viewing camera */
     if (!get_mvp_float16(&ubo->data.main_cam_mvp)) return false;
@@ -755,7 +755,7 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
     ubo->data.cam_order_2 = cam_order[2];
     ubo->data.cam_order_3 = cam_order[3];
     ubo->data.shader_mode = shader_mode;
-    ubo->data.fake_occlusion = (fake_occlusion) ? 1 : 0;
+    ubo->data.elevation_based_occlusion = (elevation_based_occlusion) ? 1 : 0;
     ubo->data.blend_ratio = blend_ratio;
     ubo->data.frame_width  = initial_win_size.width;
     ubo->data.frame_height = initial_win_size.height;
@@ -935,7 +935,7 @@ int main(int argc, char **argv)
     Shader_Mode shader_mode = SHADER_MODE_MODEL;
     float vid_update_time = 0.0f;
     bool playing = false;
-    bool fake_occlusion = false;
+    bool elevation_based_occlusion = false;
 
     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))          return 1;
@@ -1032,7 +1032,7 @@ int main(int argc, char **argv)
         if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             playing = !playing;
         if (is_key_pressed(KEY_L)) log_cameras(&cameras[1], NUM_CCTVS);
-        if (is_key_pressed(KEY_O)) fake_occlusion = !fake_occlusion;
+        if (is_key_pressed(KEY_O)) elevation_based_occlusion = !elevation_based_occlusion;
 
         if (playing) vid_update_time += get_frame_time();
 
@@ -1078,7 +1078,7 @@ int main(int argc, char **argv)
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
             float blend_ratio = calc_blend_ratio(cameras, cam_order);
             if (!vk_compute_fence_wait()) return 1;
-            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, fake_occlusion)) return 1;
+            if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, elevation_based_occlusion)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
 
