@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vulkan/vulkan_core.h>
+#include "vk_ctx.h"
+#include "ext/raylib-5.0/raymath.h"
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -213,14 +215,16 @@ typedef enum {
     ORTHOGRAPHIC
 } Camera_Projection;
 
-#define RL_VECTOR3_TYPE
-typedef struct Vector3 {
-    float x;
-    float y;
-    float z;
-} Vector3;
+// #if !defined(RL_VECTOR3_TYPE)
+// typedef struct {
+//     float x;
+//     float y;
+//     float z;
+// } Vector3;
+// #define RL_VECTOR3_TYPE
+// #endif
 
-#define CVR_CAMERA
+// #define CVR_CAMERA
 typedef struct {
     Vector3 position;
     Vector3 target;
@@ -229,7 +233,7 @@ typedef struct {
     int projection;
 } Camera;
 
-#define SHAPE_TYPE
+// #define SHAPE_TYPE
 typedef enum {
     SHAPE_CUBE = 0,
     SHAPE_QUAD,
@@ -238,46 +242,58 @@ typedef enum {
     SHAPE_COUNT,
 } Shape_Type;
 
-#define RL_MATRIX_TYPE
-typedef struct {
-    float m0, m4, m8, m12;
-    float m1, m5, m9, m13;
-    float m2, m6, m10, m14;
-    float m3, m7, m11, m15;
-} Matrix;
-
-#define RL_FLOAT_16
-typedef struct float16 {
-    float v[16];
-} float16;
+// #if !defined(RL_MATRIX_TYPE)
+// typedef struct {
+//     float m0, m4, m8, m12;
+//     float m1, m5, m9, m13;
+//     float m2, m6, m10, m14;
+//     float m3, m7, m11, m15;
+// } Matrix;
+// #define RL_MATRIX_TYPE
+// #endif
+//
+// #if !defined(RL_FLOAT_16)
+// typedef struct {
+//     float v[16];
+// } float16;
+// #define RL_FLOAT_16
+// #endif
 
 typedef struct {
     int width;
     int height;
 } Window_Size;
 
+/* window */
 bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 void enable_full_screen();
 bool window_should_close();                                 /* Check if window should close and poll events */
 Window_Size get_window_size();
-void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
-void start_timer();
-void begin_mode_3d(Camera camera);                          /* Set camera and push a matrix */
-void end_mode_3d();                                         /* Pops matrix, checks for errors */
-void end_drawing();                                         /* Submits commands, presents, and polls for input */
-void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
-void begin_compute();
-void end_compute();
 void set_window_size(int width, int height);
 void set_window_pos(int x, int y);
 
+/* camera */
+void update_camera_free(Camera *camera);                    /* Updates camera based on WASD movement, and mouse */
+void look_at(Camera camera);
+Matrix get_proj(Camera camera);
+Matrix get_proj_aspect(Camera camera, double aspect);
+void camera_move_up(Camera *camera, float distance);
+void begin_mode_3d(Camera camera);                          /* Set camera and push a matrix */
+void end_mode_3d();                                         /* Pops matrix, checks for errors */
+
+/* drawing */
+void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
+void end_drawing();                                         /* Submits commands, presents, and polls for input */
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
-bool draw_points(size_t vtx_id);
-bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
+/* gpu compute */
+void begin_compute();
+void end_compute();
+
+/* input */
 bool is_key_pressed(int key);
 bool is_key_down(int key);
 int get_mouse_x();
@@ -285,13 +301,20 @@ int get_mouse_y();
 bool is_gamepad_button_pressed(int button);
 bool is_gamepad_button_down(int button);
 float get_gamepad_axis_movement(int axis);
+bool is_mouse_button_down(int button);
+float get_mouse_wheel_move();
+int get_last_btn_pressed();
 
+/* time */
 double get_frame_time();
 double get_time();
 int get_fps();
 int get_average_fps();
 void set_target_fps(int fps);
+void start_timer(); // called implicitly by begin_drawing
+void log_fps();
 
+/* transformations */
 void push_matrix();
 void pop_matrix();
 void translate(float x, float y, float z);
@@ -302,50 +325,22 @@ void rotate_z(float angle);
 void rotate_xyz(Vector3 angle);
 void rotate_zyx(Vector3 angle);
 void scale(float x, float y, float z);
-void look_at(Camera camera);
-void camera_move_up(Camera *camera, float distance);
-
-typedef struct {
-    void *data;
-    int width;
-    int height;
-    int mipmaps;
-    int format;
-} Image;
-
-Image load_image(const char *file_name);
-void unload_image(Image img);
-
-typedef struct {
-    size_t id;
-    int width;
-    int height;
-    int mipmaps;
-    int format;
-} Texture;
-
-typedef struct {
-    void *items;  // pointer to elements
-    size_t size;  // size of the entire buffer
-    size_t count; // number of items
-} Buffer; // TODO: I shouldn't need this anymore now that I'm okay with exposing vk_ctx.h to user space
-
-bool is_mouse_button_down(int button);
-float get_mouse_wheel_move();
-int get_last_btn_pressed();
-
-bool upload_point_cloud(Buffer buff, size_t *id);
-void destroy_point_cloud(size_t id);
-bool update_cameras_ubo(Camera *four_cameras, int shader_mode, int *cam_order);
 bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
 bool get_mvp(Matrix *mvp);
 bool get_mvp_float16(float16 *mvp);
 Matrix get_view_proj();
-bool pc_sampler_init();
-Matrix get_proj(Camera camera);
-Matrix get_proj_aspect(Camera camera, double aspect);
+
+/* color */
 Color color_from_HSV(float hue, float saturation, float value);
+
+/* GPU */
 void wait_idle();
-void log_fps();
+
+/* STUFF TO GET RID OF */
+// void destroy_point_cloud(size_t id); // TODO: I don't want to manage this state
+// bool upload_point_cloud(Buffer buff, size_t *id); // TODO: I don't want to manage this state
+bool draw_points(size_t vtx_id);
+bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
+bool draw_points_ex2(Vk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 #endif // CVR_H_

@@ -1,8 +1,24 @@
 #ifndef GEOMETRY_H_
 #define GEOMETRY_H_
 
-#include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
+
+#if !defined(RL_VECTOR3_TYPE)
+typedef struct {
+    float x;
+    float y;
+    float z;
+} Vector3;
+#define RL_VECTOR3_TYPE
+#endif
+
+#if !defined(RL_VECTOR2_TYPE)
+typedef struct {
+    float x;
+    float y;
+} Vector2;
+#define RL_VECTOR2_TYPE
+#endif
 
 typedef struct {
     Vector3 pos;

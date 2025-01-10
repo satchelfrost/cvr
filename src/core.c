@@ -1,9 +1,4 @@
 #include "cvr.h"
-#include <stdbool.h>
-#include <vulkan/vulkan_core.h>
-
-#define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
 
 #define VK_CTX_IMPLEMENTATION
 #include "vk_ctx.h"
@@ -11,8 +6,10 @@
 #define NOB_IMPLEMENTATION
 #include "ext/nob.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "ext/stb_image.h"
+#define RAYMATH_IMPLEMENTATION
+#include "ext/raylib-5.0/raymath.h"
+
+#include <time.h> // used by nanosleep
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
@@ -89,7 +86,6 @@ typedef enum {
     DEFAULT_PL_FILL,
     DEFAULT_PL_WIREFRAME,
     DEFAULT_PL_POINT_CLOUD,
-    DEFAULT_PL_COMPUTE,
     DEFAULT_PL_COUNT,
 } Default_Pipeline;
 
@@ -240,7 +236,8 @@ bool draw_shape(Shape_Type shape_type)
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, mvp);
+    float16 f16_mvp = MatrixToFloatV(mvp);
+    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, &f16_mvp);
 
     return true;
 }
@@ -258,9 +255,10 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    float16 f16_mvp = MatrixToFloatV(mvp);
     Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape].idx_buff;
-    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, mvp);
+    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, &f16_mvp);
 
     return true;
 }
@@ -336,10 +334,11 @@ bool draw_shape_wireframe(Shape_Type shape_type)
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    float16 f16_mvp = MatrixToFloatV(mvp);
     vk_draw(
         pipelines.handles[DEFAULT_PL_WIREFRAME],
         pipelines.layouts[DEFAULT_PL_WIREFRAME],
-        vtx_buff, idx_buff, mvp
+        vtx_buff, idx_buff, &f16_mvp
     );
     return true;
 }
@@ -467,7 +466,7 @@ void begin_drawing(Color color)
 {
     start_timer();
     vk_begin_drawing();
-    vk_begin_render_pass(color);
+    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
 }
 
 void end_drawing()
@@ -706,20 +705,6 @@ void destroy_shape_res()
     }
 }
 
-Image load_image(const char *file_name)
-{
-    Image img = {0};
-    int channels;
-    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
-    img.format = (int)VK_FORMAT_R8G8B8A8_SRGB;
-    return img;
-}
-
-void unload_image(Image image)
-{
-    free(image.data);
-}
-
 Vector3 get_camera_forward(Camera *camera)
 {
     return Vector3Normalize(Vector3Subtract(camera->target, camera->position));
@@ -862,36 +847,36 @@ bool is_mouse_button_down(int button)
     return mouse.curr_button_state[button] == 1;
 }
 
-bool upload_point_cloud(Buffer buff, size_t *id)
-{
-    Vk_Buffer vk_buff = {
-        .count = buff.count,
-        .size  = buff.size,
-    };
-    if (!vk_vtx_buff_staged_upload(&vk_buff, buff.items)) {
-        nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
-        return false;
-    }
+// bool upload_point_cloud(Buffer buff, size_t *id)
+// {
+//     Vk_Buffer vk_buff = {
+//         .count = buff.count,
+//         .size  = buff.size,
+//     };
+//     if (!vk_vtx_buff_staged_upload(&vk_buff, buff.items)) {
+//         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
+//         return false;
+//     }
+//
+//     *id = point_clouds.count;
+//     nob_da_append(&point_clouds, vk_buff);
+//     return true;
+// }
 
-    *id = point_clouds.count;
-    nob_da_append(&point_clouds, vk_buff);
-    return true;
-}
-
-void destroy_point_cloud(size_t id)
-{
-    vkDeviceWaitIdle(vk_ctx.device);
-
-    bool found = false;
-    for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle) {
-            vk_buff_destroy(point_clouds.items[i]);
-            found = true;
-        }
-    }
-
-    if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
-}
+// void destroy_point_cloud(size_t id)
+// {
+//     vkDeviceWaitIdle(vk_ctx.device);
+//
+//     bool found = false;
+//     for (size_t i = 0; i < point_clouds.count; i++) {
+//         if (i == id && point_clouds.items[i].handle) {
+//             vk_buff_destroy(point_clouds.items[i]);
+//             found = true;
+//         }
+//     }
+//
+//     if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
+// }
 
 bool default_pl_point_cloud_init()
 {
@@ -961,10 +946,10 @@ bool draw_points(size_t vtx_id)
         return false;
     }
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-
+    float16 f16_mvp = MatrixToFloatV(mvp);
     VkPipeline pl = pipelines.handles[DEFAULT_PL_POINT_CLOUD];
     VkPipelineLayout pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD];
-    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, NULL, 0);
+    vk_draw_points_ex(vtx_buff, &f16_mvp, pl, pl_layout, NULL, 0);
 
     return true;
 }
@@ -987,8 +972,29 @@ bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, Vk
         return false;
     }
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    float16 f16_mvp = MatrixToFloatV(mvp);
+    vk_draw_points_ex(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
 
-    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, ds_sets, ds_set_count);
+    return true;
+}
+
+bool draw_points_ex2(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+{
+    if (!vtx_buff.handle) {
+        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud");
+        return false;
+    }
+
+    Matrix model = {0};
+    if (mat_stack_p) {
+        model = mat_stack[mat_stack_p - 1];
+    } else {
+        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        return false;
+    }
+    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    float16 f16_mvp = MatrixToFloatV(mvp);
+    vk_draw_points_ex(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
 
     return true;
 }

@@ -1,15 +1,18 @@
 #include "cvr.h"
 #include "ext/nob.h"
-#include "ext/raylib-5.0/raymath.h"
+// #include "ext/raylib-5.0/raymath.h"
 #include <float.h>
 #include "vk_ctx.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "ext/stb_image.h"
 
 /* point cloud sizes */
 #define S  "5060224"
 #define M  "50602232"
 #define L  "101204464"
 #define XL "506022320"
-#define NUM_IMGS 4
+#define TEXTURE_COUNT 4
 
 #define read_attr(attr, sv)                   \
     do {                                      \
@@ -27,16 +30,17 @@ typedef struct {
     Point_Vert *items;
     size_t count;
     size_t capacity;
-} Vertices;
-
-typedef struct {
-    Vertices verts;
-    Buffer buff;
-    size_t id;
+    Vk_Buffer buff;
 } Point_Cloud;
 
 typedef struct {
-    float16 camera_mvps[NUM_IMGS];
+    const char *file_name;
+    Vk_Texture handle;
+    float aspect;
+} Texture;
+
+typedef struct {
+    float16 camera_mvps[TEXTURE_COUNT];
     int idx; // TODO: unused in shader
     int shader_mode;
     int cam_0;
@@ -62,10 +66,15 @@ typedef enum {
     DS_LAYOUT_COUNT,
 } Ds_Layout_Idx;
 
+Texture textures[TEXTURE_COUNT] = {
+    {.file_name = "res/view_1_ffmpeg.png"},
+    {.file_name = "res/view_2_ffmpeg.png"},
+    {.file_name = "res/view_3_ffmpeg.png"},
+    {.file_name = "res/view_4_ffmpeg.png"},
+};
 VkDescriptorSetLayout ds_layouts[DS_LAYOUT_COUNT];
 VkDescriptorSet ds_sets[DS_SET_COUNT];
 VkDescriptorPool pool;
-Vk_Texture textures[NUM_IMGS];
 VkPipelineLayout pl_layout;
 VkPipeline gfx_pl;
 
@@ -120,11 +129,11 @@ bool setup_ds_sets(Vk_Buffer buff)
         .buffer = buff.handle,
         .range  = buff.size,
     };
-    VkDescriptorImageInfo img_infos[NUM_IMGS] = {0};
-    for (size_t i = 0; i < NUM_IMGS; i++) {
+    VkDescriptorImageInfo img_infos[TEXTURE_COUNT] = {0};
+    for (size_t i = 0; i < TEXTURE_COUNT; i++) {
         img_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_infos[i].imageView   = textures[i].view;
-        img_infos[i].sampler     = textures[i].sampler;
+        img_infos[i].imageView   = textures[i].handle.view;
+        img_infos[i].sampler     = textures[i].handle.sampler;
     }
     VkWriteDescriptorSet writes[] = {
         /* point-cloud.vert */
@@ -140,64 +149,32 @@ bool setup_ds_sets(Vk_Buffer buff)
     return true;
 }
 
-bool load_texture(Image img, size_t img_idx)
+bool upload_texture(Texture *texture)
 {
     bool result = true;
+    int channels, width, height;
+    void *data = stbi_load(texture->file_name, &width, &height, &channels, STBI_rgb_alpha);
 
-    /* create staging buffer for image */
-    Vk_Buffer stg_buff;
-    stg_buff.size  = img.width * img.height * format_to_size(img.format);
-    stg_buff.count = img.width * img.height;
-    if (!vk_stg_buff_init(&stg_buff, img.data, false)) return false;
+    if (!data) {
+        nob_log(NOB_ERROR, "image %s could not be loaded", texture->file_name);
+        nob_return_defer(false);
+    } else {
+        nob_log(NOB_INFO, "image %s was successfully loaded", texture->file_name);
+        nob_log(NOB_INFO, "    (height, width) = (%d, %d)", height, width);
+        nob_log(NOB_INFO, "    image size in memory = %d bytes", height * width * 4);
+    }
 
-    /* create the image */
-    Vk_Image vk_img = {
-        .extent  = {img.width, img.height},
-        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = img.format,
-    };
-    result = vk_img_init(
-        &vk_img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    if (!result) nob_return_defer(false);
-    result = transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
-    if (!result) nob_return_defer(false);
-    if (!vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent)) nob_return_defer(false);
-    result = transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
-    if (!result) nob_return_defer(false);
+    if (!vk_load_texture(data, width, height, VK_FORMAT_R8G8B8A8_SRGB, &texture->handle))
+        nob_return_defer(false);
 
-    /* create image view */
-    VkImageView img_view;
-    if (!vk_img_view_init(vk_img, &img_view)) nob_return_defer(false);
-
-    /* create sampler */
-    VkSampler sampler;
-    if (!vk_sampler_init(&sampler)) return false;
-
-    Vk_Texture texture = {
-        .view = img_view,
-        .sampler = sampler,
-        .img = vk_img,
-    };
-    textures[img_idx] = texture;
+    texture->aspect = (float)width / height;
 
 defer:
-    vk_buff_destroy(stg_buff);
+    free(data);
     return result;
-
 }
 
-bool read_vtx(const char *file, Vertices *verts)
+bool read_vtx(const char *file, Point_Cloud *pc) // TODO: I don't think this needs to be a pointer
 {
     bool result = true;
 
@@ -223,7 +200,7 @@ bool read_vtx(const char *file, Vertices *verts)
             .x = x, .y = y, .z = z,
             .r = r, .g = g, .b = b, .a = 255,
         };
-        nob_da_append(verts, vert);
+        nob_da_append(pc, vert);
     }
 
 defer:
@@ -235,18 +212,17 @@ bool load_points(const char *name, Point_Cloud *point_cloud)
 {
     bool result = true;
 
-    Vertices verts = {0};
-    if (!read_vtx(name, &verts)) {
+    if (!read_vtx(name, point_cloud)) {
         nob_log(NOB_ERROR, "failed to load point cloud");
         nob_log(NOB_ERROR, "this example requires private data");
         nob_return_defer(false);
     }
-    nob_log(NOB_INFO, "Number of vertices %zu", verts.count);
+    nob_log(NOB_INFO, "Number of vertices %zu", point_cloud->count);
 
-    point_cloud->buff.items = verts.items;
-    point_cloud->buff.count = verts.count;
-    point_cloud->buff.size  = verts.count * sizeof(*verts.items);
-    point_cloud->verts = verts;
+    // point_cloud->buff.items = verts.items;
+    point_cloud->buff.count = point_cloud->count;
+    point_cloud->buff.size  = point_cloud->count * sizeof(*point_cloud->items);
+    // point_cloud->verts = verts;
 
 defer:
     return result;
@@ -509,15 +485,6 @@ int main(int argc, char **argv)
     if (!load_points("res/arena_" M "_f32.vtx", &hres)) return 1;
     Point_Cloud lres = {0};
     if (!load_points("res/arena_" S "_f32.vtx", &lres)) return 1;
-    Image imgs[NUM_IMGS] = {0};
-    for (size_t i = 0; i < NUM_IMGS; i++) {
-        const char *img_name = nob_temp_sprintf("res/view_%d_ffmpeg.png", i + 1);
-        imgs[i] = load_image(img_name);
-        if (!imgs[i].data) {
-            nob_log(NOB_ERROR, "failed to load png file %s", img_name);
-            return 1;
-        }
-    }
 
     /* initialize window and Vulkan */
     if (argc > 4) {
@@ -528,14 +495,11 @@ int main(int argc, char **argv)
     }
 
     /* upload resources to GPU */
-    for (size_t i = 0; i < NUM_IMGS; i++) {
-        if (!load_texture(imgs[i], i)) return 1;
-        free(imgs[i].data);
-    }
-    if (!upload_point_cloud(hres.buff, &hres.id)) return 1;
-    if (!upload_point_cloud(lres.buff, &lres.id)) return 1;
-    nob_da_free(hres.verts);
-    nob_da_free(lres.verts);
+    for (size_t i = 0; i < TEXTURE_COUNT; i++) if (!upload_texture(&textures[i])) return 1;
+    if (!vk_vtx_buff_staged_upload(&hres.buff, hres.items)) return 1;
+    if (!vk_vtx_buff_staged_upload(&lres.buff, lres.items)) return 1;
+    nob_da_free(hres);
+    nob_da_free(lres);
 
     /* initialize shader resources */
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
@@ -603,8 +567,7 @@ int main(int argc, char **argv)
             }
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-            size_t vtx_id = (use_hres) ? hres.id : lres.id;
-            draw_points_ex(vtx_id, gfx_pl, pl_layout, ds_sets, DS_SET_COUNT);
+            draw_points_ex2((use_hres) ? hres.buff : lres.buff, gfx_pl, pl_layout, ds_sets, DS_SET_COUNT);
 
             /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
@@ -615,14 +578,14 @@ int main(int argc, char **argv)
 
     /* cleanup */
     wait_idle();
-    for (size_t i = 0; i < NUM_IMGS; i++) vk_unload_texture(&textures[i]);
+    for (size_t i = 0; i < TEXTURE_COUNT; i++) vk_unload_texture(&textures[i].handle);
     vk_buff_destroy(ubo.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_UNIFORM]);
     vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_SAMPLERS]);
     vk_destroy_pl_res(gfx_pl, pl_layout);
-    destroy_point_cloud(hres.id);
-    destroy_point_cloud(lres.id);
+    vk_buff_destroy(hres.buff);
+    vk_buff_destroy(lres.buff);
     close_window();
     return 0;
 }

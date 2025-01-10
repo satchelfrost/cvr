@@ -1,8 +1,6 @@
 #ifndef VK_CTX_H_
 #define VK_CTX_H_
 
-#include "cvr.h"
-#include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
@@ -14,7 +12,7 @@
 
 /*
  * Note: if I ever get around to making this a proper header-only library then I will want to remove
- * the dependencies on nob, and raymath.
+ * the dependencies on nob
  * */
 
 #ifndef APP_NAME
@@ -154,9 +152,9 @@ bool vk_ubo_map(Vk_Buffer *buff);
 
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
-void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp);
-void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
+void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
+void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
+void vk_draw_points_ex(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_rec_compute();
@@ -256,29 +254,8 @@ bool pick_phys_device();
 void cleanup_swapchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 
-#ifndef CVR_CAMERA
-typedef struct {
-    Vector3 position;
-    Vector3 target;
-    Vector3 up;
-    float fovy;
-    int projection;
-} Camera;
-#endif
 
-void cvr_set_proj(Camera camera);
-void cvr_set_view(Camera camera);
-
-#ifndef CVR_COLOR
-typedef struct Color {
-    unsigned char r;
-    unsigned char g;
-    unsigned char b;
-    unsigned char a;
-} Color;
-#endif
-
-void vk_begin_render_pass(Color color);
+void vk_begin_render_pass(float r, float g, float b, float a);
 
 int format_to_size(VkFormat fmt);
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -298,9 +275,7 @@ bool vk_sampler_init(VkSampler *sampler);
 
 #ifdef VK_CTX_IMPLEMENTATION
 
-#include "ext/raylib-5.0/raymath.h"
 #include <vulkan/vulkan.h>
-#include <time.h>
 
 #define Z_NEAR 0.01
 #define Z_FAR 1000.0
@@ -943,7 +918,7 @@ bool vk_frame_buffs_init()
     return true;
 }
 
-void vk_begin_render_pass(Color color)
+void vk_begin_render_pass(float r, float g, float b, float a)
 {
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -952,12 +927,7 @@ void vk_begin_render_pass(Color color)
     begin_rp.renderArea.extent = vk_ctx.extent;
     VkClearValue clear_color = {
         .color = {
-            {
-                color.r / 255.0f,
-                color.g / 255.0f,
-                color.b / 255.0f,
-                color.a / 255.0f,
-            }
+            {r, g, b, a}
         }
     };
     VkClearValue clear_depth = {
@@ -972,7 +942,7 @@ void vk_begin_render_pass(Color color)
     vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
+void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp)
 {
     VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
@@ -988,21 +958,11 @@ void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_B
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-
-    float16 mat = MatrixToFloatV(mvp);
-    vkCmdPushConstants(
-        cmd_buffer,
-        pl_layout,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(float16),
-        &mat
-    );
-
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 }
 
-void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, Matrix mvp)
+void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp)
 {
     VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
 
@@ -1020,8 +980,7 @@ void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    float16 mat = MatrixToFloatV(mvp);
-    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float16), &mat);
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 }
 
@@ -1133,7 +1092,7 @@ void vk_compute_pl_barrier()
 }
 #endif // PLATFORM_QUEST
 
-void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+void vk_draw_points_ex(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
     VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
@@ -1156,16 +1115,7 @@ void vk_draw_points_ex(Vk_Buffer vtx_buff, Matrix mvp, VkPipeline pl, VkPipeline
         );
     }
 
-    float16 mat = MatrixToFloatV(mvp);
-    vkCmdPushConstants(
-        cmd_buffer,
-        pl_layout,
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        sizeof(float16),
-        &mat
-    );
-
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
     vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
 }
 
@@ -2256,6 +2206,7 @@ bool vk_sampler_init(VkSampler *sampler)
     return true;
 }
 
+// TODO: a better name might be upload texture
 bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_Texture *texture)
 {
     bool result = true;
@@ -2329,7 +2280,7 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_T
         nob_return_defer(false);
     }
 
-    Vk_Texture tex= {
+    Vk_Texture tex = {
         .view = img_view,
         .sampler = sampler,
         .img = vk_img,

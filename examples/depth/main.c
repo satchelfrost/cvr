@@ -1,5 +1,4 @@
 #include "cvr.h"
-#include "ext/nob.h"
 
 int main()
 {
@@ -11,7 +10,7 @@ int main()
         .projection = PERSPECTIVE,
     };
 
-    init_window(500, 500, "depth");
+    init_window(500, 500, "cube");
 
     while(!window_should_close()) {
         begin_drawing(BEIGE);
