@@ -288,6 +288,7 @@ void end_drawing();                                         /* Submits commands,
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
+bool draw_points(Vk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 /* gpu compute */
 void begin_compute();
@@ -335,12 +336,5 @@ Color color_from_HSV(float hue, float saturation, float value);
 
 /* GPU */
 void wait_idle();
-
-/* STUFF TO GET RID OF */
-// void destroy_point_cloud(size_t id); // TODO: I don't want to manage this state
-// bool upload_point_cloud(Buffer buff, size_t *id); // TODO: I don't want to manage this state
-bool draw_points(size_t vtx_id);
-bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
-bool draw_points_ex2(Vk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 #endif // CVR_H_

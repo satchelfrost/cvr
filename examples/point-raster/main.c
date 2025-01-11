@@ -320,7 +320,7 @@ int main()
         if (pc.pending_change) {
             /* destroy old point cloud buffer and generate new points */
             wait_idle();
-            vk_buff_destroy(pc.buff);
+            vk_buff_destroy(&pc.buff);
             gen_points(num_points, &pc);
 
             /* upload new buffer and update descriptor sets */
@@ -361,7 +361,7 @@ int main()
         start_timer();
         if (!vk_begin_drawing()) return 1;
             vk_raster_sampler_barrier(storage_tex.img.handle);
-            vk_begin_render_pass(BLACK);
+            vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
         end_drawing();
     }
@@ -369,9 +369,9 @@ int main()
     wait_idle();
     free(pc.items);
     free(frame.data);
-    vk_buff_destroy(pc.buff);
-    vk_buff_destroy(frame.buff);
-    vk_buff_destroy(ubo.buff);
+    vk_buff_destroy(&pc.buff);
+    vk_buff_destroy(&frame.buff);
+    vk_buff_destroy(&ubo.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(cs_render_ds_layout);
     vk_destroy_ds_layout(cs_resolve_ds_layout);

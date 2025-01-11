@@ -85,7 +85,6 @@ typedef struct {
 typedef enum {
     DEFAULT_PL_FILL,
     DEFAULT_PL_WIREFRAME,
-    DEFAULT_PL_POINT_CLOUD,
     DEFAULT_PL_COUNT,
 } Default_Pipeline;
 
@@ -699,9 +698,9 @@ void destroy_shape_res()
 {
     for (size_t i = 0; i < SHAPE_COUNT; i++) {
         if (shapes[i].vtx_buff.handle)
-            vk_buff_destroy(shapes[i].vtx_buff);
+            vk_buff_destroy(&shapes[i].vtx_buff);
         if (shapes[i].idx_buff.handle)
-            vk_buff_destroy(shapes[i].idx_buff);
+            vk_buff_destroy(&shapes[i].idx_buff);
     }
 }
 
@@ -847,138 +846,7 @@ bool is_mouse_button_down(int button)
     return mouse.curr_button_state[button] == 1;
 }
 
-// bool upload_point_cloud(Buffer buff, size_t *id)
-// {
-//     Vk_Buffer vk_buff = {
-//         .count = buff.count,
-//         .size  = buff.size,
-//     };
-//     if (!vk_vtx_buff_staged_upload(&vk_buff, buff.items)) {
-//         nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
-//         return false;
-//     }
-//
-//     *id = point_clouds.count;
-//     nob_da_append(&point_clouds, vk_buff);
-//     return true;
-// }
-
-// void destroy_point_cloud(size_t id)
-// {
-//     vkDeviceWaitIdle(vk_ctx.device);
-//
-//     bool found = false;
-//     for (size_t i = 0; i < point_clouds.count; i++) {
-//         if (i == id && point_clouds.items[i].handle) {
-//             vk_buff_destroy(point_clouds.items[i]);
-//             found = true;
-//         }
-//     }
-//
-//     if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
-// }
-
-bool default_pl_point_cloud_init()
-{
-    /* create pipeline layout */
-    VkPushConstantRange pk_range = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .size = sizeof(float16),
-    };
-    VkPipelineLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pk_range,
-    };
-    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_POINT_CLOUD]))
-        return false;
-
-    /* create pipeline */
-    VkVertexInputAttributeDescription vert_attrs[] = {
-        {
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-        },
-        {
-            .location = 1,
-            .format = VK_FORMAT_R8G8B8A8_UINT,
-            .offset = offsetof(Small_Vertex, r),
-        },
-    };
-    VkVertexInputBindingDescription vert_bindings = {
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-        .stride    = sizeof(Small_Vertex),
-    };
-    Pipeline_Config config = {
-        .pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD],
-        .vert = "./res/point-cloud.vert.spv",
-        .frag = "./res/point-cloud.frag.spv",
-        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
-        .polygon_mode = VK_POLYGON_MODE_POINT,
-        .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
-        .vert_bindings = &vert_bindings,
-        .vert_binding_count = 1,
-    };
-    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_POINT_CLOUD])) return false;
-
-    return true;
-}
-
-bool draw_points(size_t vtx_id)
-{
-    /* create point cloud pipeline if it hasn't been created */
-    if (!pipelines.handles[DEFAULT_PL_POINT_CLOUD])
-        if (!default_pl_point_cloud_init()) return false;
-
-    Vk_Buffer vtx_buff = {0};
-    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
-        vtx_buff = point_clouds.items[vtx_id];
-    } else {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-        return false;
-    }
-
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        return false;
-    }
-    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    float16 f16_mvp = MatrixToFloatV(mvp);
-    VkPipeline pl = pipelines.handles[DEFAULT_PL_POINT_CLOUD];
-    VkPipelineLayout pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD];
-    vk_draw_points_ex(vtx_buff, &f16_mvp, pl, pl_layout, NULL, 0);
-
-    return true;
-}
-
-bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
-{
-    Vk_Buffer vtx_buff = {0};
-    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
-        vtx_buff = point_clouds.items[vtx_id];
-    } else {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-        return false;
-    }
-
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        return false;
-    }
-    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    float16 f16_mvp = MatrixToFloatV(mvp);
-    vk_draw_points_ex(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
-
-    return true;
-}
-
-bool draw_points_ex2(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+bool draw_points(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
     if (!vtx_buff.handle) {
         nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud");
@@ -994,7 +862,7 @@ bool draw_points_ex2(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layo
     }
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
-    vk_draw_points_ex(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
+    vk_draw_points(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
 
     return true;
 }

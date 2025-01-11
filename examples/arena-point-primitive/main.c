@@ -567,7 +567,7 @@ int main(int argc, char **argv)
             }
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
-            draw_points_ex2((use_hres) ? hres.buff : lres.buff, gfx_pl, pl_layout, ds_sets, DS_SET_COUNT);
+            draw_points((use_hres) ? hres.buff : lres.buff, gfx_pl, pl_layout, ds_sets, DS_SET_COUNT);
 
             /* update uniform buffer */
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
@@ -579,13 +579,13 @@ int main(int argc, char **argv)
     /* cleanup */
     wait_idle();
     for (size_t i = 0; i < TEXTURE_COUNT; i++) vk_unload_texture(&textures[i].handle);
-    vk_buff_destroy(ubo.buff);
+    vk_buff_destroy(&ubo.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_UNIFORM]);
     vk_destroy_ds_layout(ds_layouts[DS_LAYOUT_SAMPLERS]);
     vk_destroy_pl_res(gfx_pl, pl_layout);
-    vk_buff_destroy(hres.buff);
-    vk_buff_destroy(lres.buff);
+    vk_buff_destroy(&hres.buff);
+    vk_buff_destroy(&lres.buff);
     close_window();
     return 0;
 }

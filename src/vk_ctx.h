@@ -4,16 +4,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
+
+// TODO: get rid of these three headers
 #include "geometry.h"
 #include "ext/nob.h"
 #include "nob_ext.h"
 
 // TODO: check for return_defer usage and double free corruption errors
-
-/*
- * Note: if I ever get around to making this a proper header-only library then I will want to remove
- * the dependencies on nob
- * */
 
 #ifndef APP_NAME
     #define APP_NAME "app"
@@ -154,7 +151,7 @@ bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
 void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
-void vk_draw_points_ex(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
+void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
 bool vk_rec_compute();
@@ -166,7 +163,7 @@ void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_
 void vk_compute_pl_barrier();
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
-void vk_buff_destroy(Vk_Buffer buffer);
+void vk_buff_destroy(Vk_Buffer *buffer);
 
 /* leave mapped should be true if we are consantly going to be using this same staging buffer */
 bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data, bool leave_mapped);
@@ -1092,7 +1089,7 @@ void vk_compute_pl_barrier()
 }
 #endif // PLATFORM_QUEST
 
-void vk_draw_points_ex(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
     VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
@@ -1665,11 +1662,11 @@ bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data, bool leave_mapped)
     return true;
 }
 
-void vk_buff_destroy(Vk_Buffer buffer)
+void vk_buff_destroy(Vk_Buffer *buffer)
 {
-    vkDestroyBuffer(vk_ctx.device, buffer.handle, NULL);
-    vkFreeMemory(vk_ctx.device, buffer.mem, NULL);
-    buffer.handle = NULL; // TODO: buffer should have been a pointer because this actually does nothing
+    vkDestroyBuffer(vk_ctx.device, buffer->handle, NULL);
+    vkFreeMemory(vk_ctx.device, buffer->mem, NULL);
+    buffer->handle = NULL;
 }
 
 bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
@@ -1711,7 +1708,7 @@ bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
     vk_buff_copy(*vtx_buff, stg_buff, 0);
 
 defer:
-    vk_buff_destroy(stg_buff);
+    vk_buff_destroy(&stg_buff);
     return result;
 }
 
@@ -1777,7 +1774,7 @@ bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
     vk_buff_copy(*vtx_buff, stg_buff, 0);
 
 defer:
-    vk_buff_destroy(stg_buff);
+    vk_buff_destroy(&stg_buff);
     return result;
 }
 
@@ -1820,7 +1817,7 @@ bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data)
     vk_buff_copy(*idx_buff, stg_buff, 0);
 
 defer:
-    vk_buff_destroy(stg_buff);
+    vk_buff_destroy(&stg_buff);
     return result;
 }
 
@@ -2288,7 +2285,7 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_T
     *texture = tex;
 
 defer:
-    vk_buff_destroy(stg_buff);
+    vk_buff_destroy(&stg_buff);
     return result;
 }
 

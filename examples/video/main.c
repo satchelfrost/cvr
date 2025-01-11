@@ -520,7 +520,7 @@ int main()
         free(video_textures.initial_frames[i].cb.data);
         free(video_textures.initial_frames[i].cr.data);
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
-            vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
+            vk_buff_destroy(&video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
             vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }

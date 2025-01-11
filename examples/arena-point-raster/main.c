@@ -1086,7 +1086,7 @@ int main(int argc, char **argv)
         start_timer();
         if (!vk_begin_drawing()) return 1;
             vk_raster_sampler_barrier(storage_tex.img.handle);
-            vk_begin_render_pass(BLACK);
+            vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
         end_drawing();
     }
@@ -1100,7 +1100,7 @@ int main(int argc, char **argv)
     free(frame_buff.data);
     free(tex_buff.data);
     for (size_t i = 0; i < MAX_LOD; i++) {
-        vk_buff_destroy(pc_layers[i].buff);
+        vk_buff_destroy(&pc_layers[i].buff);
         free(pc_layers[i].items);
     }
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
@@ -1109,13 +1109,13 @@ int main(int argc, char **argv)
         free(video_textures.initial_frames[i].cb.data);
         free(video_textures.initial_frames[i].cr.data);
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
-            vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
+            vk_buff_destroy(&video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
             vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
-    vk_buff_destroy(frame_buff.buff);
-    vk_buff_destroy(ubo.buff);
-    vk_buff_destroy(tex_buff.buff);
+    vk_buff_destroy(&frame_buff.buff);
+    vk_buff_destroy(&ubo.buff);
+    vk_buff_destroy(&tex_buff.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(cs_render_ds_layout);
     vk_destroy_ds_layout(cs_resolve_ds_layout);

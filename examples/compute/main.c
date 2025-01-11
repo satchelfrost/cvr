@@ -1,8 +1,5 @@
 #include "cvr.h"
-#include "ext/raylib-5.0/raymath.h"
-#include <stdlib.h>
 #include "ext/nob.h"
-#include "vk_ctx.h"
 
 #define PARTICLE_COUNT 800
 
@@ -198,8 +195,9 @@ int main()
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             Matrix mvp = {0};
-            get_mvp(&mvp);
-            vk_draw_points_ex(comp_buff, mvp, gfx_pl, gfx_pl_layout, NULL, 0);
+            if (!get_mvp(&mvp)) return 1;
+            float16 f16_mvp = MatrixToFloatV(mvp);
+            vk_draw_points(comp_buff, &f16_mvp, gfx_pl, gfx_pl_layout, NULL, 0);
             time = get_time();
             memcpy(ubo.mapped, &time, sizeof(float));
         end_mode_3d();
@@ -207,8 +205,8 @@ int main()
     }
 
     wait_idle();
-    vk_buff_destroy(ubo);
-    vk_buff_destroy(comp_buff);
+    vk_buff_destroy(&ubo);
+    vk_buff_destroy(&comp_buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(compute_ds_layout);
     vk_destroy_pl_res(compute_pl, compute_pl_layout);
