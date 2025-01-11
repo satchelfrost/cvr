@@ -1,6 +1,7 @@
 #include <string.h>
+
 #define NOB_IMPLEMENTATION
-#include "src/ext/nob.h"
+#include "nob.h"
 
 #define FILE_DOES_NOT_EXIST 0
 #define FILE_EXISTS 1

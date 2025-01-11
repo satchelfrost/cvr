@@ -4,11 +4,12 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
-
-// TODO: get rid of these three headers
-#include "geometry.h"
-#include "ext/nob.h"
-#include "nob_ext.h"
+#include <assert.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <stdio.h>
 
 // TODO: check for return_defer usage and double free corruption errors
 
@@ -16,12 +17,13 @@
     #define APP_NAME "app"
 #endif
 #ifndef MIN_SEVERITY
-    #define MIN_SEVERITY NOB_WARNING
+    #define MIN_SEVERITY VK_WARNING
 #endif
 #define VK_FLAGS_NONE 0
 #define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(vk_ctx.instance, #pfn)
 #define VK_SUCCEEDED(x) ((x) == VK_SUCCESS)
 #define clamp(val, min, max) ((val) < (min)) ? (min) : (((val) > (max)) ? (max) : (val))
+#define VK_ARRAY_LEN(array) (sizeof(array)/sizeof(array[0]))
 
 typedef struct {
     VkImage *items;
@@ -45,7 +47,7 @@ typedef struct {
     VkSwapchainKHR handle;
     Imgs imgs;
     Img_Views img_views;
-    Frame_Buffs buffs;
+    Frame_Buffs frame_buffs;
     bool buff_resized;
 } Vk_Swapchain;
 
@@ -229,9 +231,16 @@ void vk_destroy_ds_layout(VkDescriptorSetLayout layout);
 bool vk_alloc_ds(VkDescriptorSetAllocateInfo alloc, VkDescriptorSet *sets);
 void vk_update_ds(size_t count, VkWriteDescriptorSet *writes);
 
-/* Utilities */
+typedef enum {
+    VK_INFO,
+    VK_WARNING,
+    VK_ERROR,
+} Vk_Log_Level;
+
+void vk_log(Vk_Log_Level level, const char *fmt, ...);
+
 void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
-Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
+Vk_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 bool setup_debug_msgr();
 bool set_queue_fam_indices(VkPhysicalDevice phys_device);
 
@@ -261,6 +270,53 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_T
 void vk_unload_texture(Vk_Texture *texture);
 bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 bool vk_sampler_init(VkSampler *sampler);
+
+#define vk_return_defer(value) do { result = (value); goto defer; } while(0)
+
+// Initial capacity of a dynamic array
+#define VK_DA_INIT_CAP 256
+
+#define vk_da_append(da, item)                                                        \
+    do {                                                                              \
+        if ((da)->count >= (da)->capacity) {                                          \
+            (da)->capacity = (da)->capacity == 0 ? VK_DA_INIT_CAP : (da)->capacity*2; \
+            (da)->items = realloc((da)->items, (da)->capacity*sizeof(*(da)->items));  \
+            assert((da)->items != NULL && "\"Buy more RAM lol\"\n\t\t-Tsoding");      \
+        }                                                                             \
+                                                                                      \
+        (da)->items[(da)->count++] = (item);                                          \
+    } while (0)
+
+#define vk_da_append_many(da, new_items, new_items_count)                                   \
+    do {                                                                                    \
+        if ((da)->count + new_items_count > (da)->capacity) {                               \
+            if ((da)->capacity == 0) {                                                      \
+                (da)->capacity = VK_DA_INIT_CAP;                                            \
+            }                                                                               \
+            while ((da)->count + new_items_count > (da)->capacity) {                        \
+                (da)->capacity *= 2;                                                        \
+            }                                                                               \
+            (da)->items = realloc((da)->items, (da)->capacity*sizeof(*(da)->items));        \
+            assert((da)->items != NULL && "\"Buy more RAM lol\"\n\t\t-Tsoding");            \
+        }                                                                                   \
+        memcpy((da)->items + (da)->count, new_items, new_items_count*sizeof(*(da)->items)); \
+        (da)->count += new_items_count;                                                     \
+    } while (0)
+
+#define vk_da_free(da) free((da).items)
+
+typedef struct {
+    char *items;
+    size_t count;
+    size_t capacity;
+} Vk_String_Builder;
+
+bool vk_read_entire_file(const char *path, Vk_String_Builder *sb);
+
+#define vk_sb_free(sb) free((sb).items)
+
+// Append a sized buffer to a string builder
+#define vk_sb_append_buf(sb, buf, size) vk_da_append_many(sb, buf, size)
 
 #endif // VK_CTX_H_
 
@@ -304,6 +360,78 @@ Instance_Exts instance_exts = {0};
 bool inst_exts_satisfied();
 bool chk_validation_support();
 bool device_exts_supported(VkPhysicalDevice phys_device);
+
+void vk_log(Vk_Log_Level level, const char *fmt, ...)
+{
+#ifdef PLATFORM_QUEST
+#include <android/log.h>
+#ifndef APP_NAME
+#define APP_NAME "threaded_app"
+#endif // APP_NAME
+#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO,  APP_NAME, __VA_ARGS__))
+#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN,  APP_NAME, __VA_ARGS__))
+#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, APP_NAME, __VA_ARGS__))
+    switch (level) {
+    case VK_INFO:
+        LOGI("[INFO] %s",fmt);
+        break;
+    case VK_WARNING:
+        LOGW("[WARNING] %s", fmt);
+        break;
+    case VK_ERROR:
+        LOGE("[ERROR] %s", fmt);
+        break;
+    }
+#else
+    switch (level) {
+    case VK_INFO:
+        fprintf(stderr, "[INFO] ");
+        break;
+    case VK_WARNING:
+        fprintf(stderr, "[WARNING] ");
+        break;
+    case VK_ERROR:
+        fprintf(stderr, "[ERROR] ");
+        break;
+    default:
+        assert(0 && "unreachable");
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    fprintf(stderr, "\n");
+#endif // PLATFORM_QUEST
+}
+
+bool vk_read_entire_file(const char *path, Vk_String_Builder *sb)
+{
+    bool result = true;
+    size_t buf_size = 32*1024;
+    char *buf = realloc(NULL, buf_size);
+    assert(buf != NULL && "\"Buy more RAM lool!!\"\n\t\t-Tsoding");
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        vk_log(VK_ERROR, "Could not open %s for reading: %s", path, strerror(errno));
+        vk_return_defer(false);
+    }
+
+    size_t n = fread(buf, 1, buf_size, f);
+    while (n > 0) {
+        vk_sb_append_buf(sb, buf, n);
+        n = fread(buf, 1, buf_size, f);
+    }
+    if (ferror(f)) {
+        vk_log(VK_ERROR, "Could not read %s: %s\n", path, strerror(errno));
+        vk_return_defer(false);
+    }
+
+defer:
+    free(buf);
+    if (f) fclose(f);
+    return result;
+}
 
 bool vk_init()
 {
@@ -356,7 +484,7 @@ bool vk_instance_init()
 {
 #ifdef ENABLE_VALIDATION
     if (!chk_validation_support()) {
-        nob_log(NOB_ERROR, "validation requested, but not supported");
+        vk_log(VK_ERROR, "validation requested, but not supported");
         return false;
     }
 #endif
@@ -377,12 +505,12 @@ bool vk_instance_init()
     uint32_t platform_ext_count = 0;
     const char **platform_exts = get_platform_exts(&platform_ext_count);
     for (size_t i = 0; i < platform_ext_count; i++)
-        nob_da_append(&instance_exts, platform_exts[i]);
+        vk_da_append(&instance_exts, platform_exts[i]);
     
 #ifdef ENABLE_VALIDATION
-    instance_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
+    instance_ci.enabledLayerCount = VK_ARRAY_LEN(validation_layers);
     instance_ci.ppEnabledLayerNames = validation_layers;
-    nob_da_append(&instance_exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    vk_da_append(&instance_exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
     populated_debug_msgr_ci(&debug_msgr_ci);
     instance_ci.pNext = &debug_msgr_ci;
@@ -391,11 +519,11 @@ bool vk_instance_init()
     instance_ci.ppEnabledExtensionNames = instance_exts.items;
 
     if (!inst_exts_satisfied()) {
-        nob_log(NOB_ERROR, "unsatisfied instance extensions");
+        vk_log(VK_ERROR, "unsatisfied instance extensions");
         return false;
     }
     if (!VK_SUCCEEDED(vkCreateInstance(&instance_ci, NULL, &vk_ctx.instance))) {
-        nob_log(NOB_ERROR, "failed to create vulkan instance");
+        vk_log(VK_ERROR, "failed to create vulkan instance");
         return false;
     }
 
@@ -412,7 +540,7 @@ bool vk_device_init()
 {
     int queue_fam_idxs[] = {vk_ctx.gfx_idx, vk_ctx.present_idx};
     U32_Set unique_fams = {0};
-    populate_set(queue_fam_idxs, NOB_ARRAY_LEN(queue_fam_idxs), &unique_fams);
+    populate_set(queue_fam_idxs, VK_ARRAY_LEN(queue_fam_idxs), &unique_fams);
 
     Queue_Create_Infos queue_cis = {0};
     float queuePriority = 1.0f;
@@ -422,7 +550,7 @@ bool vk_device_init()
         queue_ci.queueFamilyIndex = unique_fams.items[i];
         queue_ci.queueCount = 1;
         queue_ci.pQueuePriorities = &queuePriority;
-        nob_da_append(&queue_cis, queue_ci);
+        vk_da_append(&queue_cis, queue_ci);
     }
 
     VkPhysicalDeviceFeatures features = {
@@ -450,11 +578,11 @@ bool vk_device_init()
         .pEnabledFeatures = NULL, // necessary when pNext is used
         .pQueueCreateInfos = queue_cis.items,
         .queueCreateInfoCount = queue_cis.count,
-        .enabledExtensionCount = NOB_ARRAY_LEN(device_exts),
+        .enabledExtensionCount = VK_ARRAY_LEN(device_exts),
         .ppEnabledExtensionNames = device_exts,
     };
 #ifdef ENABLE_VALIDATION
-    device_ci.enabledLayerCount = NOB_ARRAY_LEN(validation_layers);
+    device_ci.enabledLayerCount = VK_ARRAY_LEN(validation_layers);
     device_ci.ppEnabledLayerNames = validation_layers;
 #endif
 
@@ -464,12 +592,12 @@ bool vk_device_init()
         vkGetDeviceQueue(vk_ctx.device, vk_ctx.present_idx, 0, &vk_ctx.present_queue);
         vkGetDeviceQueue(vk_ctx.device, vk_ctx.compute_idx, 0, &vk_ctx.compute_queue);
     } else {
-        nob_log(NOB_ERROR, "failed calling vkCreateDevice");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed calling vkCreateDevice");
+        vk_return_defer(false);
     }
 
 defer:
-    nob_da_free(queue_cis);
+    vk_da_free(queue_cis);
     return result;
 }
 
@@ -500,7 +628,7 @@ bool vk_swapchain_init()
     uint32_t queue_fam_idxs[] = {vk_ctx.gfx_idx, vk_ctx.present_idx};
     if (vk_ctx.gfx_idx != vk_ctx.present_idx) {
         swapchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        swapchain_ci.queueFamilyIndexCount = NOB_ARRAY_LEN(queue_fam_idxs);
+        swapchain_ci.queueFamilyIndexCount = VK_ARRAY_LEN(queue_fam_idxs);
         swapchain_ci.pQueueFamilyIndices = queue_fam_idxs;
     } else {
         swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -509,11 +637,12 @@ bool vk_swapchain_init()
     if (VK_SUCCEEDED(vkCreateSwapchainKHR(vk_ctx.device, &swapchain_ci, NULL, &vk_ctx.swapchain.handle))) {
         uint32_t img_count = 0;
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, NULL);
-        nob_da_resize(&vk_ctx.swapchain.imgs, img_count);
+        vk_ctx.swapchain.imgs.items = realloc(vk_ctx.swapchain.imgs.items, img_count * sizeof(VkImage));
+        vk_ctx.swapchain.imgs.count = img_count;
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, vk_ctx.swapchain.imgs.items);
         return true;
     } else {
-        nob_log(NOB_ERROR, "failed to create swapchain image");
+        vk_log(VK_ERROR, "failed to create swapchain image");
         return false;
     }
 }
@@ -533,7 +662,7 @@ bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
     };
 
     if (!VK_SUCCEEDED(vkCreateImageView(vk_ctx.device, &img_view_ci, NULL, img_view))) {
-        nob_log(NOB_ERROR, "failed to create image view");
+        vk_log(VK_ERROR, "failed to create image view");
         return false;
     }
 
@@ -542,15 +671,15 @@ bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
 
 bool vk_img_views_init()
 {
-    nob_da_resize(&vk_ctx.swapchain.img_views, vk_ctx.swapchain.imgs.count);
-    for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++)  {
+    for (size_t i = 0; i < vk_ctx.swapchain.imgs.count; i++)  {
+        vk_da_append(&vk_ctx.swapchain.img_views, VK_NULL_HANDLE);
         Vk_Image img = {
             .handle = vk_ctx.swapchain.imgs.items[i],
             .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
             .format = vk_ctx.surface_fmt.format,
         };
         if (!vk_img_view_init(img, &vk_ctx.swapchain.img_views.items[i])) {
-            nob_log(NOB_ERROR, "failed initializing swapchain view %zu", i);
+            vk_log(VK_ERROR, "failed initializing swapchain view %zu", i);
             return false;
         }
     }
@@ -574,13 +703,13 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
             .pName = "main",
         },
     };
-    if (!vk_shader_mod_init(config.vert, &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init(config.frag, &stages[1].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(config.vert, &stages[0].module)) vk_return_defer(false);
+    if (!vk_shader_mod_init(config.frag, &stages[1].module)) vk_return_defer(false);
 
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
+        .dynamicStateCount = VK_ARRAY_LEN(dynamic_states),
         .pDynamicStates = dynamic_states,
     };
     VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
@@ -634,8 +763,8 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
         .logicOp = VK_LOGIC_OP_COPY,
     };
     if (!config.pl_layout) {
-        nob_log(NOB_ERROR, "pipeline layout was NULL");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "pipeline layout was NULL");
+        vk_return_defer(false);
     }
     VkPipelineDepthStencilStateCreateInfo depth_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -646,7 +775,7 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
     };
     VkGraphicsPipelineCreateInfo pipeline_ci = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = NOB_ARRAY_LEN(stages),
+        .stageCount = VK_ARRAY_LEN(stages),
         .pStages = stages,
         .pVertexInputState = &vertex_input_ci,
         .pInputAssemblyState = &input_assembly_ci,
@@ -661,8 +790,8 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
         .subpass = 0,
     };
     if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(vk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
-        nob_log(NOB_ERROR, "failed to create pipeline");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create pipeline");
+        vk_return_defer(false);
     }
 
 defer:
@@ -688,14 +817,14 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
             .pName = "main",
         },
     };
-    if (!vk_shader_mod_init("./res/sst.vert.spv", &stages[0].module)) nob_return_defer(false);
-    if (!vk_shader_mod_init("./res/sst.frag.spv", &stages[1].module)) nob_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.vert.spv", &stages[0].module)) vk_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.frag.spv", &stages[1].module)) vk_return_defer(false);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic_state_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = NOB_ARRAY_LEN(dynamic_states),
+        .dynamicStateCount = VK_ARRAY_LEN(dynamic_states),
         .pDynamicStates = dynamic_states,
     };
     VkPipelineVertexInputStateCreateInfo empty_input_state = {
@@ -739,7 +868,7 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
     };
     VkGraphicsPipelineCreateInfo pipeline_ci = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = NOB_ARRAY_LEN(stages),
+        .stageCount = VK_ARRAY_LEN(stages),
         .pStages = stages,
         .pVertexInputState = &empty_input_state,
         .pInputAssemblyState = &input_assembly_ci,
@@ -756,8 +885,8 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
 
     VkResult res = vkCreateGraphicsPipelines(vk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create basic pipline ");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create basic pipline ");
+        vk_return_defer(false);
     }
 
 defer:
@@ -769,7 +898,7 @@ defer:
 bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
 {
     if (!VK_SUCCEEDED(vkCreatePipelineLayout(vk_ctx.device, &ci, NULL, pl_layout))) {
-        nob_log(NOB_ERROR, "failed to create pipeline layout");
+        vk_log(VK_ERROR, "failed to create pipeline layout");
         return false;
     }
 
@@ -785,7 +914,7 @@ bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkP
         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
         .pName = "main",
     };
-    if (!vk_shader_mod_init(shader_name, &shader_ci.module)) nob_return_defer(false);
+    if (!vk_shader_mod_init(shader_name, &shader_ci.module)) vk_return_defer(false);
 
     VkComputePipelineCreateInfo pipeline_ci = {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -793,8 +922,8 @@ bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkP
         .stage = shader_ci,
     };
     if (!VK_SUCCEEDED(vkCreateComputePipelines(vk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pipeline))) {
-        nob_log(NOB_ERROR, "failed to create compute pipeline");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create compute pipeline");
+        vk_return_defer(false);
     }
 
 defer:
@@ -812,10 +941,10 @@ bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
     bool result = true;
 
-    Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file_name, &sb)) {
-        nob_log(NOB_ERROR, "failed to read entire file %s", file_name);
-        nob_return_defer(false);
+    Vk_String_Builder sb = {0};
+    if (!vk_read_entire_file(file_name, &sb)) {
+        vk_log(VK_ERROR, "failed to read entire file %s", file_name);
+        vk_return_defer(false);
     }
 
     VkShaderModuleCreateInfo module_ci = {
@@ -824,12 +953,12 @@ bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
         .pCode = (const uint32_t *)sb.items,
     };
     if (!VK_SUCCEEDED(vkCreateShaderModule(vk_ctx.device, &module_ci, NULL, module))) {
-        nob_log(NOB_ERROR, "failed to create shader module from %s", file_name);
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create shader module from %s", file_name);
+        vk_return_defer(false);
     }
 
 defer:
-    nob_sb_free(sb);
+    vk_sb_free(sb);
     return result;
 }
 
@@ -876,7 +1005,7 @@ bool vk_render_pass_init()
     };
     VkRenderPassCreateInfo render_pass_ci = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = NOB_ARRAY_LEN(attachments),
+        .attachmentCount = VK_ARRAY_LEN(attachments),
         .pAttachments = attachments,
         .subpassCount = 1,
         .pSubpasses = &gfx_subpass,
@@ -887,27 +1016,27 @@ bool vk_render_pass_init()
     if (VK_SUCCEEDED(vkCreateRenderPass(vk_ctx.device, &render_pass_ci, NULL, &vk_ctx.render_pass))) {
         return true;
     } else {
-        nob_log(NOB_ERROR, "failed when calling vkCreateRenderPass");
+        vk_log(VK_ERROR, "failed when calling vkCreateRenderPass");
         return false;
     }
 }
 
 bool vk_frame_buffs_init()
 {
-    nob_da_resize(&vk_ctx.swapchain.buffs, vk_ctx.swapchain.img_views.count);
     for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++) {
+        vk_da_append(&vk_ctx.swapchain.frame_buffs, VK_NULL_HANDLE);
         VkImageView attachments[] = {vk_ctx.swapchain.img_views.items[i], vk_ctx.depth_img_view};
         VkFramebufferCreateInfo frame_buff_ci = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .renderPass = vk_ctx.render_pass,
-            .attachmentCount = NOB_ARRAY_LEN(attachments),
+            .attachmentCount = VK_ARRAY_LEN(attachments),
             .pAttachments = attachments,
             .width =  vk_ctx.extent.width,
             .height = vk_ctx.extent.height,
             .layers = 1,
         };
-        if (!VK_SUCCEEDED(vkCreateFramebuffer(vk_ctx.device, &frame_buff_ci, NULL, &vk_ctx.swapchain.buffs.items[i]))) {
-            nob_log(NOB_ERROR, "failed when calling vkCreateFramebuffer on index %zu", i);
+        if (!VK_SUCCEEDED(vkCreateFramebuffer(vk_ctx.device, &frame_buff_ci, NULL, &vk_ctx.swapchain.frame_buffs.items[i]))) {
+            vk_log(VK_ERROR, "failed when calling vkCreateFramebuffer on index %zu", i);
             return false;
         }
     }
@@ -920,7 +1049,7 @@ void vk_begin_render_pass(float r, float g, float b, float a)
     VkRenderPassBeginInfo begin_rp = {0};
     begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     begin_rp.renderPass = vk_ctx.render_pass;
-    begin_rp.framebuffer = vk_ctx.swapchain.buffs.items[img_idx];
+    begin_rp.framebuffer = vk_ctx.swapchain.frame_buffs.items[img_idx];
     begin_rp.renderArea.extent = vk_ctx.extent;
     VkClearValue clear_color = {
         .color = {
@@ -934,7 +1063,7 @@ void vk_begin_render_pass(float r, float g, float b, float a)
         }
     };
     VkClearValue clear_values[] = {clear_color, clear_depth};
-    begin_rp.clearValueCount = NOB_ARRAY_LEN(clear_values);
+    begin_rp.clearValueCount = VK_ARRAY_LEN(clear_values);
     begin_rp.pClearValues = clear_values;
     vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
@@ -1015,7 +1144,7 @@ bool vk_rec_compute()
     VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
     VkResult res = vkBeginCommandBuffer(vk_ctx.compute_buff, &begin_info);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to begin compute command buffer");
+        vk_log(VK_ERROR, "failed to begin compute command buffer");
         return false;
     }
 
@@ -1026,7 +1155,7 @@ bool vk_end_rec_compute()
 {
     VkResult res = vkEndCommandBuffer(vk_ctx.compute_buff);                   
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to end compute pass");
+        vk_log(VK_ERROR, "failed to end compute pass");
         return false;
     }
 
@@ -1045,7 +1174,7 @@ bool vk_submit_compute()
 
     VkResult res = vkQueueSubmit(vk_ctx.compute_queue, 1, &submit, vk_ctx.compute_fence);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit compute queue");
+        vk_log(VK_ERROR, "failed to submit compute queue");
         return false;
     }
 
@@ -1057,12 +1186,12 @@ bool vk_compute_fence_wait()
     /* first wait for compute fence */
     VkResult res = vkWaitForFences(vk_ctx.device, 1, &vk_ctx.compute_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed waiting for compute fence");
+        vk_log(VK_ERROR, "failed waiting for compute fence");
         return false;
     }
     res = vkResetFences(vk_ctx.device, 1, &vk_ctx.compute_fence);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed resetting compute fence");
+        vk_log(VK_ERROR, "failed resetting compute fence");
         return false;
     }
 
@@ -1120,7 +1249,7 @@ bool vk_begin_drawing()
 {
     VkResult res = vkWaitForFences(vk_ctx.device, 1, &vk_ctx.gfx_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to wait for fences");
+        vk_log(VK_ERROR, "failed to wait for fences");
         return false;
     }
 
@@ -1131,27 +1260,27 @@ bool vk_begin_drawing()
     if (res == VK_ERROR_OUT_OF_DATE_KHR) {
         if (!vk_swapchain_init()) return false;
     } else if (!VK_SUCCEEDED(res) && res != VK_SUBOPTIMAL_KHR) {
-        nob_log(NOB_ERROR, "failed to acquire swapchain image");
+        vk_log(VK_ERROR, "failed to acquire swapchain image");
         return false;
     } else if (res == VK_SUBOPTIMAL_KHR) {
-        nob_log(NOB_WARNING, "suboptimal swapchain image");
+        vk_log(VK_WARNING, "suboptimal swapchain image");
     }
 
     res = vkResetFences(vk_ctx.device, 1, &vk_ctx.gfx_fence);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to reset fences");
+        vk_log(VK_ERROR, "failed to reset fences");
         return false;
     }
     res = vkResetCommandBuffer(vk_ctx.gfx_buff, 0);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR,"failed to reset cmd buffer");
+        vk_log(VK_ERROR,"failed to reset cmd buffer");
         return false;
     }
 
     VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
     res = vkBeginCommandBuffer(vk_ctx.gfx_buff, &begin_info);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR,"failed to begin command buffer");
+        vk_log(VK_ERROR,"failed to begin command buffer");
         return false;
     }
 
@@ -1163,7 +1292,7 @@ bool vk_end_drawing()
     vkCmdEndRenderPass(vk_ctx.gfx_buff);
     VkResult res = vkEndCommandBuffer(vk_ctx.gfx_buff);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to record command buffer");
+        vk_log(VK_ERROR, "failed to record command buffer");
         return false;
     }
 
@@ -1194,7 +1323,7 @@ bool vk_end_drawing()
 
     res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit to graphics queue");
+        vk_log(VK_ERROR, "failed to submit to graphics queue");
         return false;
     }
 
@@ -1211,7 +1340,7 @@ bool vk_end_drawing()
         vk_ctx.swapchain.buff_resized = false;
         if (!vk_recreate_swapchain()) return false;
     } else if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to present queue");
+        vk_log(VK_ERROR, "failed to present queue");
         return false;
     }
 
@@ -1244,11 +1373,11 @@ bool vk_depth_init()
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to initialize depth image");
+        vk_log(VK_ERROR, "failed to initialize depth image");
         return false;
     }
     if (!vk_img_view_init(vk_ctx.depth_img, &vk_ctx.depth_img_view)) {
-        nob_log(NOB_ERROR, "failed to initialize depth image view");
+        vk_log(VK_ERROR, "failed to initialize depth image view");
         return false;
     }
 
@@ -1293,11 +1422,11 @@ bool is_device_suitable(VkPhysicalDevice phys_device)
     vkGetPhysicalDeviceFeatures(phys_device, &features);
     if (props.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
         props.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-        nob_log(NOB_ERROR, "device not suitable, neither discrete nor integrated GPU present");
+        vk_log(VK_ERROR, "device not suitable, neither discrete nor integrated GPU present");
         return false;
     };
     if (!features.geometryShader) {
-        nob_log(NOB_ERROR, "device not suitable, geometry shader not present");
+        vk_log(VK_ERROR, "device not suitable, geometry shader not present");
         return false;
     }
     if (!device_exts_supported(phys_device)) return false;
@@ -1314,9 +1443,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
 {
     (void)msg_type;
     (void)p_user_data;
-    Nob_Log_Level log_lvl = translate_msg_severity(msg_severity);
+    Vk_Log_Level log_lvl = translate_msg_severity(msg_severity);
     if (log_lvl < MIN_SEVERITY) return VK_FALSE;
-    nob_log(log_lvl, "[Vulkan Validation] %s", p_callback_data->pMessage);
+    vk_log(log_lvl, "[Vulkan Validation] %s", p_callback_data->pMessage);
     return VK_FALSE;
 }
 
@@ -1332,17 +1461,17 @@ void populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci)
     debug_msgr_ci->pfnUserCallback = debug_callback;
 }
 
-Nob_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity)
+Vk_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity)
 {
     switch (msg_severity) {
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: return NOB_INFO;
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:    return NOB_INFO;
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: return NOB_WARNING;
-    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:   return NOB_ERROR;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: return VK_INFO;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:    return VK_INFO;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: return VK_WARNING;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:   return VK_ERROR;
     default: assert(0 && "this message severity is not handled");
     }
 
-    return NOB_ERROR; // unreachable
+    return VK_ERROR; // unreachable
 }
 
 bool setup_debug_msgr()
@@ -1353,7 +1482,7 @@ bool setup_debug_msgr()
     if (vkCreateDebugUtilsMessengerEXT) {
         return VK_SUCCEEDED(vkCreateDebugUtilsMessengerEXT(vk_ctx.instance, &debug_msgr_ci, NULL, &vk_ctx.debug_msgr));
     } else {
-        nob_log(NOB_ERROR, "failed to load function pointer for vkCreateDebugUtilesMessenger");
+        vk_log(VK_ERROR, "failed to load function pointer for vkCreateDebugUtilesMessenger");
         return false;
     }
 }
@@ -1384,7 +1513,7 @@ bool set_queue_fam_indices(VkPhysicalDevice phys_device)
         if (has_gfx && has_present && has_compute) return true;
     }
 
-    nob_log(NOB_ERROR, "missing graphics, present, and/or compute queue idx");
+    vk_log(VK_ERROR, "missing graphics, present, and/or compute queue idx");
     return false;
 }
 
@@ -1410,7 +1539,7 @@ void populate_set(int arr[], size_t arr_size, U32_Set *set)
         if (arr[i] == -1)
             continue;
 
-        nob_da_append(set, arr[i]);
+        vk_da_append(set, arr[i]);
 
         for (size_t j = i + 1; j < arr_size; j++)
             if (arr[i] == arr[j])
@@ -1423,13 +1552,13 @@ bool swapchain_adequate(VkPhysicalDevice phys_device)
     uint32_t surface_fmt_count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys_device, vk_ctx.surface, &surface_fmt_count, NULL);
     if (!surface_fmt_count) {
-        nob_log(NOB_ERROR, "swapchain inadequate because surface format count was zero");
+        vk_log(VK_ERROR, "swapchain inadequate because surface format count was zero");
         return false;
     }
     uint32_t present_mode_count = 0; 
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys_device, vk_ctx.surface, &present_mode_count, NULL);
     if (!present_mode_count) {
-        nob_log(NOB_ERROR, "swapchain inadequate because present mode count was zero");
+        vk_log(VK_ERROR, "swapchain inadequate because present mode count was zero");
         return false;
     }
 
@@ -1450,12 +1579,12 @@ bool choose_swapchain_fmt()
     }
 
     if (surface_fmt_count) {
-        nob_log(NOB_WARNING, "default surface format %d and colorspace %d", fmts[0].format, fmts[0].colorSpace);
+        vk_log(VK_WARNING, "default surface format %d and colorspace %d", fmts[0].format, fmts[0].colorSpace);
         vk_ctx.surface_fmt = fmts[0];
         return true;
     } else {
-        nob_log(NOB_ERROR, "failed to find any surface swapchain formats");
-        nob_log(NOB_ERROR, "this shouldn't have happened if swapchain_adequate returned true");
+        vk_log(VK_ERROR, "failed to find any surface swapchain formats");
+        vk_log(VK_ERROR, "this shouldn't have happened if swapchain_adequate returned true");
         return false;
     }
 }
@@ -1503,15 +1632,22 @@ void cleanup_swapchain()
     vkDestroyImage(vk_ctx.device, vk_ctx.depth_img.handle, NULL);
     vkFreeMemory(vk_ctx.device, vk_ctx.depth_img.mem, NULL);
 
-    for (size_t i = 0; i < vk_ctx.swapchain.buffs.count; i++)
-        vkDestroyFramebuffer(vk_ctx.device, vk_ctx.swapchain.buffs.items[i], NULL);
+    for (size_t i = 0; i < vk_ctx.swapchain.frame_buffs.count; i++)
+        vkDestroyFramebuffer(vk_ctx.device, vk_ctx.swapchain.frame_buffs.items[i], NULL);
     for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++)
         vkDestroyImageView(vk_ctx.device, vk_ctx.swapchain.img_views.items[i], NULL);
     vkDestroySwapchainKHR(vk_ctx.device, vk_ctx.swapchain.handle, NULL);
 
-    nob_da_reset(vk_ctx.swapchain.buffs);
-    nob_da_reset(vk_ctx.swapchain.img_views);
-    nob_da_reset(vk_ctx.swapchain.imgs);
+    /* cleanup and reset everything in case we resuse it */
+    vk_da_free(vk_ctx.swapchain.frame_buffs);
+    vk_da_free(vk_ctx.swapchain.img_views);
+    vk_da_free(vk_ctx.swapchain.imgs);
+    vk_ctx.swapchain.frame_buffs.count = 0;
+    vk_ctx.swapchain.img_views.count = 0;
+    vk_ctx.swapchain.imgs.count = 0;
+    vk_ctx.swapchain.frame_buffs.items = NULL;
+    vk_ctx.swapchain.img_views.items = NULL;
+    vk_ctx.swapchain.imgs.items = NULL;
 }
 
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx)
@@ -1546,7 +1682,7 @@ bool inst_exts_satisfied()
             }
         }
         if (!found)
-            nob_log(NOB_ERROR, "instance extension `%s` not available", instance_exts.items[i]);
+            vk_log(VK_ERROR, "instance extension `%s` not available", instance_exts.items[i]);
     }
 
     return false;
@@ -1558,8 +1694,8 @@ bool chk_validation_support()
     vkEnumerateInstanceLayerProperties(&layer_count, NULL);
     VkLayerProperties avail_layers[layer_count];
     vkEnumerateInstanceLayerProperties(&layer_count, avail_layers);
-    size_t unsatisfied_layers = NOB_ARRAY_LEN(validation_layers);
-    for (size_t i = 0; i < NOB_ARRAY_LEN(validation_layers); i++) {
+    size_t unsatisfied_layers = VK_ARRAY_LEN(validation_layers);
+    for (size_t i = 0; i < VK_ARRAY_LEN(validation_layers); i++) {
         bool found = false;
         for (size_t j = 0; j < layer_count; j++) {
             if (strcmp(validation_layers[i], avail_layers[j].layerName) == 0) {
@@ -1570,7 +1706,7 @@ bool chk_validation_support()
             }
         }
         if (!found)
-            nob_log(NOB_ERROR, "validation layer `%s` not available", validation_layers[i]);
+            vk_log(VK_ERROR, "validation layer `%s` not available", validation_layers[i]);
     }
 
     return true;
@@ -1582,8 +1718,8 @@ bool device_exts_supported(VkPhysicalDevice phys_device)
     vkEnumerateDeviceExtensionProperties(phys_device, NULL, &avail_ext_count, NULL);
     VkExtensionProperties avail_exts[avail_ext_count];
     vkEnumerateDeviceExtensionProperties(phys_device, NULL, &avail_ext_count, avail_exts);
-    uint32_t unsatisfied_exts = NOB_ARRAY_LEN(device_exts); 
-    for (size_t i = 0; i < NOB_ARRAY_LEN(device_exts); i++) {
+    uint32_t unsatisfied_exts = VK_ARRAY_LEN(device_exts); 
+    for (size_t i = 0; i < VK_ARRAY_LEN(device_exts); i++) {
         bool found = false;
         for (size_t j = 0; j < avail_ext_count; j++) {
             if (strcmp(device_exts[i], avail_exts[j].extensionName) == 0) {
@@ -1594,7 +1730,7 @@ bool device_exts_supported(VkPhysicalDevice phys_device)
             }
         }
         if (!found)
-            nob_log(NOB_ERROR, "device extension `%s` not available", device_exts[i]);
+            vk_log(VK_ERROR, "device extension `%s` not available", device_exts[i]);
     }
 
     return false;
@@ -1603,7 +1739,7 @@ bool device_exts_supported(VkPhysicalDevice phys_device)
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
 {
     if (buffer->size == 0) {
-        nob_log(NOB_ERROR, "Vk_Buffer must be set with size before calling vk_buff_init");
+        vk_log(VK_ERROR, "Vk_Buffer must be set with size before calling vk_buff_init");
         return false;
     }
 
@@ -1614,7 +1750,7 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
     if (!VK_SUCCEEDED(vkCreateBuffer(vk_ctx.device, &buffer_ci, NULL, &buffer->handle))) {
-        nob_log(NOB_ERROR, "failed to create buffer");
+        vk_log(VK_ERROR, "failed to create buffer");
         return false;
     }
 
@@ -1625,15 +1761,15 @@ bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyF
         .allocationSize = mem_reqs.size,
     };
     if (!find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex)) {
-        nob_log(NOB_ERROR, "while initializing buffer, memory not suitable based on memory requirements");
+        vk_log(VK_ERROR, "while initializing buffer, memory not suitable based on memory requirements");
         return false;
     }
     if (!VK_SUCCEEDED(vkAllocateMemory(vk_ctx.device, &alloc_ci, NULL, &buffer->mem))) {
-        nob_log(NOB_ERROR, "failed to allocate buffer memory!");
+        vk_log(VK_ERROR, "failed to allocate buffer memory!");
         return false;
     }
     if (!VK_SUCCEEDED(vkBindBufferMemory(vk_ctx.device, buffer->handle, buffer->mem, 0))) {
-        nob_log(NOB_ERROR, "failed to bind buffer memory");
+        vk_log(VK_ERROR, "failed to bind buffer memory");
         return false;
     }
 
@@ -1648,11 +1784,11 @@ bool vk_stg_buff_init(Vk_Buffer *stg_buff, void *data, bool leave_mapped)
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     if(!result) {
-        nob_log(NOB_ERROR, "failed to create staging buffer");
+        vk_log(VK_ERROR, "failed to create staging buffer");
         return false;
     }
     if (!VK_SUCCEEDED(vkMapMemory(vk_ctx.device, stg_buff->mem, 0, stg_buff->size, 0, &stg_buff->mapped))) {
-        nob_log(NOB_ERROR, "unable to map memory for staging buffer");
+        vk_log(VK_ERROR, "unable to map memory for staging buffer");
         return false;
     }
     memcpy(stg_buff->mapped, data, stg_buff->size);
@@ -1684,12 +1820,12 @@ bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to create staging buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create staging buffer");
+        vk_return_defer(false);
     }
     if (!VK_SUCCEEDED(vkMapMemory(vk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped))) {
-        nob_log(NOB_ERROR, "failed to map memory");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to map memory");
+        vk_return_defer(false);
     }
     memcpy(stg_buff.mapped, data, stg_buff.size);
     vkUnmapMemory(vk_ctx.device, stg_buff.mem);
@@ -1700,8 +1836,8 @@ bool vk_vtx_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to create vertex buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create vertex buffer");
+        vk_return_defer(false);
     }
 
     /* transfer data from staging buffer to vertex buffer */
@@ -1723,7 +1859,7 @@ bool vk_vtx_buff_upload(Vk_Buffer *vtx_buff, const void *data)
 
     VkResult res = vkMapMemory(vk_ctx.device, vtx_buff->mem, 0, vtx_buff->size, 0, &(vtx_buff->mapped));
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to map memory");
+        vk_log(VK_ERROR, "failed to map memory");
         return false;
     }
 
@@ -1748,12 +1884,12 @@ bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to create staging compute buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create staging compute buffer");
+        vk_return_defer(false);
     }
     if (!VK_SUCCEEDED(vkMapMemory(vk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped))) {
-        nob_log(NOB_ERROR, "failed to map memory");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to map memory");
+        vk_return_defer(false);
     }
     memcpy(stg_buff.mapped, data, stg_buff.size);
     vkUnmapMemory(vk_ctx.device, stg_buff.mem);
@@ -1766,8 +1902,8 @@ bool vk_comp_buff_staged_upload(Vk_Buffer *vtx_buff, const void *data)
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to create compute buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create compute buffer");
+        vk_return_defer(false);
     }
 
     /* transfer data from staging buffer to vertex buffer */
@@ -1793,12 +1929,12 @@ bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data)
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to create staging buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create staging buffer");
+        vk_return_defer(false);
     }
     if (!VK_SUCCEEDED(vkMapMemory(vk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped))) {
-        nob_log(NOB_ERROR, "failed to map memory");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to map memory");
+        vk_return_defer(false);
     }
     memcpy(stg_buff.mapped, data, stg_buff.size);
     vkUnmapMemory(vk_ctx.device, stg_buff.mem);
@@ -1809,8 +1945,8 @@ bool vk_idx_buff_staged_upload(Vk_Buffer *idx_buff, const void *data)
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
     if (!result) {
-        nob_log(NOB_ERROR, "failed to create index buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create index buffer");
+        vk_return_defer(false);
     }
 
     /* transfer data from staging buffer to index buffer */
@@ -1832,7 +1968,7 @@ bool vk_idx_buff_upload(Vk_Buffer *idx_buff, const void *data)
 
     VkResult res = vkMapMemory(vk_ctx.device, idx_buff->mem, 0, idx_buff->size, 0, &(idx_buff->mapped));
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to map memory in idx buff upload");
+        vk_log(VK_ERROR, "failed to map memory in idx buff upload");
         return false;
     }
     memcpy(idx_buff->mapped, data, idx_buff->size);
@@ -1850,17 +1986,17 @@ bool vk_buff_copy(Vk_Buffer dst_buff, Vk_Buffer src_buff, VkDeviceSize size)
         if (size) {
             copy_region.size = size;
             if (size > dst_buff.size) {
-                nob_log(NOB_ERROR, "Cannot copy buffer, size > dst buffer (won't fit)");
+                vk_log(VK_ERROR, "Cannot copy buffer, size > dst buffer (won't fit)");
                 return false;
             }
             if (size > src_buff.size) {
-                nob_log(NOB_ERROR, "Cannot copy buffer, size > src buffer (cannot copy more than what's available)");
+                vk_log(VK_ERROR, "Cannot copy buffer, size > src buffer (cannot copy more than what's available)");
                 return false;
             }
         } else {
             // size == 0 means copy the entire src to dst
             if (dst_buff.size < src_buff.size) {
-                nob_log(NOB_ERROR, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
+                vk_log(VK_ERROR, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
                 return false;
             }
             copy_region.size = src_buff.size;
@@ -1876,8 +2012,8 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
     bool result = true;
 
     if (img->extent.width == 0 && img->extent.height == 0) {
-        nob_log(NOB_ERROR, "Vk_Image must be set with width/height before calling vk_img_init");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "Vk_Image must be set with width/height before calling vk_img_init");
+        vk_return_defer(false);
     }
 
     VkImageCreateInfo img_ci = {
@@ -1893,8 +2029,8 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
     if (!VK_SUCCEEDED(vkCreateImage(vk_ctx.device, &img_ci, NULL, &img->handle))) {
-        nob_log(NOB_ERROR, "failed to create image");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to create image");
+        vk_return_defer(false);
     }
 
     VkMemoryRequirements mem_reqs = {0};
@@ -1905,19 +2041,19 @@ bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags p
         .allocationSize = mem_reqs.size,
     };
     if (!find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex)) {
-        nob_log(NOB_ERROR, "Memory not suitable based on memory requirements");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "Memory not suitable based on memory requirements");
+        vk_return_defer(false);
     }
     VkResult res = vkAllocateMemory(vk_ctx.device, &alloc_ci, NULL, &img->mem);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to allocate buffer memory!");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to allocate buffer memory!");
+        vk_return_defer(false);
     }
 
     res = vkBindImageMemory(vk_ctx.device, img->handle, img->mem, 0);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to bind image buffer memory");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to bind image buffer memory");
+        vk_return_defer(false);
     }
 
 defer:
@@ -1932,7 +2068,7 @@ bool cmd_pool_init()
         .queueFamilyIndex = vk_ctx.gfx_idx, // TODO: this sort of assumes all queues using pool have the same idx
     };
     if (!VK_SUCCEEDED(vkCreateCommandPool(vk_ctx.device, &cmd_pool_ci, NULL, &vk_ctx.pool))) {
-        nob_log(NOB_ERROR, "failed to create command pool");
+        vk_log(VK_ERROR, "failed to create command pool");
         return false;
     }
 
@@ -1948,11 +2084,11 @@ bool cmd_buff_init()
         .commandBufferCount = 1,
     };
     if (!VK_SUCCEEDED(vkAllocateCommandBuffers(vk_ctx.device, &ci, &vk_ctx.gfx_buff))) {
-        nob_log(NOB_ERROR, "failed to create graphics command buffer");
+        vk_log(VK_ERROR, "failed to create graphics command buffer");
         return false;
     }
     if (!VK_SUCCEEDED(vkAllocateCommandBuffers(vk_ctx.device, &ci, &vk_ctx.compute_buff))) {
-        nob_log(NOB_ERROR, "failed to create compute command buffer");
+        vk_log(VK_ERROR, "failed to create compute command buffer");
         return false;
     }
 
@@ -1976,7 +2112,7 @@ bool cmd_syncs_init()
     res |= vkCreateFence(vk_ctx.device, &fence_ci, NULL, &vk_ctx.gfx_fence);
     res |= vkCreateFence(vk_ctx.device, &fence_ci, NULL, &vk_ctx.compute_fence);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create sync objects");
+        vk_log(VK_ERROR, "failed to create sync objects");
         return false;
     }
 
@@ -1993,7 +2129,7 @@ bool cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
     };
     VkResult res = vkAllocateCommandBuffers(vk_ctx.device, &ci, tmp_cmd_buff);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create quick cmd");
+        vk_log(VK_ERROR, "failed to create quick cmd");
         return false;
     }
     VkCommandBufferBeginInfo cmd_begin = {
@@ -2002,7 +2138,7 @@ bool cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
     };
     res = vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to begin quick cmd");
+        vk_log(VK_ERROR, "failed to begin quick cmd");
         return false;
     }
 
@@ -2015,8 +2151,8 @@ bool cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
 
     VkResult res = vkEndCommandBuffer(*tmp_cmd_buff);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to end cmd buffer");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to end cmd buffer");
+        vk_return_defer(false);
     }
 
     VkSubmitInfo submit = {
@@ -2027,16 +2163,16 @@ bool cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
 
     res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to submit quick cmd");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to submit quick cmd");
+        vk_return_defer(false);
     }
 
     /* TODO: perhaps I should use a fence instead of a queue wait idle */
 
     res = vkQueueWaitIdle(vk_ctx.gfx_queue);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to wait idle in quick cmd");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to wait idle in quick cmd");
+        vk_return_defer(false);
     }
 
 defer:
@@ -2069,7 +2205,7 @@ bool transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
             src_stg_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
             dst_stg_mask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         } else {
-            nob_log(NOB_ERROR, "old_layout %d with new_layout %d not allowed yet", old_layout, new_layout);
+            vk_log(VK_ERROR, "old_layout %d with new_layout %d not allowed yet", old_layout, new_layout);
             return false;
         }
 
@@ -2173,7 +2309,7 @@ int format_to_size(VkFormat fmt)
     } else if (VK_FORMAT_R8_UNORM <= fmt && fmt <= VK_FORMAT_R8_SRGB) {
         return 1;
     } else {
-        nob_log(NOB_WARNING, "unrecognized format %d, returning 4 instead", fmt);
+        vk_log(VK_WARNING, "unrecognized format %d, returning 4 instead", fmt);
         return 4;
     }
 }
@@ -2196,7 +2332,7 @@ bool vk_sampler_init(VkSampler *sampler)
         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
     };
     if (!VK_SUCCEEDED(vkCreateSampler(vk_ctx.device, &sampler_ci, NULL, sampler))) {
-        nob_log(NOB_ERROR, "failed to create sampler");
+        vk_log(VK_ERROR, "failed to create sampler");
         return false;
     }
 
@@ -2217,10 +2353,10 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_T
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    if(!result) nob_return_defer(false);
+    if(!result) vk_return_defer(false);
     if (!VK_SUCCEEDED(vkMapMemory(vk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped))) {
-        nob_log(NOB_ERROR, "unable to map memory");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "unable to map memory");
+        vk_return_defer(false);
     }
     memcpy(stg_buff.mapped, data, stg_buff.size);
     vkUnmapMemory(vk_ctx.device, stg_buff.mem);
@@ -2236,24 +2372,24 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_T
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    if (!result) nob_return_defer(false);
+    if (!result) vk_return_defer(false);
     result = transition_img_layout(
         vk_img.handle,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
-    if (!result) nob_return_defer(false);
-    if (!vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent)) nob_return_defer(false);
+    if (!result) vk_return_defer(false);
+    if (!vk_img_copy(vk_img.handle, stg_buff.handle, vk_img.extent)) vk_return_defer(false);
     result = transition_img_layout(
         vk_img.handle,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
-    if (!result) nob_return_defer(false);
+    if (!result) vk_return_defer(false);
 
     /* create image view */
     VkImageView img_view;
-    if (!vk_img_view_init(vk_img, &img_view)) nob_return_defer(false);
+    if (!vk_img_view_init(vk_img, &img_view)) vk_return_defer(false);
 
     /* create sampler */
     VkPhysicalDeviceProperties props = {0};
@@ -2273,8 +2409,8 @@ bool vk_load_texture(void *data, size_t width, size_t height, VkFormat fmt, Vk_T
     };
     VkSampler sampler;
     if (!VK_SUCCEEDED(vkCreateSampler(vk_ctx.device, &sampler_ci, NULL, &sampler))) {
-        nob_log(NOB_ERROR, "failed calling vkCreateSampler");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed calling vkCreateSampler");
+        vk_return_defer(false);
     }
 
     Vk_Texture tex = {
@@ -2305,7 +2441,7 @@ void vk_unload_texture(Vk_Texture *texture)
 bool vk_create_storage_img(Vk_Texture *texture)
 {
     if (texture->img.extent.width == 0 && texture->img.extent.height == 0) {
-        nob_log(NOB_ERROR, "storage image does not have width or height");
+        vk_log(VK_ERROR, "storage image does not have width or height");
         return false;
     }
 
@@ -2356,7 +2492,7 @@ bool vk_create_storage_img(Vk_Texture *texture)
     VkSampler sampler;
     VkResult res = vkCreateSampler(vk_ctx.device, &sampler_ci, NULL, &sampler);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create sampler");
+        vk_log(VK_ERROR, "failed to create sampler");
         return false;
     }
 
@@ -2371,7 +2507,7 @@ bool vk_create_ds_layout(VkDescriptorSetLayoutCreateInfo layout_ci, VkDescriptor
 {
     VkResult res = vkCreateDescriptorSetLayout(vk_ctx.device, &layout_ci, NULL, layout);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor set layout");
+        vk_log(VK_ERROR, "failed to create descriptor set layout");
         return false;
     }
 
@@ -2382,7 +2518,7 @@ bool vk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *poo
 {
     VkResult res = vkCreateDescriptorPool(vk_ctx.device, &pool_ci, NULL, pool);
     if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to create descriptor pool");
+        vk_log(VK_ERROR, "failed to create descriptor pool");
         return false;
     }
 
@@ -2403,10 +2539,10 @@ bool vk_alloc_ds(VkDescriptorSetAllocateInfo alloc, VkDescriptorSet *sets)
 {
     VkResult res = vkAllocateDescriptorSets(vk_ctx.device, &alloc, sets);
     if (res == VK_ERROR_OUT_OF_POOL_MEMORY) {
-        nob_log(NOB_ERROR, "out of pool memory");
+        vk_log(VK_ERROR, "out of pool memory");
         return false;
     } else if (!VK_SUCCEEDED(res)) {
-        nob_log(NOB_ERROR, "failed to allocate descriptor sets");
+        vk_log(VK_ERROR, "failed to allocate descriptor sets");
         return false;
     }
 

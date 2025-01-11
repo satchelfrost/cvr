@@ -1,15 +1,13 @@
 #include "cvr.h"
-#include "ext/nob.h"
 
 #ifndef PLATFORM_QUEST
-#include "ext/raylib-5.0/raymath.h"
 Shape_Type shape = SHAPE_CUBE;
 #endif
 
 int main()
 {
 #ifdef PLATFORM_QUEST
-    nob_log(NOB_INFO, "Hello From CVR on the Quest!");
+    vk_log(VK_INFO, "Hello From CVR on the Quest!");
 #else
     Camera camera = {
         .position   = {0.0f, 2.0f, 5.0f},

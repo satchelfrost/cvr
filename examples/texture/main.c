@@ -1,8 +1,5 @@
 #include "cvr.h"
-#include "ext/nob.h"
-#include "ext/raylib-5.0/raymath.h"
-#include <math.h>
-#include "vk_ctx.h"
+#include "geometry.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "ext/stb_image.h"
@@ -38,16 +35,16 @@ bool upload_texture(Texture *texture)
     void *data = stbi_load(texture->file_name, &width, &height, &channels, STBI_rgb_alpha);
 
     if (!data) {
-        nob_log(NOB_ERROR, "image %s could not be loaded", texture->file_name);
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "image %s could not be loaded", texture->file_name);
+        vk_return_defer(false);
     } else {
-        nob_log(NOB_INFO, "image %s was successfully loaded", texture->file_name);
-        nob_log(NOB_INFO, "    (height, width) = (%d, %d)", height, width);
-        nob_log(NOB_INFO, "    image size in memory = %d bytes", height * width * 4);
+        vk_log(VK_INFO, "image %s was successfully loaded", texture->file_name);
+        vk_log(VK_INFO, "    (height, width) = (%d, %d)", height, width);
+        vk_log(VK_INFO, "    image size in memory = %d bytes", height * width * 4);
     }
 
     if (!vk_load_texture(data, width, height, VK_FORMAT_R8G8B8A8_SRGB, &texture->handle))
-        nob_return_defer(false);
+        vk_return_defer(false);
 
     texture->aspect = (float)width / height;
 
@@ -85,7 +82,7 @@ bool setup_ds_sets()
 {
     /* allocate descriptor sets based on layouts */
     VkDescriptorSetLayout layouts[] = {ds_layout, ds_layout};
-    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, NOB_ARRAY_LEN(layouts), ds_pool)};
+    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, VK_ARRAY_LEN(layouts), ds_pool)};
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
 
     /* update descriptor sets based on layouts */
@@ -145,7 +142,7 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };

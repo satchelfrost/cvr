@@ -1,5 +1,5 @@
 #include "cvr.h"
-#include "ext/nob.h"
+#include "geometry.h"
 
 #define MAX_POINTS  100000000 // 100 million
 #define MIN_POINTS  100000    // 100 thousand
@@ -52,7 +52,7 @@ void gen_points(size_t num_points, Point_Cloud *pc)
             .a = 255,
         };
 
-        nob_da_append(pc, vert);
+        vk_da_append(pc, vert);
     }
 
     pc->buff.count = pc->count;
@@ -96,7 +96,7 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
         .polygon_mode = VK_POLYGON_MODE_POINT,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -136,7 +136,7 @@ int main()
                 pc.pending_change = true;
                 num_points = num_points * 10;
             } else {
-                nob_log(NOB_INFO, "max point count reached");
+                vk_log(VK_INFO, "max point count reached");
             }
         }
         if (is_key_pressed(KEY_DOWN)) {
@@ -144,7 +144,7 @@ int main()
                 pc.pending_change = true;
                 num_points = num_points / 10;
             } else {
-                nob_log(NOB_INFO, "min point count reached");
+                vk_log(VK_INFO, "min point count reached");
             }
         }
         if (is_key_pressed(KEY_R)) record.collecting = true;
@@ -160,13 +160,13 @@ int main()
 
         /* collect the frame rate */
         if (record.collecting) {
-            nob_da_append(&record, get_fps());
+            vk_da_append(&record, get_fps());
             if (record.count >= record.max) {
                 /* print results and reset */
                 size_t sum = 0;
                 for (size_t i = 0; i < record.count; i++) sum += record.items[i];
                 float ave = (float) sum / record.count;
-                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
+                vk_log(VK_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
                 record.count = 0;
                 record.collecting = false;
             }
@@ -184,7 +184,7 @@ int main()
     vk_wait_idle();
     vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     vk_buff_destroy(&pc.buff);
-    nob_da_free(pc);
+    vk_da_free(pc);
     close_window();
     return 0;
 }

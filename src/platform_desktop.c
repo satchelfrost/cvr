@@ -38,8 +38,8 @@ bool init_platform()
         const GLFWvidmode *mode = glfwGetVideoMode(largest_monitor);
         win_size.width = mode->width;
         win_size.height = mode->height;
-        nob_log(NOB_INFO, "full screen mode enabled", mode->width, mode->height);
-        nob_log(NOB_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
+        vk_log(VK_INFO, "full screen mode enabled", mode->width, mode->height);
+        vk_log(VK_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
         platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
         if (!platform.handle) return false;
     } else {
@@ -62,7 +62,7 @@ bool platform_surface_init()
     if (VK_SUCCEEDED(glfwCreateWindowSurface(vk_ctx.instance, platform.handle, NULL, &vk_ctx.surface))) {
         return true;
     } else {
-        nob_log(NOB_ERROR, "failed to initialize glfw window surface");
+        vk_log(VK_ERROR, "failed to initialize glfw window surface");
         return false;
     }
 }
@@ -199,10 +199,10 @@ void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y)
 void joystick_callback(int jid, int event)
 {
     if (event == GLFW_CONNECTED) {
-        nob_log(NOB_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+        vk_log(VK_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
     else if (event == GLFW_DISCONNECTED) {
-        nob_log(NOB_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+        vk_log(VK_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
 }
 

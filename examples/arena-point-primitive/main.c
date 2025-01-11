@@ -1,8 +1,9 @@
 #include "cvr.h"
-#include "ext/nob.h"
-// #include "ext/raylib-5.0/raymath.h"
-#include <float.h>
-#include "vk_ctx.h"
+#include "geometry.h"
+#include <float.h> // FLT_MAX
+
+#define NOB_IMPLEMENTATION
+#include "../nob.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "ext/stb_image.h"
@@ -111,7 +112,7 @@ bool setup_ds_pool()
     };
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
+        .poolSizeCount = VK_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
         .maxSets = 2,
     };
@@ -144,7 +145,7 @@ bool setup_ds_sets(Vk_Buffer buff)
         {DS_WRITE_IMG(2, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SET_FRAG], &img_infos[2])},
         {DS_WRITE_IMG(3, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SET_FRAG], &img_infos[3])},
     };
-    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+    vk_update_ds(VK_ARRAY_LEN(writes), writes);
 
     return true;
 }
@@ -156,16 +157,16 @@ bool upload_texture(Texture *texture)
     void *data = stbi_load(texture->file_name, &width, &height, &channels, STBI_rgb_alpha);
 
     if (!data) {
-        nob_log(NOB_ERROR, "image %s could not be loaded", texture->file_name);
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "image %s could not be loaded", texture->file_name);
+        vk_return_defer(false);
     } else {
-        nob_log(NOB_INFO, "image %s was successfully loaded", texture->file_name);
-        nob_log(NOB_INFO, "    (height, width) = (%d, %d)", height, width);
-        nob_log(NOB_INFO, "    image size in memory = %d bytes", height * width * 4);
+        vk_log(VK_INFO, "image %s was successfully loaded", texture->file_name);
+        vk_log(VK_INFO, "    (height, width) = (%d, %d)", height, width);
+        vk_log(VK_INFO, "    image size in memory = %d bytes", height * width * 4);
     }
 
     if (!vk_load_texture(data, width, height, VK_FORMAT_R8G8B8A8_SRGB, &texture->handle))
-        nob_return_defer(false);
+        vk_return_defer(false);
 
     texture->aspect = (float)width / height;
 
@@ -178,9 +179,9 @@ bool read_vtx(const char *file, Point_Cloud *pc) // TODO: I don't think this nee
 {
     bool result = true;
 
-    nob_log(NOB_INFO, "reading vtx file %s", file);
+    vk_log(VK_INFO, "reading vtx file %s", file);
     Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
+    if (!nob_read_entire_file(file, &sb)) vk_return_defer(false);
 
     Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
     size_t vtx_count = 0;
@@ -200,11 +201,11 @@ bool read_vtx(const char *file, Point_Cloud *pc) // TODO: I don't think this nee
             .x = x, .y = y, .z = z,
             .r = r, .g = g, .b = b, .a = 255,
         };
-        nob_da_append(pc, vert);
+        vk_da_append(pc, vert);
     }
 
 defer:
-    nob_sb_free(sb);
+    vk_sb_free(sb);
     return result;
 }
 
@@ -213,11 +214,11 @@ bool load_points(const char *name, Point_Cloud *point_cloud)
     bool result = true;
 
     if (!read_vtx(name, point_cloud)) {
-        nob_log(NOB_ERROR, "failed to load point cloud");
-        nob_log(NOB_ERROR, "this example requires private data");
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to load point cloud");
+        vk_log(VK_ERROR, "this example requires private data");
+        vk_return_defer(false);
     }
-    nob_log(NOB_INFO, "Number of vertices %zu", point_cloud->count);
+    vk_log(VK_INFO, "Number of vertices %zu", point_cloud->count);
 
     // point_cloud->buff.items = verts.items;
     point_cloud->buff.count = point_cloud->count;
@@ -235,11 +236,11 @@ void log_cameras(Camera *cameras, size_t count)
         Vector3 up  = cameras[i].up;
         Vector3 tg  = cameras[i].target;
         float fov   = cameras[i].fovy;
-        nob_log(NOB_INFO, "Camera %d", i);
-        nob_log(NOB_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
-        nob_log(NOB_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
-        nob_log(NOB_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
-        nob_log(NOB_INFO, "    fovy     %.2f", fov);
+        vk_log(VK_INFO, "Camera %d", i);
+        vk_log(VK_INFO, "    position %.2f %.2f %.2f", pos.x, pos.y, pos.z);
+        vk_log(VK_INFO, "    up       %.2f %.2f %.2f", up.x, up.y, up.z);
+        vk_log(VK_INFO, "    target   %.2f %.2f %.2f", tg.x, tg.y, tg.z);
+        vk_log(VK_INFO, "    fovy     %.2f", fov);
     }
 }
 
@@ -256,7 +257,7 @@ int get_closest_camera(Camera *cameras, size_t count)
             shortest = dist_sqr;
         }
     }
-    if (shortest_idx < 0) nob_log(NOB_ERROR, "Unknown camera index");
+    if (shortest_idx < 0) vk_log(VK_ERROR, "Unknown camera index");
 
     return shortest_idx;
 }
@@ -287,7 +288,7 @@ void get_cam_order(const Camera *cameras, size_t count, int *cam_order, size_t c
         sqr_distances[i - 1].idx = i - 1;
     }
 
-    qsort(sqr_distances, NOB_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
+    qsort(sqr_distances, VK_ARRAY_LEN(sqr_distances), sizeof(Distance_Sqr_Idx), dist_sqr_compare);
     for (size_t i = 0; i < cam_order_count; i++)
         cam_order[i] = sqr_distances[i].idx;
 }
@@ -299,41 +300,41 @@ void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
 
 void log_controls()
 {
-    nob_log(NOB_INFO, "------------");
-    nob_log(NOB_INFO, "| Keyboard |");
-    nob_log(NOB_INFO, "------------");
-    nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "    | Movement |");
-    nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "        [W] - Forward");
-    nob_log(NOB_INFO, "        [A] - Left");
-    nob_log(NOB_INFO, "        [S] - Back");
-    nob_log(NOB_INFO, "        [D] - Right");
-    nob_log(NOB_INFO, "        [E] - Up");
-    nob_log(NOB_INFO, "        [Q] - Down");
-    nob_log(NOB_INFO, "        [Shift] - Fast movement");
-    nob_log(NOB_INFO, "        Right Click + Mouse Movement = Rotation");
-    nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "    | Hot keys |");
-    nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "        [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
-    nob_log(NOB_INFO, "        [C] - Change piloted camera");
-    nob_log(NOB_INFO, "        [R] - Resolution toggle");
-    nob_log(NOB_INFO, "        [V] - View change (also pilots current view)");
-    nob_log(NOB_INFO, "        [P] - Print camera info");
-    nob_log(NOB_INFO, "        [Space] - Reset cameras to default position");
-    nob_log(NOB_INFO, "-----------");
-    nob_log(NOB_INFO, "| Gamepad |");
-    nob_log(NOB_INFO, "-----------");
-    nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "    | Movement |");
-    nob_log(NOB_INFO, "    ------------");
-    nob_log(NOB_INFO, "        [Left Analog] - Translation");
-    nob_log(NOB_INFO, "        [Right Analog] - Rotation");
-    nob_log(NOB_INFO, "    ---------");
-    nob_log(NOB_INFO, "    | Other |");
-    nob_log(NOB_INFO, "    ---------");
-    nob_log(NOB_INFO, "        [Right Trigger] - shader mode");
+    vk_log(VK_INFO, "------------");
+    vk_log(VK_INFO, "| Keyboard |");
+    vk_log(VK_INFO, "------------");
+    vk_log(VK_INFO, "    ------------");
+    vk_log(VK_INFO, "    | Movement |");
+    vk_log(VK_INFO, "    ------------");
+    vk_log(VK_INFO, "        [W] - Forward");
+    vk_log(VK_INFO, "        [A] - Left");
+    vk_log(VK_INFO, "        [S] - Back");
+    vk_log(VK_INFO, "        [D] - Right");
+    vk_log(VK_INFO, "        [E] - Up");
+    vk_log(VK_INFO, "        [Q] - Down");
+    vk_log(VK_INFO, "        [Shift] - Fast movement");
+    vk_log(VK_INFO, "        Right Click + Mouse Movement = Rotation");
+    vk_log(VK_INFO, "    ------------");
+    vk_log(VK_INFO, "    | Hot keys |");
+    vk_log(VK_INFO, "    ------------");
+    vk_log(VK_INFO, "        [M] - Shader mode (base model, camera overlap, single texture, or multi-texture)");
+    vk_log(VK_INFO, "        [C] - Change piloted camera");
+    vk_log(VK_INFO, "        [R] - Resolution toggle");
+    vk_log(VK_INFO, "        [V] - View change (also pilots current view)");
+    vk_log(VK_INFO, "        [P] - Print camera info");
+    vk_log(VK_INFO, "        [Space] - Reset cameras to default position");
+    vk_log(VK_INFO, "-----------");
+    vk_log(VK_INFO, "| Gamepad |");
+    vk_log(VK_INFO, "-----------");
+    vk_log(VK_INFO, "    ------------");
+    vk_log(VK_INFO, "    | Movement |");
+    vk_log(VK_INFO, "    ------------");
+    vk_log(VK_INFO, "        [Left Analog] - Translation");
+    vk_log(VK_INFO, "        [Right Analog] - Rotation");
+    vk_log(VK_INFO, "    ---------");
+    vk_log(VK_INFO, "    | Other |");
+    vk_log(VK_INFO, "    ---------");
+    vk_log(VK_INFO, "        [Right Trigger] - shader mode");
 }
 
 typedef enum {
@@ -348,19 +349,19 @@ void log_shader_mode(Shader_Mode mode)
 {
     switch (mode) {
     case SHADER_MODE_BASE_MODEL:
-        nob_log(NOB_INFO, "Shader mode: base model");
+        vk_log(VK_INFO, "Shader mode: base model");
         break;
     case SHADER_MODE_PROGRESSIVE_COLOR:
-        nob_log(NOB_INFO, "Shader mode: progressive color");
+        vk_log(VK_INFO, "Shader mode: progressive color");
         break;
     case SHADER_MODE_SINGLE_TEX:
-        nob_log(NOB_INFO, "Shader mode: single texture");
+        vk_log(VK_INFO, "Shader mode: single texture");
         break;
     case SHADER_MODE_MULTI_TEX:
-        nob_log(NOB_INFO, "Shader mode: multi-texture");
+        vk_log(VK_INFO, "Shader mode: multi-texture");
         break;
     default:
-        nob_log(NOB_ERROR, "Shader mode: unrecognized %d", mode);
+        vk_log(VK_ERROR, "Shader mode: unrecognized %d", mode);
         break;
     }
 }
@@ -429,7 +430,7 @@ bool create_pipelines()
         .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
         .polygon_mode = VK_POLYGON_MODE_POINT,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -498,8 +499,8 @@ int main(int argc, char **argv)
     for (size_t i = 0; i < TEXTURE_COUNT; i++) if (!upload_texture(&textures[i])) return 1;
     if (!vk_vtx_buff_staged_upload(&hres.buff, hres.items)) return 1;
     if (!vk_vtx_buff_staged_upload(&lres.buff, lres.items)) return 1;
-    nob_da_free(hres);
-    nob_da_free(lres);
+    vk_da_free(hres);
+    vk_da_free(lres);
 
     /* initialize shader resources */
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
@@ -511,14 +512,14 @@ int main(int argc, char **argv)
     if (!create_pipelines()) return 1;
 
     /* settings & logging*/
-    copy_camera_infos(camera_defaults, &cameras[1], NOB_ARRAY_LEN(camera_defaults));
+    copy_camera_infos(camera_defaults, &cameras[1], VK_ARRAY_LEN(camera_defaults));
     bool use_hres = false;
     int cam_view_idx = 0;
     int cam_move_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
     log_controls();
-    nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
-    nob_log(NOB_INFO, "viewing camera %d",  cam_view_idx);
+    vk_log(VK_INFO, "piloting camera %d", cam_move_idx);
+    vk_log(VK_INFO, "viewing camera %d",  cam_view_idx);
     Shader_Mode shader_mode = SHADER_MODE_BASE_MODEL;
     int cam_order[4] = {0};
 
@@ -527,19 +528,19 @@ int main(int argc, char **argv)
         /* input */
         if (is_key_down(KEY_F)) log_fps();
         if (is_key_pressed(KEY_C)) {
-            cam_move_idx = (cam_move_idx + 1) % NOB_ARRAY_LEN(cameras);
-            nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
+            cam_move_idx = (cam_move_idx + 1) % VK_ARRAY_LEN(cameras);
+            vk_log(VK_INFO, "piloting camera %d", cam_move_idx);
         }
         if (is_key_pressed(KEY_V)) {
-            cam_view_idx = (cam_view_idx + 1) % NOB_ARRAY_LEN(cameras);
+            cam_view_idx = (cam_view_idx + 1) % VK_ARRAY_LEN(cameras);
             cam_move_idx = cam_view_idx;
             camera = &cameras[cam_view_idx];
-            nob_log(NOB_INFO, "viewing camera %d", cam_view_idx);
-            nob_log(NOB_INFO, "piloting camera %d", cam_move_idx);
+            vk_log(VK_INFO, "viewing camera %d", cam_view_idx);
+            vk_log(VK_INFO, "piloting camera %d", cam_move_idx);
         }
         if (is_key_pressed(KEY_R) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_UP))
             use_hres = !use_hres;
-        if (is_key_pressed(KEY_P)) log_cameras(cameras, NOB_ARRAY_LEN(cameras));
+        if (is_key_pressed(KEY_P)) log_cameras(cameras, VK_ARRAY_LEN(cameras));
         if (is_key_pressed(KEY_M) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_TRIGGER_1)) {
             shader_mode = (shader_mode + 1) % SHADER_MODE_COUNT;
             log_shader_mode(shader_mode);
@@ -549,8 +550,8 @@ int main(int argc, char **argv)
             log_shader_mode(shader_mode);
         }
         if (is_key_pressed(KEY_SPACE)) {
-            nob_log(NOB_INFO, "resetting camera defaults");
-            copy_camera_infos(&cameras[1], camera_defaults, NOB_ARRAY_LEN(camera_defaults));
+            vk_log(VK_INFO, "resetting camera defaults");
+            copy_camera_infos(&cameras[1], camera_defaults, VK_ARRAY_LEN(camera_defaults));
         }
         update_camera_free(&cameras[cam_move_idx]);
 
@@ -558,7 +559,7 @@ int main(int argc, char **argv)
         begin_drawing(BLUE);
             begin_mode_3d(*camera);
             /* draw the other cameras */
-            for (size_t i = 0; i < NOB_ARRAY_LEN(cameras); i++) {
+            for (size_t i = 0; i < VK_ARRAY_LEN(cameras); i++) {
                 if (camera == &cameras[i]) continue;
                 push_matrix();
                     look_at(cameras[i]);
@@ -570,7 +571,7 @@ int main(int argc, char **argv)
             draw_points((use_hres) ? hres.buff : lres.buff, gfx_pl, pl_layout, ds_sets, DS_SET_COUNT);
 
             /* update uniform buffer */
-            get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
+            get_cam_order(cameras, VK_ARRAY_LEN(cameras), cam_order, VK_ARRAY_LEN(cam_order));
             if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, &ubo)) return 1;
         end_mode_3d();
         end_drawing();
