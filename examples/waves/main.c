@@ -1,5 +1,4 @@
 #include "cvr.h"
-#include <math.h>
 
 Shape_Type shape = SHAPE_TETRAHEDRON;
 

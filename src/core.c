@@ -1,18 +1,13 @@
 #include "cvr.h"
-#include <stdbool.h>
-#include <vulkan/vulkan_core.h>
-
-#define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
 
 #define VK_CTX_IMPLEMENTATION
 #include "vk_ctx.h"
 
-#define NOB_IMPLEMENTATION
-#include "ext/nob.h"
+#define RAYMATH_IMPLEMENTATION
+#include "ext/raylib-5.0/raymath.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "ext/stb_image.h"
+#include <time.h>     // used by nanosleep
+#include "geometry.h" // defines some default primitives
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
@@ -88,8 +83,6 @@ typedef struct {
 typedef enum {
     DEFAULT_PL_FILL,
     DEFAULT_PL_WIREFRAME,
-    DEFAULT_PL_POINT_CLOUD,
-    DEFAULT_PL_COMPUTE,
     DEFAULT_PL_COUNT,
 } Default_Pipeline;
 
@@ -132,9 +125,9 @@ bool alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 void destroy_shape_res();
 
-#if defined(PLATFORM_DESKTOP)
+#if defined(PLATFORM_DESKTOP_GLFW)
     #include "platform_desktop.c"
-#elif defined(PLATFORM_QUEST)
+#elif defined(PLATFORM_ANDROID_QUEST)
     #include "platform_quest.c"
 #else
     /* alternative backend here */
@@ -212,7 +205,7 @@ bool default_pl_fill_init()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -233,14 +226,15 @@ bool draw_shape(Shape_Type shape_type)
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
 
     Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, mvp);
+    float16 f16_mvp = MatrixToFloatV(mvp);
+    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, &f16_mvp);
 
     return true;
 }
@@ -253,14 +247,15 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    float16 f16_mvp = MatrixToFloatV(mvp);
     Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape].idx_buff;
-    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, mvp);
+    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, &f16_mvp);
 
     return true;
 }
@@ -308,7 +303,7 @@ bool default_pl_wireframe_init()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_LINE,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -331,15 +326,16 @@ bool draw_shape_wireframe(Shape_Type shape_type)
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
+    float16 f16_mvp = MatrixToFloatV(mvp);
     vk_draw(
         pipelines.handles[DEFAULT_PL_WIREFRAME],
         pipelines.layouts[DEFAULT_PL_WIREFRAME],
-        vtx_buff, idx_buff, mvp
+        vtx_buff, idx_buff, &f16_mvp
     );
     return true;
 }
@@ -410,7 +406,7 @@ bool get_mvp(Matrix *mvp)
     bool result = true;
 
     Matrix model = {0};
-    if (!get_matrix_tos(&model)) nob_return_defer(false);
+    if (!get_matrix_tos(&model)) vk_return_defer(false);
     *mvp = MatrixMultiply(model, matrices.view_proj);
 
 defer:
@@ -422,7 +418,7 @@ bool get_mvp_float16(float16 *mvp)
     bool result = true;
 
     Matrix m = {0};
-    if (!get_mvp(&m)) nob_return_defer(false);
+    if (!get_mvp(&m)) vk_return_defer(false);
     *mvp = MatrixToFloatV(m);
 
 defer:
@@ -467,7 +463,7 @@ void begin_drawing(Color color)
 {
     start_timer();
     vk_begin_drawing();
-    vk_begin_render_pass(color);
+    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
 }
 
 void end_drawing()
@@ -502,7 +498,7 @@ void push_matrix()
             mat_stack[mat_stack_p++] = MatrixIdentity();
         }
     } else {
-        nob_log(NOB_ERROR, "matrix stack overflow");
+        vk_log(VK_ERROR, "matrix stack overflow");
     }
 }
 
@@ -511,7 +507,7 @@ void pop_matrix()
     if (mat_stack_p > 0)
         mat_stack_p--;
     else
-        nob_log(NOB_ERROR, "matrix stack underflow");
+        vk_log(VK_ERROR, "matrix stack underflow");
 }
 
 void end_mode_3d()
@@ -525,7 +521,7 @@ void end_mode_3d()
     }
 
     if (leftover)
-        nob_log(NOB_WARNING, "%d matrix stack(s) leftover", leftover);
+        vk_log(VK_WARNING, "%d matrix stack(s) leftover", leftover);
 }
 
 bool is_key_pressed(int key)
@@ -595,7 +591,7 @@ void translate(float x, float y, float z)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixTranslate(x, y, z), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to translate");
+        vk_log(VK_ERROR, "no matrix available to translate");
 }
 
 void rotate(Vector3 axis, float angle)
@@ -603,7 +599,7 @@ void rotate(Vector3 axis, float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotate(axis, angle), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to rotate");
+        vk_log(VK_ERROR, "no matrix available to rotate");
 }
 
 void rotate_x(float angle)
@@ -611,7 +607,7 @@ void rotate_x(float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateX(angle), mat_stack[mat_stack_p - 1]);
     else
-    nob_log(NOB_ERROR, "no matrix available to rotate x");
+    vk_log(VK_ERROR, "no matrix available to rotate x");
 }
 
 void rotate_y(float angle)
@@ -619,7 +615,7 @@ void rotate_y(float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateY(angle), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to rotate y");
+        vk_log(VK_ERROR, "no matrix available to rotate y");
 }
 
 void rotate_z(float angle)
@@ -627,7 +623,7 @@ void rotate_z(float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZ(angle), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to rotate z");
+        vk_log(VK_ERROR, "no matrix available to rotate z");
 }
 
 void rotate_xyz(Vector3 angle)
@@ -635,7 +631,7 @@ void rotate_xyz(Vector3 angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateXYZ(angle), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to rotate xyz");
+        vk_log(VK_ERROR, "no matrix available to rotate xyz");
 }
 
 void rotate_zyx(Vector3 angle)
@@ -643,7 +639,7 @@ void rotate_zyx(Vector3 angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZYX(angle), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to rotate zyx");
+        vk_log(VK_ERROR, "no matrix available to rotate zyx");
 }
 
 void scale(float x, float y, float z)
@@ -651,7 +647,7 @@ void scale(float x, float y, float z)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixScale(x, y, z), mat_stack[mat_stack_p - 1]);
     else
-        nob_log(NOB_ERROR, "no matrix available to scale");
+        vk_log(VK_ERROR, "no matrix available to scale");
 }
 
 bool alloc_shape_res(Shape_Type shape_type)
@@ -659,8 +655,8 @@ bool alloc_shape_res(Shape_Type shape_type)
     bool result = true;
 
     if (is_shape_res_alloc(shape_type)) {
-        nob_log(NOB_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
-        nob_return_defer(false);
+        vk_log(VK_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
+        vk_return_defer(false);
     }
 
     Shape *shape = &shapes[shape_type];
@@ -677,13 +673,13 @@ bool alloc_shape_res(Shape_Type shape_type)
     SHAPE_LIST
 #undef X
     default:
-        nob_log(NOB_ERROR, "unrecognized shape %d", shape_type);
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "unrecognized shape %d", shape_type);
+        vk_return_defer(false);
     }
 
     if ((!vk_vtx_buff_upload(&shape->vtx_buff, shape->verts)) || (!vk_idx_buff_upload(&shape->idx_buff, shape->idxs))) {
-        nob_log(NOB_ERROR, "failed to allocate resources for shape %d", shape_type);
-        nob_return_defer(false);
+        vk_log(VK_ERROR, "failed to allocate resources for shape %d", shape_type);
+        vk_return_defer(false);
     }
 
 defer:
@@ -700,24 +696,10 @@ void destroy_shape_res()
 {
     for (size_t i = 0; i < SHAPE_COUNT; i++) {
         if (shapes[i].vtx_buff.handle)
-            vk_buff_destroy(shapes[i].vtx_buff);
+            vk_buff_destroy(&shapes[i].vtx_buff);
         if (shapes[i].idx_buff.handle)
-            vk_buff_destroy(shapes[i].idx_buff);
+            vk_buff_destroy(&shapes[i].idx_buff);
     }
-}
-
-Image load_image(const char *file_name)
-{
-    Image img = {0};
-    int channels;
-    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
-    img.format = (int)VK_FORMAT_R8G8B8A8_SRGB;
-    return img;
-}
-
-void unload_image(Image image)
-{
-    free(image.data);
 }
 
 Vector3 get_camera_forward(Camera *camera)
@@ -862,94 +844,10 @@ bool is_mouse_button_down(int button)
     return mouse.curr_button_state[button] == 1;
 }
 
-bool upload_point_cloud(Buffer buff, size_t *id)
+bool draw_points(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
-    Vk_Buffer vk_buff = {
-        .count = buff.count,
-        .size  = buff.size,
-    };
-    if (!vk_vtx_buff_staged_upload(&vk_buff, buff.items)) {
-        nob_log(NOB_ERROR, "failed to initialize vertex buffer for point cloud");
-        return false;
-    }
-
-    *id = point_clouds.count;
-    nob_da_append(&point_clouds, vk_buff);
-    return true;
-}
-
-void destroy_point_cloud(size_t id)
-{
-    vkDeviceWaitIdle(vk_ctx.device);
-
-    bool found = false;
-    for (size_t i = 0; i < point_clouds.count; i++) {
-        if (i == id && point_clouds.items[i].handle) {
-            vk_buff_destroy(point_clouds.items[i]);
-            found = true;
-        }
-    }
-
-    if (!found) nob_log(NOB_WARNING, "point cloud %zu does not exist cannot destroy", id);
-}
-
-bool default_pl_point_cloud_init()
-{
-    /* create pipeline layout */
-    VkPushConstantRange pk_range = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .size = sizeof(float16),
-    };
-    VkPipelineLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pk_range,
-    };
-    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_POINT_CLOUD]))
-        return false;
-
-    /* create pipeline */
-    VkVertexInputAttributeDescription vert_attrs[] = {
-        {
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-        },
-        {
-            .location = 1,
-            .format = VK_FORMAT_R8G8B8A8_UINT,
-            .offset = offsetof(Small_Vertex, r),
-        },
-    };
-    VkVertexInputBindingDescription vert_bindings = {
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-        .stride    = sizeof(Small_Vertex),
-    };
-    Pipeline_Config config = {
-        .pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD],
-        .vert = "./res/point-cloud.vert.spv",
-        .frag = "./res/point-cloud.frag.spv",
-        .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
-        .polygon_mode = VK_POLYGON_MODE_POINT,
-        .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
-        .vert_bindings = &vert_bindings,
-        .vert_binding_count = 1,
-    };
-    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_POINT_CLOUD])) return false;
-
-    return true;
-}
-
-bool draw_points(size_t vtx_id)
-{
-    /* create point cloud pipeline if it hasn't been created */
-    if (!pipelines.handles[DEFAULT_PL_POINT_CLOUD])
-        if (!default_pl_point_cloud_init()) return false;
-
-    Vk_Buffer vtx_buff = {0};
-    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
-        vtx_buff = point_clouds.items[vtx_id];
-    } else {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
+    if (!vtx_buff.handle) {
+        vk_log(VK_ERROR, "vertex buffer was not uploaded for point cloud");
         return false;
     }
 
@@ -957,38 +855,12 @@ bool draw_points(size_t vtx_id)
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
+        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-
-    VkPipeline pl = pipelines.handles[DEFAULT_PL_POINT_CLOUD];
-    VkPipelineLayout pl_layout = pipelines.layouts[DEFAULT_PL_POINT_CLOUD];
-    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, NULL, 0);
-
-    return true;
-}
-
-bool draw_points_ex(size_t vtx_id, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
-{
-    Vk_Buffer vtx_buff = {0};
-    if (vtx_id < point_clouds.count && point_clouds.items[vtx_id].handle) {
-        vtx_buff = point_clouds.items[vtx_id];
-    } else {
-        nob_log(NOB_ERROR, "vertex buffer was not uploaded for point cloud with id %zu", vtx_id);
-        return false;
-    }
-
-    Matrix model = {0};
-    if (mat_stack_p) {
-        model = mat_stack[mat_stack_p - 1];
-    } else {
-        nob_log(NOB_ERROR, "No matrix stack, cannot draw.");
-        return false;
-    }
-    Matrix mvp = MatrixMultiply(model, matrices.view_proj);
-
-    vk_draw_points_ex(vtx_buff, mvp, pl, pl_layout, ds_sets, ds_set_count);
+    float16 f16_mvp = MatrixToFloatV(mvp);
+    vk_draw_points(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
 
     return true;
 }
@@ -1042,7 +914,7 @@ void set_target_fps(int fps)
 {
     if (fps < 1) cvr_time.target = 0.0;
     else cvr_time.target = 1.0 / (double) fps;
-    nob_log(NOB_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
+    vk_log(VK_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
 }
 
 void look_at(Camera camera)
@@ -1054,7 +926,7 @@ void look_at(Camera camera)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(mat_stack[mat_stack_p - 1], inv);
     else
-        nob_log(NOB_ERROR, "no matrix available to translate");
+        vk_log(VK_ERROR, "no matrix available to translate");
 }
 
 bool get_matrix_tos(Matrix *model)
@@ -1062,7 +934,7 @@ bool get_matrix_tos(Matrix *model)
     if (mat_stack_p) {
         *model = mat_stack[mat_stack_p - 1];
     } else {
-        nob_log(NOB_ERROR, "No matrix on stack");
+        vk_log(VK_ERROR, "No matrix on stack");
         return false;
     }
 
@@ -1115,7 +987,7 @@ void log_fps()
     static int fps = -1;
     int curr_fps = get_fps();
     if (curr_fps != fps) {
-        nob_log(NOB_INFO, "FPS %d (%.3f)", curr_fps, get_frame_time());
+        vk_log(VK_INFO, "FPS %d (%.3f)", curr_fps, get_frame_time());
         fps = curr_fps;
     }
 }

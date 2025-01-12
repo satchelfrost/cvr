@@ -1,8 +1,4 @@
 #include "cvr.h"
-#include "vk_ctx.h"
-#include "ext/nob.h"
-#include "ext/raylib-5.0/raymath.h"
-#include <stdlib.h>
 
 #define MAX_POINTS 100000000 // 100 million
 #define MIN_POINTS 100000    // 100 thousand
@@ -82,7 +78,7 @@ void gen_points(size_t num_points, Point_Cloud *pc)
             .color = uint_color,
         };
 
-        nob_da_append(pc, vert);
+        vk_da_append(pc, vert);
     }
 
     pc->buff.count = pc->count;
@@ -108,7 +104,7 @@ bool setup_ds_layouts()
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = NOB_ARRAY_LEN(cs_render_bindings),
+        .bindingCount = VK_ARRAY_LEN(cs_render_bindings),
         .pBindings = cs_render_bindings,
     };
     if (!vk_create_ds_layout(layout_ci, &cs_render_ds_layout)) return false;
@@ -119,7 +115,7 @@ bool setup_ds_layouts()
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2,  STORAGE_IMAGE, COMPUTE_BIT)},
     };
-    layout_ci.bindingCount = NOB_ARRAY_LEN(cs_resolve_bindings);
+    layout_ci.bindingCount = VK_ARRAY_LEN(cs_resolve_bindings);
     layout_ci.pBindings = cs_resolve_bindings;
     if (!vk_create_ds_layout(layout_ci, &cs_resolve_ds_layout)) return false;
 
@@ -145,7 +141,7 @@ bool setup_ds_pool()
 
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
+        .poolSizeCount = VK_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
         .maxSets = 3, // compute shader render, compute shader resolve, and graphics
     };
@@ -159,7 +155,7 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
 {
     /* allocate descriptor sets based on layouts */
     VkDescriptorSetLayout layouts[] = {cs_render_ds_layout, cs_resolve_ds_layout, gfx_ds_layout};
-    size_t count = NOB_ARRAY_LEN(layouts);
+    size_t count = VK_ARRAY_LEN(layouts);
     VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, count, pool)};
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
 
@@ -193,7 +189,7 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
         /* default.frag */
         {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SST], &img_info)},
     };
-    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+    vk_update_ds(VK_ARRAY_LEN(writes), writes);
 
     return true;
 }
@@ -303,7 +299,7 @@ int main()
                 pc.pending_change = true;
                 num_points = num_points * 10;
             } else {
-                nob_log(NOB_INFO, "max point count reached");
+                vk_log(VK_INFO, "max point count reached");
             }
         }
         if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
@@ -311,7 +307,7 @@ int main()
                 pc.pending_change = true;
                 num_points = num_points / 10;
             } else {
-                nob_log(NOB_INFO, "min point count reached");
+                vk_log(VK_INFO, "min point count reached");
             }
         }
         if (is_key_pressed(KEY_R)) record.collecting = true;
@@ -320,7 +316,7 @@ int main()
         if (pc.pending_change) {
             /* destroy old point cloud buffer and generate new points */
             wait_idle();
-            vk_buff_destroy(pc.buff);
+            vk_buff_destroy(&pc.buff);
             gen_points(num_points, &pc);
 
             /* upload new buffer and update descriptor sets */
@@ -336,13 +332,13 @@ int main()
 
         /* collect the frame rate */
         if (record.collecting) {
-            nob_da_append(&record, get_fps());
+            vk_da_append(&record, get_fps());
             if (record.count >= record.max) {
                 /* print results and reset */
                 size_t sum = 0;
                 for (size_t i = 0; i < record.count; i++) sum += record.items[i];
                 float ave = (float) sum / record.count;
-                nob_log(NOB_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
+                vk_log(VK_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
                 record.count = 0;
                 record.collecting = false;
             }
@@ -361,7 +357,7 @@ int main()
         start_timer();
         if (!vk_begin_drawing()) return 1;
             vk_raster_sampler_barrier(storage_tex.img.handle);
-            vk_begin_render_pass(BLACK);
+            vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
         end_drawing();
     }
@@ -369,9 +365,9 @@ int main()
     wait_idle();
     free(pc.items);
     free(frame.data);
-    vk_buff_destroy(pc.buff);
-    vk_buff_destroy(frame.buff);
-    vk_buff_destroy(ubo.buff);
+    vk_buff_destroy(&pc.buff);
+    vk_buff_destroy(&frame.buff);
+    vk_buff_destroy(&ubo.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(cs_render_ds_layout);
     vk_destroy_ds_layout(cs_resolve_ds_layout);

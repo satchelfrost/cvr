@@ -1,7 +1,6 @@
 #ifndef GEOMETRY_H_
 #define GEOMETRY_H_
 
-#include "ext/raylib-5.0/raymath.h"
 #include <stdint.h>
 
 typedef struct {

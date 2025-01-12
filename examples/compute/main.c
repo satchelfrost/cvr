@@ -1,8 +1,5 @@
 #include "cvr.h"
-#include "ext/raylib-5.0/raymath.h"
-#include <stdlib.h>
-#include "ext/nob.h"
-#include "vk_ctx.h"
+#include "geometry.h"
 
 #define PARTICLE_COUNT 800
 
@@ -48,7 +45,7 @@ void init_particles(Particle *particles, float width, float height)
         particle->velocity = Vector2Normalize(particle->pos);
         particle->velocity.x *= 0.0025f;
         particle->velocity.y *= 0.0025f;
-        particle->color = color_to_vec4(colors[i % NOB_ARRAY_LEN(colors)]);
+        particle->color = color_to_vec4(colors[i % VK_ARRAY_LEN(colors)]);
     }
 }
 
@@ -60,7 +57,7 @@ bool setup_ds_layout()
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = NOB_ARRAY_LEN(bindings),
+        .bindingCount = VK_ARRAY_LEN(bindings),
         .pBindings = bindings,
     };
     return vk_create_ds_layout(layout_ci, &compute_ds_layout);
@@ -74,7 +71,7 @@ bool setup_ds_pool()
     };
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = NOB_ARRAY_LEN(pool_sizes),
+        .poolSizeCount = VK_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
         .maxSets = 1,
     };
@@ -100,7 +97,7 @@ bool setup_ds(Vk_Buffer ubo, Vk_Buffer comp_buff)
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, compute_ds,  &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, compute_ds,  &comp_info)},
     };
-    vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+    vk_update_ds(VK_ARRAY_LEN(writes), writes);
 
     return true;
 }
@@ -140,7 +137,7 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
         .polygon_mode = VK_POLYGON_MODE_POINT,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -198,8 +195,9 @@ int main()
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             Matrix mvp = {0};
-            get_mvp(&mvp);
-            vk_draw_points_ex(comp_buff, mvp, gfx_pl, gfx_pl_layout, NULL, 0);
+            if (!get_mvp(&mvp)) return 1;
+            float16 f16_mvp = MatrixToFloatV(mvp);
+            vk_draw_points(comp_buff, &f16_mvp, gfx_pl, gfx_pl_layout, NULL, 0);
             time = get_time();
             memcpy(ubo.mapped, &time, sizeof(float));
         end_mode_3d();
@@ -207,8 +205,8 @@ int main()
     }
 
     wait_idle();
-    vk_buff_destroy(ubo);
-    vk_buff_destroy(comp_buff);
+    vk_buff_destroy(&ubo);
+    vk_buff_destroy(&comp_buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(compute_ds_layout);
     vk_destroy_pl_res(compute_pl, compute_pl_layout);

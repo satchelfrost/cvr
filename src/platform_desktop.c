@@ -1,11 +1,5 @@
 #include <GLFW/glfw3.h>
 
-typedef struct {
-    GLFWwindow *handle;
-} Platform_Data;
-
-static Platform_Data platform = {0};
-
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
@@ -38,8 +32,8 @@ bool init_platform()
         const GLFWvidmode *mode = glfwGetVideoMode(largest_monitor);
         win_size.width = mode->width;
         win_size.height = mode->height;
-        nob_log(NOB_INFO, "full screen mode enabled", mode->width, mode->height);
-        nob_log(NOB_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
+        vk_log(VK_INFO, "full screen mode enabled", mode->width, mode->height);
+        vk_log(VK_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
         platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
         if (!platform.handle) return false;
     } else {
@@ -55,16 +49,6 @@ bool init_platform()
     glfwSetJoystickCallback(joystick_callback);
 
     return true;
-}
-
-bool platform_surface_init()
-{
-    if (VK_SUCCEEDED(glfwCreateWindowSurface(vk_ctx.instance, platform.handle, NULL, &vk_ctx.surface))) {
-        return true;
-    } else {
-        nob_log(NOB_ERROR, "failed to initialize glfw window surface");
-        return false;
-    }
 }
 
 bool window_should_close()
@@ -199,10 +183,10 @@ void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y)
 void joystick_callback(int jid, int event)
 {
     if (event == GLFW_CONNECTED) {
-        nob_log(NOB_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+        vk_log(VK_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
     else if (event == GLFW_DISCONNECTED) {
-        nob_log(NOB_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+        vk_log(VK_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
 }
 
@@ -224,24 +208,4 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     win_size.width = width;
     win_size.height = height;
     vk_ctx.swapchain.buff_resized = true;
-}
-
-const char **get_platform_exts(uint32_t *platform_ext_count)
-{
-    return glfwGetRequiredInstanceExtensions(platform_ext_count);
-}
-
-void platform_wait_resize_frame_buffer()
-{
-    int width = 0, height = 0;
-    glfwGetFramebufferSize(platform.handle, &width, &height);
-    while (width == 0 || height == 0) {
-        glfwGetFramebufferSize(platform.handle, &width, &height);
-        glfwWaitEvents();
-    }
-}
-
-void platform_frame_buff_size(int *width, int *height)
-{
-    glfwGetFramebufferSize(platform.handle, width, height);
 }

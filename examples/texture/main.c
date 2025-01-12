@@ -1,8 +1,8 @@
 #include "cvr.h"
-#include "ext/nob.h"
-#include "ext/raylib-5.0/raymath.h"
-#include <math.h>
-#include "vk_ctx.h"
+#include "geometry.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "ext/stb_image.h"
 
 typedef enum {
     DS_MATRIX,
@@ -18,35 +18,39 @@ VkPipelineLayout gfx_pl_layout;
 
 typedef struct {
     const char *file_name;
-    Vk_Texture texture;
+    Vk_Texture handle;
     float aspect;
-} Picture;
+} Texture;
 
-Picture pictures[] = {
+#define TEXTURE_COUNT 2
+Texture textures[TEXTURE_COUNT] = {
     {.file_name = "res/matrix.png"},
     {.file_name = "res/statue.jpg"}
 };
 
-bool init_picture(Picture *picture)
+bool upload_texture(Texture *texture)
 {
-    Image img = load_image(picture->file_name);
+    bool result = true;
+    int channels, width, height;
+    void *data = stbi_load(texture->file_name, &width, &height, &channels, STBI_rgb_alpha);
 
-    if (!img.data) {
-        nob_log(NOB_ERROR, "image %s could not be loaded", picture->file_name);
-        return false;
+    if (!data) {
+        vk_log(VK_ERROR, "image %s could not be loaded", texture->file_name);
+        vk_return_defer(false);
     } else {
-        nob_log(NOB_INFO, "image %s was successfully loaded", picture->file_name);
-        nob_log(NOB_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
-        nob_log(NOB_INFO, "    image size in memory = %d bytes", img.height * img.width * 4);
+        vk_log(VK_INFO, "image %s was successfully loaded", texture->file_name);
+        vk_log(VK_INFO, "    (height, width) = (%d, %d)", height, width);
+        vk_log(VK_INFO, "    image size in memory = %d bytes", height * width * 4);
     }
 
-    if (!vk_load_texture(img.data, img.width, img.height, img.format, &picture->texture))
-        return false;
+    if (!vk_load_texture(data, width, height, VK_FORMAT_R8G8B8A8_SRGB, &texture->handle))
+        vk_return_defer(false);
 
-    picture->aspect = (float)img.width / img.height;
+    texture->aspect = (float)width / height;
 
-    unload_image(img);
-    return true;
+defer:
+    free(data);
+    return result;
 }
 
 bool setup_ds_layout()
@@ -78,15 +82,15 @@ bool setup_ds_sets()
 {
     /* allocate descriptor sets based on layouts */
     VkDescriptorSetLayout layouts[] = {ds_layout, ds_layout};
-    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, NOB_ARRAY_LEN(layouts), ds_pool)};
+    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, VK_ARRAY_LEN(layouts), ds_pool)};
     if (!vk_alloc_ds(alloc, ds_sets)) return false;
 
     /* update descriptor sets based on layouts */
-    for (size_t i = 0; i < NOB_ARRAY_LEN(pictures); i++) {
+    for (size_t i = 0; i < TEXTURE_COUNT; i++) {
         VkDescriptorImageInfo img_info = {
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView   = pictures[i].texture.view,
-            .sampler     = pictures[i].texture.sampler,
+            .imageView   = textures[i].handle.view,
+            .sampler     = textures[i].handle.sampler,
         };
         VkWriteDescriptorSet write = {
             DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[i], &img_info)
@@ -138,7 +142,7 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -159,8 +163,8 @@ int main()
 
     init_window(500, 500, "Load texture");
 
-    for (size_t i = 0; i < NOB_ARRAY_LEN(pictures); i++)
-        if (!init_picture(&pictures[i])) return 1;
+    for (size_t i = 0; i < TEXTURE_COUNT; i++)
+        if (!upload_texture(&textures[i])) return 1;
 
     /* setup descriptors */
     if (!setup_ds_layout()) return 1;
@@ -176,12 +180,12 @@ int main()
         begin_mode_3d(camera);
             rotate_y(time);
             push_matrix();
-                scale(pictures[DS_MATRIX].aspect, 1.0f, 1.0f);
+                scale(textures[DS_MATRIX].aspect, 1.0f, 1.0f);
                 if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_MATRIX], SHAPE_QUAD))
                     return 1;
             pop_matrix();
 
-            scale(pictures[DS_STATUE].aspect, 1.0f, 1.0f);
+            scale(textures[DS_STATUE].aspect, 1.0f, 1.0f);
             translate(0.0f, 0.0f, 1.0f);
                 if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_STATUE], SHAPE_QUAD))
                     return 1;
@@ -192,8 +196,8 @@ int main()
     }
 
     wait_idle();
-    vk_unload_texture(&pictures[DS_MATRIX].texture);
-    vk_unload_texture(&pictures[DS_STATUE].texture);
+    vk_unload_texture(&textures[DS_MATRIX].handle);
+    vk_unload_texture(&textures[DS_STATUE].handle);
     vk_destroy_ds_layout(ds_layout);
     vk_destroy_ds_pool(ds_pool);
     vk_destroy_pl_res(gfx_pl, gfx_pl_layout);

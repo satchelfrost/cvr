@@ -1,6 +1,7 @@
 #include <string.h>
+
 #define NOB_IMPLEMENTATION
-#include "src/ext/nob.h"
+#include "nob.h"
 
 #define FILE_DOES_NOT_EXIST 0
 #define FILE_EXISTS 1
@@ -483,7 +484,7 @@ bool build_cvr_linux(const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, "cc");
-            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP");
+            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
@@ -536,7 +537,7 @@ bool build_cvr_win(const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP");
+            nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
@@ -619,7 +620,7 @@ bool build_cvr_quest(Config config, const char *platform_path)
             nob_needs_rebuild(output_path, &header_path, 1)) {
             cmd.count = 0;
             nob_cmd_append(&cmd, config.android.cc);
-            nob_cmd_append(&cmd, "-DPLATFORM_QUEST");
+            nob_cmd_append(&cmd, "-DPLATFORM_ANDROID_QUEST");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-target", "aarch64-linux-android" ANDROID_VERSION);
             nob_cmd_append(&cmd, "-I./src/ext");
@@ -885,7 +886,7 @@ bool build_example_quest(Config config, const char *example_build_path, const ch
     if (obj_updated || cvrlib_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, config.android.cc);
-        nob_cmd_append(&cmd, "-DPLATFORM_QUEST");
+        nob_cmd_append(&cmd, "-DPLATFORM_ANDROID_QUEST");
         nob_cmd_append(&cmd, "-target", "aarch64-linux-android-"ANDROID_VERSION);
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src/ext");

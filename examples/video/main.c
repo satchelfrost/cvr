@@ -1,10 +1,12 @@
-#include "vk_ctx.h"
 #include "cvr.h"
-#include "ext/nob.h"
 #include <pthread.h>
+#include "geometry.h"
 
 #define PL_MPEG_IMPLEMENTATION
-#include "pl_mpeg.h"
+#include "ext/pl_mpeg.h"
+
+#define NOB_IMPLEMENTATION
+#include "../nob.h"
 
 #define FACTOR 50
 #define WIDTH  (16 * FACTOR)
@@ -115,7 +117,7 @@ bool video_enqueue()
     queue_str[MAX_QUEUED_FRAMES + 2] = 0;
     for (int i = 0; i < MAX_QUEUED_FRAMES; i++)
         queue_str[i + 1] = (i < video_queue.size) ? '*' : ' ';
-    nob_log(NOB_INFO, "%s", queue_str);
+    vk_log(VK_INFO, "%s", queue_str);
 #endif
 
     /* first decode the frames */
@@ -188,7 +190,7 @@ void *producer(void *arg)
                 plm_rewind(video_textures.plms[i]);
         }
     };
-    nob_log(NOB_INFO, "producer finished");
+    vk_log(VK_INFO, "producer finished");
     return NULL;
 }
  
@@ -201,7 +203,7 @@ bool setup_ds_layout()
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = NOB_ARRAY_LEN(tex_frag_bindings),
+        .bindingCount = VK_ARRAY_LEN(tex_frag_bindings),
         .pBindings = tex_frag_bindings,
     };
     if (!vk_create_ds_layout(layout_ci, &video_textures.ds_layout)) return false;
@@ -252,7 +254,7 @@ bool setup_ds_sets()
             {DS_WRITE_IMG(1, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cb_img_info)},
             {DS_WRITE_IMG(2, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cr_img_info)},
         };
-        vk_update_ds(NOB_ARRAY_LEN(writes), writes);
+        vk_update_ds(VK_ARRAY_LEN(writes), writes);
     }
 
     return true;
@@ -296,7 +298,7 @@ bool init_video_texture(void *data, int width, int height, Video_Idx vid_idx, Vi
     /* create image view */
     VkImageView img_view;
     if (!vk_img_view_init(vk_img, &img_view)) {
-        nob_log(NOB_ERROR, "failed to create image view");
+        vk_log(VK_ERROR, "failed to create image view");
         return false;
     };
 
@@ -379,7 +381,7 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = NOB_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
@@ -407,7 +409,7 @@ int main()
         // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
-            nob_log(NOB_ERROR, "could not open file %s", file_name);
+            vk_log(VK_ERROR, "could not open file %s", file_name);
             return 1;
         } else {
             video_textures.plms[i] = plm;
@@ -429,9 +431,9 @@ int main()
         video_textures.initial_frames[i].y.data  = malloc(y_size);
         video_textures.initial_frames[i].cb.data = malloc(cb_size);
         video_textures.initial_frames[i].cr.data = malloc(cr_size);
-        nob_log(NOB_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
-        nob_log(NOB_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
-        nob_log(NOB_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
+        vk_log(VK_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
+        vk_log(VK_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
+        vk_log(VK_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
         if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
         if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
         if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
@@ -471,7 +473,7 @@ int main()
                 vid_update_time = 0.0f;
             } else {
                 playback_finished = true;
-                nob_log(NOB_INFO, "video could not dequeue, this shouldn't happen");
+                vk_log(VK_INFO, "video could not dequeue, this shouldn't happen");
                 return 1;
             }
 #else // On the fly decode, i.e. the slowest method
@@ -479,7 +481,7 @@ int main()
                 plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
                 if (!frame) {
                     playback_finished = true;
-                    nob_log(NOB_INFO, "playback finished!");
+                    vk_log(VK_INFO, "playback finished!");
                     return 1;
                 }
 
@@ -520,7 +522,7 @@ int main()
         free(video_textures.initial_frames[i].cb.data);
         free(video_textures.initial_frames[i].cr.data);
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
-            vk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
+            vk_buff_destroy(&video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
             vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
