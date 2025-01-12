@@ -1,11 +1,5 @@
 #include <GLFW/glfw3.h>
 
-typedef struct {
-    GLFWwindow *handle;
-} Platform_Data;
-
-static Platform_Data platform = {0};
-
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 static void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y);
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
@@ -55,16 +49,6 @@ bool init_platform()
     glfwSetJoystickCallback(joystick_callback);
 
     return true;
-}
-
-bool platform_surface_init()
-{
-    if (VK_SUCCEEDED(glfwCreateWindowSurface(vk_ctx.instance, platform.handle, NULL, &vk_ctx.surface))) {
-        return true;
-    } else {
-        vk_log(VK_ERROR, "failed to initialize glfw window surface");
-        return false;
-    }
 }
 
 bool window_should_close()
@@ -224,24 +208,4 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     win_size.width = width;
     win_size.height = height;
     vk_ctx.swapchain.buff_resized = true;
-}
-
-const char **get_platform_exts(uint32_t *platform_ext_count)
-{
-    return glfwGetRequiredInstanceExtensions(platform_ext_count);
-}
-
-void platform_wait_resize_frame_buffer()
-{
-    int width = 0, height = 0;
-    glfwGetFramebufferSize(platform.handle, &width, &height);
-    while (width == 0 || height == 0) {
-        glfwGetFramebufferSize(platform.handle, &width, &height);
-        glfwWaitEvents();
-    }
-}
-
-void platform_frame_buff_size(int *width, int *height)
-{
-    glfwGetFramebufferSize(platform.handle, width, height);
 }

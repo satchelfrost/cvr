@@ -1,6 +1,10 @@
 #ifndef VK_CTX_H_
 #define VK_CTX_H_
 
+#define VK_ASSERT assert
+#define VK_REALLOC realloc
+#define VK_FREE free
+
 #include <stdint.h>
 #include <sys/types.h>
 #include <vulkan/vulkan_core.h>
@@ -10,6 +14,11 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdbool.h>
+
+#ifdef PLATFORM_DESKTOP_GLFW
+#include <GLFW/glfw3.h>
+#endif
 
 // TODO: check for return_defer usage and double free corruption errors
 
@@ -19,6 +28,7 @@
 #ifndef MIN_SEVERITY
     #define MIN_SEVERITY VK_WARNING
 #endif
+
 #define VK_FLAGS_NONE 0
 #define load_pfn(pfn) PFN_ ## pfn pfn = (PFN_ ## pfn) vkGetInstanceProcAddr(vk_ctx.instance, #pfn)
 #define VK_SUCCEEDED(x) ((x) == VK_SUCCESS)
@@ -118,18 +128,10 @@ bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 
-/* platform specific functions that must be defined */
-/* This isn't very "header-only", however I haven't tried more than one platform yet,
- * so, I don't know how to properly generalize yet 
- *
- * ...yeah I still don't know how to generalize it, but this is incredibly inconvenient.
- * perhaps the default should be glfw, and then maybe define a symbol that lets you override them?
- * Whatever I come up with, I don't like this current solution.
- * */
-extern bool platform_surface_init();
-extern const char **get_platform_exts(uint32_t *platform_ext_count);
-extern void platform_wait_resize_frame_buffer();
-extern void platform_frame_buff_size(int *width, int *height);
+bool platform_surface_init();
+const char **get_platform_exts(uint32_t *platform_ext_count);
+void platform_wait_resize_frame_buffer();
+void platform_frame_buff_size(int *width, int *height);
 
 typedef struct {
     VkPipelineLayout pl_layout;
@@ -276,15 +278,15 @@ bool vk_sampler_init(VkSampler *sampler);
 // Initial capacity of a dynamic array
 #define VK_DA_INIT_CAP 256
 
-#define vk_da_append(da, item)                                                        \
-    do {                                                                              \
-        if ((da)->count >= (da)->capacity) {                                          \
-            (da)->capacity = (da)->capacity == 0 ? VK_DA_INIT_CAP : (da)->capacity*2; \
-            (da)->items = realloc((da)->items, (da)->capacity*sizeof(*(da)->items));  \
-            assert((da)->items != NULL && "\"Buy more RAM lol\"\n\t\t-Tsoding");      \
-        }                                                                             \
-                                                                                      \
-        (da)->items[(da)->count++] = (item);                                          \
+#define vk_da_append(da, item)                                                          \
+    do {                                                                                \
+        if ((da)->count >= (da)->capacity) {                                            \
+            (da)->capacity = (da)->capacity == 0 ? VK_DA_INIT_CAP : (da)->capacity*2;   \
+            (da)->items = VK_REALLOC((da)->items, (da)->capacity*sizeof(*(da)->items)); \
+            VK_ASSERT((da)->items != NULL && "\"Buy more RAM lol\"\n\t\t-Tsoding");     \
+        }                                                                               \
+                                                                                        \
+        (da)->items[(da)->count++] = (item);                                            \
     } while (0)
 
 #define vk_da_append_many(da, new_items, new_items_count)                                   \
@@ -296,14 +298,14 @@ bool vk_sampler_init(VkSampler *sampler);
             while ((da)->count + new_items_count > (da)->capacity) {                        \
                 (da)->capacity *= 2;                                                        \
             }                                                                               \
-            (da)->items = realloc((da)->items, (da)->capacity*sizeof(*(da)->items));        \
-            assert((da)->items != NULL && "\"Buy more RAM lol\"\n\t\t-Tsoding");            \
+            (da)->items = VK_REALLOC((da)->items, (da)->capacity*sizeof(*(da)->items));     \
+            VK_ASSERT((da)->items != NULL && "\"Buy more RAM lol\"\n\t\t-Tsoding");         \
         }                                                                                   \
         memcpy((da)->items + (da)->count, new_items, new_items_count*sizeof(*(da)->items)); \
         (da)->count += new_items_count;                                                     \
     } while (0)
 
-#define vk_da_free(da) free((da).items)
+#define vk_da_free(da) VK_FREE((da).items)
 
 typedef struct {
     char *items;
@@ -313,7 +315,7 @@ typedef struct {
 
 bool vk_read_entire_file(const char *path, Vk_String_Builder *sb);
 
-#define vk_sb_free(sb) free((sb).items)
+#define vk_sb_free(sb) VK_FREE((sb).items)
 
 // Append a sized buffer to a string builder
 #define vk_sb_append_buf(sb, buf, size) vk_da_append_many(sb, buf, size)
@@ -363,26 +365,26 @@ bool device_exts_supported(VkPhysicalDevice phys_device);
 
 void vk_log(Vk_Log_Level level, const char *fmt, ...)
 {
-#ifdef PLATFORM_QUEST
-#include <android/log.h>
-#ifndef APP_NAME
-#define APP_NAME "threaded_app"
-#endif // APP_NAME
-#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO,  APP_NAME, __VA_ARGS__))
-#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN,  APP_NAME, __VA_ARGS__))
-#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, APP_NAME, __VA_ARGS__))
-    switch (level) {
-    case VK_INFO:
-        LOGI("[INFO] %s",fmt);
-        break;
-    case VK_WARNING:
-        LOGW("[WARNING] %s", fmt);
-        break;
-    case VK_ERROR:
-        LOGE("[ERROR] %s", fmt);
-        break;
-    }
-#else
+#if defined(PLATFORM_ANDROID_QUEST)
+#   include <android/log.h>
+#   ifndef APP_NAME
+#       define APP_NAME "threaded_app"
+#   endif // APP_NAME
+#   define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO,  APP_NAME, __VA_ARGS__))
+#   define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN,  APP_NAME, __VA_ARGS__))
+#   define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, APP_NAME, __VA_ARGS__))
+       switch (level) {
+       case VK_INFO:
+           LOGI("[INFO] %s",fmt);
+           break;
+       case VK_WARNING:
+           LOGW("[WARNING] %s", fmt);
+           break;
+       case VK_ERROR:
+           LOGE("[ERROR] %s", fmt);
+           break;
+       }
+#elif defined(PLATFORM_DESKTOP_GLFW)
     switch (level) {
     case VK_INFO:
         fprintf(stderr, "[INFO] ");
@@ -394,7 +396,7 @@ void vk_log(Vk_Log_Level level, const char *fmt, ...)
         fprintf(stderr, "[ERROR] ");
         break;
     default:
-        assert(0 && "unreachable");
+        VK_ASSERT(0 && "unreachable");
     }
 
     va_list args;
@@ -402,15 +404,17 @@ void vk_log(Vk_Log_Level level, const char *fmt, ...)
     vfprintf(stderr, fmt, args);
     va_end(args);
     fprintf(stderr, "\n");
-#endif // PLATFORM_QUEST
+#else
+    VK_ASSERT(0 && "Platform not defined. use #define PLATFORM_<NAME>");
+#endif // end of platform defines
 }
 
 bool vk_read_entire_file(const char *path, Vk_String_Builder *sb)
 {
     bool result = true;
     size_t buf_size = 32*1024;
-    char *buf = realloc(NULL, buf_size);
-    assert(buf != NULL && "\"Buy more RAM lool!!\"\n\t\t-Tsoding");
+    char *buf = VK_REALLOC(NULL, buf_size);
+    VK_ASSERT(buf != NULL && "\"Buy more RAM lool!!\"\n\t\t-Tsoding");
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
         vk_log(VK_ERROR, "Could not open %s for reading: %s", path, strerror(errno));
@@ -428,31 +432,88 @@ bool vk_read_entire_file(const char *path, Vk_String_Builder *sb)
     }
 
 defer:
-    free(buf);
+    VK_FREE(buf);
     if (f) fclose(f);
     return result;
 }
 
+/***********************************************************************************
+*
+*   Platform-specific functions and data
+*
+************************************************************************************/
+
+typedef struct {
+#if defined(PLATFORM_DESKTOP_GLFW)
+    GLFWwindow *handle;
+#elif defined(PLATFORM_ANDROID_QUEST)
+#endif
+} Platform_Data;
+
+static Platform_Data platform = {0};
+
+bool platform_surface_init()
+{
+#if defined(PLATFORM_DESKTOP_GLFW)
+    if (VK_SUCCEEDED(glfwCreateWindowSurface(vk_ctx.instance, platform.handle, NULL, &vk_ctx.surface))) {
+        return true;
+    } else {
+        vk_log(VK_ERROR, "failed to initialize glfw window surface");
+        return false;
+    }
+#elif defined(PLATFORM_ANDROID_QUEST)
+#endif
+}
+
+const char **get_platform_exts(uint32_t *platform_ext_count)
+{
+#ifdef PLATFORM_DESKTOP_GLFW
+    return glfwGetRequiredInstanceExtensions(platform_ext_count);
+#elif defined(PLATFORM_ANDROID_QUEST)
+#endif
+}
+
+void platform_wait_resize_frame_buffer()
+{
+#ifdef PLATFORM_DESKTOP_GLFW
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(platform.handle, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(platform.handle, &width, &height);
+        glfwWaitEvents();
+    }
+#elif defined(PLATFORM_ANDROID_QUEST)
+#endif
+}
+
+void platform_frame_buff_size(int *width, int *height)
+{
+#ifdef PLATFORM_DESKTOP_GLFW
+    glfwGetFramebufferSize(platform.handle, width, height);
+#elif defined(PLATFORM_ANDROID_QUEST)
+#endif
+}
+
 bool vk_init()
 {
-    if (!vk_instance_init())    return false;
+    if (!vk_instance_init())      return false;
 #ifdef ENABLE_VALIDATION
-    if (!setup_debug_msgr())    return false;
+    if (!setup_debug_msgr())      return false;
 #endif
-    if (!platform_surface_init())     return false;
+    if (!platform_surface_init()) return false;
 
     /* picking physical device also sets queue family indices in ctx */
-    if (!pick_phys_device())    return false;
+    if (!pick_phys_device())      return false;
 
-    if (!vk_device_init())      return false;
-    if (!vk_swapchain_init())   return false;
-    if (!vk_img_views_init())   return false;
-    if (!vk_render_pass_init()) return false;
-    if (!vk_depth_init())       return false;
-    if (!vk_frame_buffs_init()) return false;
-    if (!cmd_pool_init())       return false;
-    if (!cmd_buff_init())       return false;
-    if (!cmd_syncs_init())      return false;
+    if (!vk_device_init())        return false;
+    if (!vk_swapchain_init())     return false;
+    if (!vk_img_views_init())     return false;
+    if (!vk_render_pass_init())   return false;
+    if (!vk_depth_init())         return false;
+    if (!vk_frame_buffs_init())   return false;
+    if (!cmd_pool_init())         return false;
+    if (!cmd_buff_init())         return false;
+    if (!cmd_syncs_init())        return false;
 
     return true;
 }
@@ -637,7 +698,7 @@ bool vk_swapchain_init()
     if (VK_SUCCEEDED(vkCreateSwapchainKHR(vk_ctx.device, &swapchain_ci, NULL, &vk_ctx.swapchain.handle))) {
         uint32_t img_count = 0;
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, NULL);
-        vk_ctx.swapchain.imgs.items = realloc(vk_ctx.swapchain.imgs.items, img_count * sizeof(VkImage));
+        vk_ctx.swapchain.imgs.items = VK_REALLOC(vk_ctx.swapchain.imgs.items, img_count * sizeof(VkImage));
         vk_ctx.swapchain.imgs.count = img_count;
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, vk_ctx.swapchain.imgs.items);
         return true;
@@ -1198,7 +1259,7 @@ bool vk_compute_fence_wait()
     return true;
 }
 
-#ifndef PLATFORM_QUEST
+#ifdef PLATFORM_DESKTOP_GLFW
 void vk_compute_pl_barrier()
 {
     VkMemoryBarrier2KHR barrier = {
@@ -1216,7 +1277,7 @@ void vk_compute_pl_barrier()
     };
     vkCmdPipelineBarrier2(vk_ctx.compute_buff, &dependency);
 }
-#endif // PLATFORM_QUEST
+#endif // PLATFORM_PLATFORM_DESKTOP_GLFW
 
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
@@ -1468,7 +1529,7 @@ Vk_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_s
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:    return VK_INFO;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: return VK_WARNING;
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:   return VK_ERROR;
-    default: assert(0 && "this message severity is not handled");
+    default: VK_ASSERT(0 && "this message severity is not handled");
     }
 
     return VK_ERROR; // unreachable
@@ -1600,7 +1661,7 @@ VkPresentModeKHR choose_present_mode()
             return present_modes[i];
     }
 
-    assert(present_mode_count && "present mode count was zero");
+    VK_ASSERT(present_mode_count && "present mode count was zero");
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 

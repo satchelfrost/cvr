@@ -6,7 +6,7 @@ Shape_Type shape = SHAPE_CUBE;
 
 int main()
 {
-#ifdef PLATFORM_QUEST
+#ifdef PLATFORM_ANDROID_QUEST
     vk_log(VK_INFO, "Hello From CVR on the Quest!");
 #else
     Camera camera = {
