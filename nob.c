@@ -253,6 +253,20 @@ static Example examples[] = {
         .supported_targets[TARGET_WINDOWS] = true,
         .private = true,
     },
+    {
+        .name = "gltf",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+        .supported_targets[TARGET_LINUX] = true,
+        .supported_targets[TARGET_WINDOWS] = true,
+        .supported_targets[TARGET_QUEST] = true,
+    },
 };
 
 typedef struct {
@@ -1321,7 +1335,7 @@ int main(int argc, char **argv)
         .argc = argc,
         .argv = argv,
     };
-    if (!handle_usr_args(&config)) return 1;
+    if (!handle_usr_args(&config)) return 0;
     assert(config.host == HOST_LINUX && "for now the only supported host is linux");
 
     Nob_Cmd cmd = {0};

@@ -6,7 +6,7 @@
 #include "ext/pl_mpeg.h"
 
 #define NOB_IMPLEMENTATION
-#include "../nob.h"
+#include "../../nob.h"
 
 #define FACTOR 50
 #define WIDTH  (16 * FACTOR)
