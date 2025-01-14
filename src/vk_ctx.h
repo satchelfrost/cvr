@@ -289,6 +289,12 @@ bool vk_sampler_init(VkSampler *sampler);
         (da)->items[(da)->count++] = (item);                                            \
     } while (0)
 
+#define vk_da_resize(da, new_size)                                                    \
+    do {                                                                              \
+        (da)->capacity = (da)->count = new_size;                                      \
+        (da)->items = VK_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); \
+    } while (0)
+
 #define vk_da_append_many(da, new_items, new_items_count)                                   \
     do {                                                                                    \
         if ((da)->count + new_items_count > (da)->capacity) {                               \
@@ -698,8 +704,7 @@ bool vk_swapchain_init()
     if (VK_SUCCEEDED(vkCreateSwapchainKHR(vk_ctx.device, &swapchain_ci, NULL, &vk_ctx.swapchain.handle))) {
         uint32_t img_count = 0;
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, NULL);
-        vk_ctx.swapchain.imgs.items = VK_REALLOC(vk_ctx.swapchain.imgs.items, img_count * sizeof(VkImage));
-        vk_ctx.swapchain.imgs.count = img_count;
+        vk_da_resize(&vk_ctx.swapchain.imgs, img_count);
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, vk_ctx.swapchain.imgs.items);
         return true;
     } else {
@@ -732,8 +737,8 @@ bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
 
 bool vk_img_views_init()
 {
-    for (size_t i = 0; i < vk_ctx.swapchain.imgs.count; i++)  {
-        vk_da_append(&vk_ctx.swapchain.img_views, VK_NULL_HANDLE);
+    vk_da_resize(&vk_ctx.swapchain.img_views, vk_ctx.swapchain.imgs.count);
+    for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++)  {
         Vk_Image img = {
             .handle = vk_ctx.swapchain.imgs.items[i],
             .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1084,8 +1089,8 @@ bool vk_render_pass_init()
 
 bool vk_frame_buffs_init()
 {
+    vk_da_resize(&vk_ctx.swapchain.frame_buffs, vk_ctx.swapchain.img_views.count);
     for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++) {
-        vk_da_append(&vk_ctx.swapchain.frame_buffs, VK_NULL_HANDLE);
         VkImageView attachments[] = {vk_ctx.swapchain.img_views.items[i], vk_ctx.depth_img_view};
         VkFramebufferCreateInfo frame_buff_ci = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,

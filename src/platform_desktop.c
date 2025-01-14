@@ -33,7 +33,7 @@ bool init_platform()
         win_size.width = mode->width;
         win_size.height = mode->height;
         vk_log(VK_INFO, "full screen mode enabled", mode->width, mode->height);
-        vk_log(VK_INFO, "monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
+        vk_log(VK_INFO, "largest monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
         platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
         if (!platform.handle) return false;
     } else {

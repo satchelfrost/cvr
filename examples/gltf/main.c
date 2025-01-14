@@ -151,7 +151,10 @@ bool load_gltf(Model *model)
     model->meshes = calloc(primitive_count, sizeof(Mesh));
     for (size_t i = 0, mesh_idx = 0; i < data->meshes_count; i++) {
         for (size_t j = 0; j < data->meshes[i].primitives_count; j++) {
+            /* only support triangles for now */
             if (data->meshes[i].primitives[j].type != cgltf_primitive_type_triangles) continue;
+
+            /* load attributes */
             for (size_t k = 0; k < data->meshes[i].primitives[j].attributes_count; k++) {
                 cgltf_attribute_type attr_type = data->meshes[i].primitives[j].attributes[k].type;
                 const char *attr_type_str = cgltf_attr_type_to_str(attr_type);
