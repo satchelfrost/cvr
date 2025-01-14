@@ -6,6 +6,8 @@
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
 
+#define DEFAULT_ALBEDO MAGENTA
+
 typedef struct {
     size_t vtx_count;
     size_t tri_count;
@@ -17,9 +19,9 @@ typedef struct {
 } Mesh;
 
 typedef struct {
-    const char *res_file_name;
+    const char *file_name;
     size_t mat_count;
-    Color *albedo;
+    Color *albedos;
     Mesh *meshes;
     size_t mesh_count;
 } Model;
@@ -40,16 +42,33 @@ typedef struct {
 const char *cgltf_res_to_str(cgltf_result res)
 {
     switch (res) {
-    case cgltf_result_success:         return "cgltf_result_success";
-    case cgltf_result_data_too_short:  return "cgltf_result_data_too_short";
-    case cgltf_result_unknown_format:  return "cgltf_result_unknown_format";
-    case cgltf_result_invalid_json:    return "cgltf_result_invalid_json";
-    case cgltf_result_invalid_gltf:    return "cgltf_result_invalid_gltf";
-    case cgltf_result_invalid_options: return "cgltf_result_invalid_options";
-    case cgltf_result_file_not_found:  return "cgltf_result_file_not_found";
-    case cgltf_result_io_error:        return "cgltf_result_io_error";
-    case cgltf_result_out_of_memory:   return "cgltf_result_out_of_memory";
-    case cgltf_result_legacy_gltf:     return "cgltf_result_legacy_gltf";
+    case cgltf_result_success:         return "success";
+    case cgltf_result_data_too_short:  return "data_too_short";
+    case cgltf_result_unknown_format:  return "unknown_format";
+    case cgltf_result_invalid_json:    return "invalid_json";
+    case cgltf_result_invalid_gltf:    return "invalid_gltf";
+    case cgltf_result_invalid_options: return "invalid_options";
+    case cgltf_result_file_not_found:  return "file_not_found";
+    case cgltf_result_io_error:        return "io_error";
+    case cgltf_result_out_of_memory:   return "out_of_memory";
+    case cgltf_result_legacy_gltf:     return "legacy_gltf";
+    default:
+        assert(0 && "unreachable");
+    }
+}
+
+const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
+{
+    switch (attr_type) {
+    case cgltf_attribute_type_position: return "position";
+    case cgltf_attribute_type_normal:   return "normal";
+    case cgltf_attribute_type_tangent:  return "tangent";
+    case cgltf_attribute_type_texcoord: return "texcoord";
+    case cgltf_attribute_type_color:    return "color";
+    case cgltf_attribute_type_joints:   return "joints";
+    case cgltf_attribute_type_weights:  return "weights";
+    case cgltf_attribute_type_custom:   return "custom";
+    case cgltf_attribute_type_invalid:  return "invalid";
     default:
         assert(0 && "unreachable");
     }
@@ -63,11 +82,11 @@ bool load_gltf(Model *model)
     cgltf_options options = {0};
 
     /* parse the gltf file */
-    if (!nob_read_entire_file(model->res_file_name, &sb)) nob_return_defer(false);
-    printf("file %s has %zu bytes\n", model->res_file_name, sb.count);
+    if (!nob_read_entire_file(model->file_name, &sb)) nob_return_defer(false);
+    printf("file %s has %zu bytes\n", model->file_name, sb.count);
     cgltf_result res = cgltf_parse(&options, sb.items, sb.count, &data);
     if (res > cgltf_result_success) {
-        printf("failed to parse %s with error code %s\n", model->res_file_name, cgltf_res_to_str(res));
+        printf("failed to parse %s; %s\n", model->file_name, cgltf_res_to_str(res));
         nob_return_defer(false);
     }
     if (data->file_type != cgltf_file_type_glb) {
@@ -76,34 +95,40 @@ bool load_gltf(Model *model)
     }
 
     /* collect gltf info */
-    printf("    mesh count %zu\n", data->meshes_count);
+    printf("    mesh count: %zu\n", data->meshes_count);
     size_t primitive_count = 0; // TODO: do something with this...
     for (size_t i = 0; i < data->meshes_count; i++) {
-        printf("        meshes[%s].primitives_count %zu\n", data->meshes[i].name, data->meshes[i].primitives_count);
+        printf("        mesh: %zu, name: '%s', primitive count: %zu\n", i, data->meshes[i].name, data->meshes[i].primitives_count);
         primitive_count += data->meshes[i].primitives_count;
         for (size_t j = 0; j < data->meshes[i].primitives_count; j++) {
-            printf("            primitive type %d\n", data->meshes[i].primitives[j].type);
+            printf("            primitive: %zu, type: %d\n", j, data->meshes[i].primitives[j].type);
         }
     }
     printf("        -------------------\n");
-    printf("        primitive count %zu\n", primitive_count);
-    printf("    material count %zu\n", data->materials_count);
-    printf("    buffer count %zu\n", data->buffers_count);
-    printf("    image count %zu\n", data->images_count);
-    printf("    texture count %zu\n", data->textures_count);
+    printf("        primitive count: %zu\n", primitive_count);
+    printf("    material count: %zu\n", data->materials_count);
+    printf("    buffer count: %zu\n", data->buffers_count);
+    printf("    image count: %zu\n", data->images_count);
+    printf("    texture count: %zu\n", data->textures_count);
 
     if (data->images_count) {
         printf("currently don't support loading images yet");
         nob_return_defer(false);
     }
 
-    // TODO: may want to call cgltf_load_buffers() here, which apparently filles buffer_view->buffer->data
+    /* reading buffers here fills buffer_view->buffer->data */
+    res = cgltf_load_buffers(&options, data, model->file_name);
+    if (res > cgltf_result_success) {
+        printf("load buffers: %s\n", cgltf_res_to_str(res));
+        nob_return_defer(false);
+    }
 
-    /* load albedo materials */
-    model->albedo = calloc(data->materials_count, sizeof(Color));
+    /* load albedo material */
+    model->albedos = malloc(data->materials_count * sizeof(Color));
     model->mat_count = data->materials_count;
     bool has_base_mat = false;
     for (size_t i = 0; i < data->materials_count; i++) {
+        model->albedos[i] = DEFAULT_ALBEDO;
         if (data->materials[i].has_pbr_metallic_roughness) {
             has_base_mat = true;
             Color albedo = {
@@ -112,7 +137,8 @@ bool load_gltf(Model *model)
                 .b = data->materials[i].pbr_metallic_roughness.base_color_factor[2] * 255,
                 .a = data->materials[i].pbr_metallic_roughness.base_color_factor[3] * 255,
             };
-            model->albedo[i] = albedo;
+            model->albedos[i] = albedo;
+            printf("    material %zu albedo: (%i, %i, %i, %i)\n", i, albedo.r, albedo.g, albedo.b, albedo.a);
         }
     }
     if (!has_base_mat) {
@@ -123,7 +149,48 @@ bool load_gltf(Model *model)
     /* load mesh data */
     model->mesh_count = primitive_count;
     model->meshes = calloc(primitive_count, sizeof(Mesh));
-
+    for (size_t i = 0, mesh_idx = 0; i < data->meshes_count; i++) {
+        for (size_t j = 0; j < data->meshes[i].primitives_count; j++) {
+            if (data->meshes[i].primitives[j].type != cgltf_primitive_type_triangles) continue;
+            for (size_t k = 0; k < data->meshes[i].primitives[j].attributes_count; k++) {
+                cgltf_attribute_type attr_type = data->meshes[i].primitives[j].attributes[k].type;
+                const char *attr_type_str = cgltf_attr_type_to_str(attr_type);
+                cgltf_accessor *attr = data->meshes[i].primitives[j].attributes[k].data;
+                switch (attr_type) {
+                case cgltf_attribute_type_position:
+                    if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
+                        printf("position must have: component type r_32f, and vec3");
+                        nob_return_defer(false);
+                    } else {
+                        model->meshes[mesh_idx].vtx_count = attr->count;
+                        model->meshes[mesh_idx].vertices = malloc(attr->count * 3 * sizeof(float));
+                        LOAD_ATTR(attr, 3, float, model->meshes[mesh_idx].vertices);
+                    }
+                    break;
+                case cgltf_attribute_type_normal:
+                    if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
+                        printf("normal must have: component type r_32f, and vec3");
+                        nob_return_defer(false);
+                    } else {
+                        model->meshes[mesh_idx].normals = malloc(attr->count * 3 * sizeof(float));
+                        LOAD_ATTR(attr, 3, float, model->meshes[mesh_idx].normals);
+                    }
+                    break;
+                case cgltf_attribute_type_tangent:
+                case cgltf_attribute_type_texcoord:
+                case cgltf_attribute_type_color:
+                case cgltf_attribute_type_joints:
+                case cgltf_attribute_type_weights:
+                case cgltf_attribute_type_custom:
+                case cgltf_attribute_type_invalid:
+                default:
+                    // printf("attribute type: '%s' not supported, attr count: %zu\n", attr_type_str, attr->count);
+                    (void)attr_type_str;
+                }
+            }
+            mesh_idx++;
+        }
+    }
 
 defer:
     nob_sb_free(sb);
@@ -133,7 +200,7 @@ defer:
 
 void unload_model(Model *model)
 {
-    free(model->albedo);
+    free(model->albedos);
     for (size_t i = 0; i < model->mesh_count; i++) {
         free(model->meshes[i].vertices);
         free(model->meshes[i].texcoords);
@@ -154,8 +221,11 @@ int main()
         .projection = PERSPECTIVE,
     };
 
-    Model robot = {.res_file_name = "res/robot.glb"};
-    return load_gltf(&robot) ? 0 : 1;
+    Model robot = {.file_name = "res/robot.glb"};
+    if (!load_gltf(&robot)) return 1;
+    unload_model(&robot);
+
+    return 0;
 
     if (!init_window(800, 600, "gltf")) return 1;
     while (!window_should_close()) {
