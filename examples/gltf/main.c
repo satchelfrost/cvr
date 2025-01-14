@@ -24,7 +24,14 @@ typedef struct {
     Color *albedos;
     Mesh *meshes;
     size_t mesh_count;
+    size_t *mesh_albedo_idx;
 } Model;
+
+VkPipeline gfx_pl;
+VkPipelineLayout gfx_pl_layout;
+VkDescriptorSetLayout ds_layout_ubo;
+VkDescriptorSet ds_ubo;
+VkDescriptorPool pool;
 
 #define LOAD_ATTR(accessor, comp_count, data_type, dst_ptr)                     \
     do {                                                                        \
@@ -96,9 +103,10 @@ bool load_gltf(Model *model)
 
     /* collect gltf info */
     printf("    mesh count: %zu\n", data->meshes_count);
-    size_t primitive_count = 0; // TODO: do something with this...
+    size_t primitive_count = 0;
     for (size_t i = 0; i < data->meshes_count; i++) {
-        printf("        mesh: %zu, name: '%s', primitive count: %zu\n", i, data->meshes[i].name, data->meshes[i].primitives_count);
+        printf("        mesh: %zu, name: '%s', primitive count: %zu\n",
+                i, data->meshes[i].name, data->meshes[i].primitives_count);
         primitive_count += data->meshes[i].primitives_count;
         for (size_t j = 0; j < data->meshes[i].primitives_count; j++) {
             printf("            primitive: %zu, type: %d\n", j, data->meshes[i].primitives[j].type);
@@ -149,6 +157,7 @@ bool load_gltf(Model *model)
     /* load mesh data */
     model->mesh_count = primitive_count;
     model->meshes = calloc(primitive_count, sizeof(Mesh));
+    model->mesh_albedo_idx = calloc(primitive_count, sizeof(size_t));
     for (size_t i = 0, mesh_idx = 0; i < data->meshes_count; i++) {
         for (size_t j = 0; j < data->meshes[i].primitives_count; j++) {
             /* only support triangles for now */
@@ -191,6 +200,27 @@ bool load_gltf(Model *model)
                     (void)attr_type_str;
                 }
             }
+
+            /* load indices */
+            if (data->meshes[i].primitives[j].indices != NULL) {
+                cgltf_accessor *attr = data->meshes[i].primitives[j].indices;
+                model->meshes[mesh_idx].tri_count = attr->count / 3;
+                if (attr->component_type != cgltf_component_type_r_16u) {
+                    printf("received component type %d, must be r16u\n", attr->component_type);
+                    nob_return_defer(false);
+                }
+                model->meshes[mesh_idx].indices = malloc(attr->count * sizeof(unsigned short));
+                LOAD_ATTR(attr, 1, unsigned short, model->meshes[mesh_idx].indices);
+            }
+
+            /* assign materials to the*/
+            for (size_t m = 0; m < data->materials_count; m++) {
+                if (&data->materials[m] == data->meshes[i].primitives[j].material) {
+                    model->mesh_albedo_idx[mesh_idx] = m;
+                    break;
+                }
+            }
+
             mesh_idx++;
         }
     }
@@ -204,6 +234,7 @@ defer:
 void unload_model(Model *model)
 {
     free(model->albedos);
+    free(model->mesh_albedo_idx);
     for (size_t i = 0; i < model->mesh_count; i++) {
         free(model->meshes[i].vertices);
         free(model->meshes[i].texcoords);
@@ -212,6 +243,45 @@ void unload_model(Model *model)
         free(model->meshes[i].indices);
     }
     free(model->meshes);
+}
+
+bool create_pipeline()
+{
+    /* create pipeline layout */
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(float16),
+    };
+    VkPush
+    VkPipelineLayoutCreateInfo layout_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pk_range,
+    };
+    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
+
+    /* create pipeline */ 
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        {.format = VK_FORMAT_R32G32B32_SFLOAT},
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(Vector3),
+    };
+    Pipeline_Config config = {
+        .pl_layout = gfx_pl_layout,
+        .vert = "./res/gltf.vert.spv",
+        .frag = "./res/gltf.frag.spv",
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .polygon_mode = VK_POLYGON_MODE_FILL,
+        .vert_attrs = vert_attrs,
+        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
+        .vert_bindings = &vert_bindings,
+        .vert_binding_count = 1,
+    };
+    if (!vk_basic_pl_init(config, &gfx_pl)) return false;
+
+    return true;
 }
 
 int main()
@@ -226,7 +296,8 @@ int main()
 
     Model robot = {.file_name = "res/robot.glb"};
     if (!load_gltf(&robot)) return 1;
-    unload_model(&robot);
+
+    // if (!create_pipeline()) return 1;
 
     return 0;
 
@@ -238,6 +309,8 @@ int main()
         end_mode_3d();
         end_drawing();
     }
+
+    unload_model(&robot);
     close_window();
     return 0;
 }
