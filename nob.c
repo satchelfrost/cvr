@@ -256,8 +256,13 @@ static Example examples[] = {
     {
         .name = "gltf",
         .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "gltf.vert",
+                "gltf.frag",
+            },
+            .count = 4,
         },
         .c_files = {
             .names = default_c_file_names,
@@ -265,7 +270,6 @@ static Example examples[] = {
         },
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
-        .supported_targets[TARGET_QUEST] = true,
     },
 };
 

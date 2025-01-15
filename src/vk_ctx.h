@@ -154,6 +154,7 @@ bool vk_ubo_map(Vk_Buffer *buff);
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
+void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size);
 void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
@@ -1151,6 +1152,26 @@ void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_B
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
     vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+}
+
+void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size)
+{
+    VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    VkViewport viewport = {
+        .width = (float)vk_ctx.extent.width,
+        .height =(float)vk_ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {.extent = vk_ctx.extent};
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pk_size, pk);
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 }
 

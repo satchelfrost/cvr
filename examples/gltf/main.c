@@ -9,13 +9,14 @@
 #define DEFAULT_ALBEDO MAGENTA
 
 typedef struct {
-    size_t vtx_count;
     size_t tri_count;
-    float *vertices;
     float *texcoords;
     float *normals;
     unsigned char *colors;
+    float *vertices;
+    Vk_Buffer vtx_buff;
     unsigned short *indices;
+    Vk_Buffer idx_buff;
 } Mesh;
 
 typedef struct {
@@ -27,6 +28,11 @@ typedef struct {
     size_t *mesh_albedo_idx;
 } Model;
 
+typedef struct {
+    float16 mvp;
+    Vector4 color;
+} Push_Const;
+
 VkPipeline gfx_pl;
 VkPipelineLayout gfx_pl_layout;
 VkDescriptorSetLayout ds_layout_ubo;
@@ -36,7 +42,7 @@ VkDescriptorPool pool;
 #define LOAD_ATTR(accessor, comp_count, data_type, dst_ptr)                     \
     do {                                                                        \
         int n = 0;                                                              \
-        data_type *buffer = accessor->buffer_view->buffer->data +               \
+        data_type *buffer = (data_type *)accessor->buffer_view->buffer->data +  \
                             accessor->buffer_view->offset / sizeof(data_type) + \
                             accessor->offset / sizeof(data_type);               \
         for (unsigned int k = 0; k < accessor->count; k++) {                    \
@@ -174,8 +180,9 @@ bool load_gltf(Model *model)
                         printf("position must have: component type r_32f, and vec3");
                         nob_return_defer(false);
                     } else {
-                        model->meshes[mesh_idx].vtx_count = attr->count;
-                        model->meshes[mesh_idx].vertices = malloc(attr->count * 3 * sizeof(float));
+                        model->meshes[mesh_idx].vertices       = malloc(attr->count * sizeof(Vector3));
+                        model->meshes[mesh_idx].vtx_buff.count = attr->count;
+                        model->meshes[mesh_idx].vtx_buff.size  = attr->count * sizeof(Vector3);
                         LOAD_ATTR(attr, 3, float, model->meshes[mesh_idx].vertices);
                     }
                     break;
@@ -184,7 +191,7 @@ bool load_gltf(Model *model)
                         printf("normal must have: component type r_32f, and vec3");
                         nob_return_defer(false);
                     } else {
-                        model->meshes[mesh_idx].normals = malloc(attr->count * 3 * sizeof(float));
+                        model->meshes[mesh_idx].normals = malloc(attr->count * sizeof(Vector3));
                         LOAD_ATTR(attr, 3, float, model->meshes[mesh_idx].normals);
                     }
                     break;
@@ -210,6 +217,8 @@ bool load_gltf(Model *model)
                     nob_return_defer(false);
                 }
                 model->meshes[mesh_idx].indices = malloc(attr->count * sizeof(unsigned short));
+                model->meshes[mesh_idx].idx_buff.size = attr->count * sizeof(unsigned short);
+                model->meshes[mesh_idx].idx_buff.count = attr->count;
                 LOAD_ATTR(attr, 1, unsigned short, model->meshes[mesh_idx].indices);
             }
 
@@ -250,9 +259,8 @@ bool create_pipeline()
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .size = sizeof(float16),
+        .size = sizeof(Push_Const),
     };
-    VkPush
     VkPipelineLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pushConstantRangeCount = 1,
@@ -284,10 +292,21 @@ bool create_pipeline()
     return true;
 }
 
+Vector4 color_to_vec4(Color color)
+{
+    Vector4 c = {
+        .x = color.r / 255.0f,
+        .y = color.g / 255.0f,
+        .z = color.b / 255.0f,
+        .w = color.a / 255.0f,
+    };
+    return c;
+}
+
 int main()
 {
     Camera camera = {
-        .position   = {5.0f, 5.0f, 5.0f},
+        .position   = {0.0f, 15.0f, 15.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = 45,
@@ -297,19 +316,56 @@ int main()
     Model robot = {.file_name = "res/robot.glb"};
     if (!load_gltf(&robot)) return 1;
 
-    // if (!create_pipeline()) return 1;
-
-    return 0;
-
     if (!init_window(800, 600, "gltf")) return 1;
+    if (!create_pipeline()) return 1;
+
+    for (size_t i = 0; i < robot.mesh_count; i++) {
+        if (!vk_vtx_buff_staged_upload(&robot.meshes[i].vtx_buff, robot.meshes[i].vertices)) return 1;
+        if (!vk_idx_buff_staged_upload(&robot.meshes[i].idx_buff, robot.meshes[i].indices))  return 1;
+    }
+    set_target_fps(120);
+
     while (!window_should_close()) {
-        begin_drawing(GREEN);
+        float dt = get_time();
+        update_camera_free(&camera);
+
+        begin_drawing(PURPLE);
         begin_mode_3d(camera);
-            if (!draw_shape(SHAPE_CUBE)) return 1;
+            for (size_t i = 0; i < 6; i++) {
+                push_matrix();
+                rotate_y(dt + (float)i);
+                translate(2.0, 0.0, 0.0);
+                draw_shape_wireframe(SHAPE_CUBE);
+                pop_matrix();
+            }
+
+            scale(1.0, (sin(2.0f * dt) * 0.5 + 0.5) * 0.2 + 1.0, 1.0);
+
+            /* draw model */
+            Matrix mvp = {0};
+            if (!get_mvp(&mvp)) return 1;
+            float16 f16_mvp = MatrixToFloatV(mvp);
+            for (size_t i = 0; i < robot.mesh_count; i++) {
+                Vector4 color = color_to_vec4(robot.albedos[robot.mesh_albedo_idx[i]]);
+                Push_Const pk = {
+                    .mvp = f16_mvp,
+                    .color = color,
+                };
+                Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
+                Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
+                vk_draw_w_push_const(gfx_pl, gfx_pl_layout, vtx_buff, idx_buff, &pk, sizeof(pk));
+            }
+
         end_mode_3d();
         end_drawing();
     }
 
+    wait_idle();
+    for (size_t i = 0; i < robot.mesh_count; i++) {
+        vk_buff_destroy(&robot.meshes[i].vtx_buff);
+        vk_buff_destroy(&robot.meshes[i].idx_buff);
+    }
+    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     unload_model(&robot);
     close_window();
     return 0;
