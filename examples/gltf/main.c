@@ -126,7 +126,7 @@ bool load_gltf(Model *model)
     printf("    texture count: %zu\n", data->textures_count);
 
     if (data->images_count) {
-        printf("currently don't support loading images yet");
+        printf("currently don't support loading images yet\n");
         nob_return_defer(false);
     }
 
@@ -333,9 +333,9 @@ int main()
         begin_mode_3d(camera);
             for (size_t i = 0; i < 6; i++) {
                 push_matrix();
-                rotate_y(dt + (float)i);
-                translate(2.0, 0.0, 0.0);
-                draw_shape_wireframe(SHAPE_CUBE);
+                    rotate_y(dt + (float)i);
+                    translate(2.0, 0.0, 0.0);
+                    draw_shape_wireframe(SHAPE_CUBE);
                 pop_matrix();
             }
 
