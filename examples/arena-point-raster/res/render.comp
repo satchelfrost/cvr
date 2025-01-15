@@ -27,12 +27,12 @@ struct Vertex {
 #define MODE_MODEL                            0
 #define MODE_FRUSTUM_OVERLAP                  1
 #define MODE_SINGLE_VID_TEX                   2
-#define MODE_MULTI_VID_TEX                    3
-#define MODE_MULTI_VID_TEX_BLEND              4
-#define MODE_VERT_COLORED_BY_CCTV             5
-#define MODE_VERT_CLOSEST_CCTV_TEX            6
-#define MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK 7
-#define MODE_SEAM_AND_VIEW_BLEND              8
+#define MODE_SEAM_AND_VIEW_BLEND              3
+#define MODE_MULTI_VID_TEX                    4
+#define MODE_MULTI_VID_TEX_BLEND              5
+#define MODE_VERT_COLORED_BY_CCTV             6
+#define MODE_VERT_CLOSEST_CCTV_TEX            7
+#define MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK 8
 
 layout(binding = 0) uniform uniform_data {
     mat4 mvp;                 // main viewing camera's view-proj w/ model

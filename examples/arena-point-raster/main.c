@@ -1032,7 +1032,6 @@ int main(int argc, char **argv)
         if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             playing = !playing;
         if (is_key_pressed(KEY_L)) log_cameras(&cameras[1], NUM_CCTVS);
-        if (is_key_pressed(KEY_O)) elevation_based_occlusion = !elevation_based_occlusion;
 
         if (playing) vid_update_time += get_frame_time();
 
@@ -1078,6 +1077,7 @@ int main(int argc, char **argv)
             get_cam_order(cameras, NOB_ARRAY_LEN(cameras), cam_order, NOB_ARRAY_LEN(cam_order));
             float blend_ratio = calc_blend_ratio(cameras, cam_order);
             if (!vk_compute_fence_wait()) return 1;
+            elevation_based_occlusion = (cameras[0].position.y < -1.5f) ? true : false;
             if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, elevation_based_occlusion)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
