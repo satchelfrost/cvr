@@ -6,6 +6,10 @@
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include <time.h>     // used by nanosleep
 #include "geometry.h" // defines some default primitives
 
