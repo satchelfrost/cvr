@@ -9,20 +9,21 @@
 #define DEFAULT_ALBEDO MAGENTA
 
 typedef struct {
-    size_t tri_count;
-    float *texcoords;
-    float *normals;
-    unsigned char *colors;
-    float *vertices;
-    Vk_Buffer vtx_buff;
+    Vector3 pos;
+    Vector3 normal;
+} Gltf_Vertex; 
+
+typedef struct {
+    Gltf_Vertex *vertices;
     unsigned short *indices;
+    Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
 } Mesh;
 
 typedef struct {
     const char *file_name;
     size_t mat_count;
-    Color *albedos;
+    Vector4 *albedos;
     Mesh *meshes;
     size_t mesh_count;
     size_t *mesh_albedo_idx;
@@ -138,7 +139,7 @@ bool load_gltf(Model *model)
     }
 
     /* load albedo material */
-    model->albedos = malloc(data->materials_count * sizeof(Color));
+    model->albedos = malloc(data->materials_count * sizeof(Vector4));
     model->mat_count = data->materials_count;
     bool has_base_mat = false;
     for (size_t i = 0; i < data->materials_count; i++) {
@@ -180,10 +181,22 @@ bool load_gltf(Model *model)
                         printf("position must have: component type r_32f, and vec3");
                         nob_return_defer(false);
                     } else {
-                        model->meshes[mesh_idx].vertices       = malloc(attr->count * sizeof(Vector3));
-                        model->meshes[mesh_idx].vtx_buff.count = attr->count;
-                        model->meshes[mesh_idx].vtx_buff.size  = attr->count * sizeof(Vector3);
-                        LOAD_ATTR(attr, 3, float, model->meshes[mesh_idx].vertices);
+                        if (!model->meshes[mesh_idx].vertices) {
+                            model->meshes[mesh_idx].vertices = malloc(attr->count * sizeof(Gltf_Vertex));
+                            model->meshes[mesh_idx].vtx_buff.count = attr->count;
+                            model->meshes[mesh_idx].vtx_buff.size  = attr->count * sizeof(Gltf_Vertex);
+                        }
+                        float *verts = (float *)attr->buffer_view->buffer->data +
+                                                attr->buffer_view->offset / sizeof(float) +
+                                                attr->offset / sizeof(float);
+                        for (size_t a = 0, n = 0; a < attr->count; a++, n += attr->stride / sizeof(float)) {
+                            Vector3 pos = {
+                                .x = verts[n + 0],
+                                .y = verts[n + 1],
+                                .z = verts[n + 2],
+                            };
+                            model->meshes[mesh_idx].vertices[a].pos = pos;
+                        }
                     }
                     break;
                 case cgltf_attribute_type_normal:
@@ -191,8 +204,22 @@ bool load_gltf(Model *model)
                         printf("normal must have: component type r_32f, and vec3");
                         nob_return_defer(false);
                     } else {
-                        model->meshes[mesh_idx].normals = malloc(attr->count * sizeof(Vector3));
-                        LOAD_ATTR(attr, 3, float, model->meshes[mesh_idx].normals);
+                        if (!model->meshes[mesh_idx].vertices) {
+                            model->meshes[mesh_idx].vertices = malloc(attr->count * sizeof(Gltf_Vertex));
+                            model->meshes[mesh_idx].vtx_buff.count = attr->count;
+                            model->meshes[mesh_idx].vtx_buff.size  = attr->count * sizeof(Gltf_Vertex);
+                        }
+                        float *verts = (float *)attr->buffer_view->buffer->data +
+                                                attr->buffer_view->offset / sizeof(float) +
+                                                attr->offset / sizeof(float);
+                        for (size_t a = 0, n = 0; a < attr->count; a++, n += attr->stride / sizeof(float)) {
+                            Vector3 normal = {
+                                .x = verts[n + 0],
+                                .y = verts[n + 1],
+                                .z = verts[n + 2],
+                            };
+                            model->meshes[mesh_idx].vertices[a].normal = normal;
+                        }
                     }
                     break;
                 case cgltf_attribute_type_tangent:
@@ -211,7 +238,6 @@ bool load_gltf(Model *model)
             /* load indices */
             if (data->meshes[i].primitives[j].indices != NULL) {
                 cgltf_accessor *attr = data->meshes[i].primitives[j].indices;
-                model->meshes[mesh_idx].tri_count = attr->count / 3;
                 if (attr->component_type != cgltf_component_type_r_16u) {
                     printf("received component type %d, must be r16u\n", attr->component_type);
                     nob_return_defer(false);
@@ -246,9 +272,6 @@ void unload_model(Model *model)
     free(model->mesh_albedo_idx);
     for (size_t i = 0; i < model->mesh_count; i++) {
         free(model->meshes[i].vertices);
-        free(model->meshes[i].texcoords);
-        free(model->meshes[i].normals);
-        free(model->meshes[i].colors);
         free(model->meshes[i].indices);
     }
     free(model->meshes);
@@ -270,11 +293,19 @@ bool create_pipeline()
 
     /* create pipeline */ 
     VkVertexInputAttributeDescription vert_attrs[] = {
-        {.format = VK_FORMAT_R32G32B32_SFLOAT},
+        {
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Gltf_Vertex, pos)
+        },
+        {
+            .location = 1,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(Gltf_Vertex, normal)
+        },
     };
     VkVertexInputBindingDescription vert_bindings = {
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-        .stride    = sizeof(Vector3),
+        .stride    = sizeof(Gltf_Vertex),
     };
     Pipeline_Config config = {
         .pl_layout = gfx_pl_layout,
