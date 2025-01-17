@@ -6,7 +6,7 @@
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
 
-#define DEFAULT_ALBEDO MAGENTA
+#define DEFAULT_ALBEDO (Vector4){1.0f, 0.0f, 1.0f, 0.0f}
 
 typedef struct {
     Vector3 pos;
@@ -22,7 +22,6 @@ typedef struct {
 
 typedef struct {
     const char *file_name;
-    size_t mat_count;
     Vector4 *albedos;
     Mesh *meshes;
     size_t mesh_count;
@@ -39,19 +38,6 @@ VkPipelineLayout gfx_pl_layout;
 VkDescriptorSetLayout ds_layout_ubo;
 VkDescriptorSet ds_ubo;
 VkDescriptorPool pool;
-
-#define LOAD_ATTR(accessor, comp_count, data_type, dst_ptr)                     \
-    do {                                                                        \
-        int n = 0;                                                              \
-        data_type *buffer = (data_type *)accessor->buffer_view->buffer->data +  \
-                            accessor->buffer_view->offset / sizeof(data_type) + \
-                            accessor->offset / sizeof(data_type);               \
-        for (unsigned int k = 0; k < accessor->count; k++) {                    \
-            for (int l = 0; l < comp_count; l++)                                \
-                dst_ptr[comp_count * k + l] = buffer[n + l];                    \
-            n += accessor->stride / sizeof(data_type);                          \
-        }                                                                       \
-    } while (0)
 
 const char *cgltf_res_to_str(cgltf_result res)
 {
@@ -140,20 +126,19 @@ bool load_gltf(Model *model)
 
     /* load albedo material */
     model->albedos = malloc(data->materials_count * sizeof(Vector4));
-    model->mat_count = data->materials_count;
     bool has_base_mat = false;
     for (size_t i = 0; i < data->materials_count; i++) {
         model->albedos[i] = DEFAULT_ALBEDO;
         if (data->materials[i].has_pbr_metallic_roughness) {
             has_base_mat = true;
-            Color albedo = {
-                .r = data->materials[i].pbr_metallic_roughness.base_color_factor[0] * 255,
-                .g = data->materials[i].pbr_metallic_roughness.base_color_factor[1] * 255,
-                .b = data->materials[i].pbr_metallic_roughness.base_color_factor[2] * 255,
-                .a = data->materials[i].pbr_metallic_roughness.base_color_factor[3] * 255,
+            Vector4 color = {
+                .x = data->materials[i].pbr_metallic_roughness.base_color_factor[0],
+                .y = data->materials[i].pbr_metallic_roughness.base_color_factor[1],
+                .z = data->materials[i].pbr_metallic_roughness.base_color_factor[2],
+                .w = data->materials[i].pbr_metallic_roughness.base_color_factor[3],
             };
-            model->albedos[i] = albedo;
-            printf("    material %zu albedo: (%i, %i, %i, %i)\n", i, albedo.r, albedo.g, albedo.b, albedo.a);
+            model->albedos[i] = color;
+            printf("    material %zu albedo: (%0.2f, %0.2f, %0.2f, %0.2f)\n", i, color.x, color.y, color.z, color.w);
         }
     }
     if (!has_base_mat) {
@@ -175,6 +160,9 @@ bool load_gltf(Model *model)
                 cgltf_attribute_type attr_type = data->meshes[i].primitives[j].attributes[k].type;
                 const char *attr_type_str = cgltf_attr_type_to_str(attr_type);
                 cgltf_accessor *attr = data->meshes[i].primitives[j].attributes[k].data;
+                float *verts = (float *)attr->buffer_view->buffer->data +
+                                        attr->buffer_view->offset / sizeof(float) +
+                                        attr->offset / sizeof(float);
                 switch (attr_type) {
                 case cgltf_attribute_type_position:
                     if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
@@ -182,46 +170,40 @@ bool load_gltf(Model *model)
                         nob_return_defer(false);
                     } else {
                         if (!model->meshes[mesh_idx].vertices) {
-                            model->meshes[mesh_idx].vertices = malloc(attr->count * sizeof(Gltf_Vertex));
+                            size_t size = attr->count * sizeof(Gltf_Vertex);
+                            model->meshes[mesh_idx].vertices = malloc(size);
                             model->meshes[mesh_idx].vtx_buff.count = attr->count;
-                            model->meshes[mesh_idx].vtx_buff.size  = attr->count * sizeof(Gltf_Vertex);
+                            model->meshes[mesh_idx].vtx_buff.size  = size;
                         }
-                        float *verts = (float *)attr->buffer_view->buffer->data +
-                                                attr->buffer_view->offset / sizeof(float) +
-                                                attr->offset / sizeof(float);
-                        for (size_t a = 0, n = 0; a < attr->count; a++, n += attr->stride / sizeof(float)) {
+                        for (size_t a = 0; a < attr->count; a++) {
                             Vector3 pos = {
-                                .x = verts[n + 0],
-                                .y = verts[n + 1],
-                                .z = verts[n + 2],
+                                .x = verts[3 * a + 0],
+                                .y = verts[3 * a + 1],
+                                .z = verts[3 * a + 2],
                             };
                             model->meshes[mesh_idx].vertices[a].pos = pos;
                         }
-                    }
-                    break;
+                    } break;
                 case cgltf_attribute_type_normal:
                     if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
                         printf("normal must have: component type r_32f, and vec3");
                         nob_return_defer(false);
                     } else {
                         if (!model->meshes[mesh_idx].vertices) {
-                            model->meshes[mesh_idx].vertices = malloc(attr->count * sizeof(Gltf_Vertex));
+                            size_t size = attr->count * sizeof(Gltf_Vertex);
+                            model->meshes[mesh_idx].vertices = malloc(size);
                             model->meshes[mesh_idx].vtx_buff.count = attr->count;
-                            model->meshes[mesh_idx].vtx_buff.size  = attr->count * sizeof(Gltf_Vertex);
+                            model->meshes[mesh_idx].vtx_buff.size  = size;
                         }
-                        float *verts = (float *)attr->buffer_view->buffer->data +
-                                                attr->buffer_view->offset / sizeof(float) +
-                                                attr->offset / sizeof(float);
-                        for (size_t a = 0, n = 0; a < attr->count; a++, n += attr->stride / sizeof(float)) {
+                        for (size_t a = 0; a < attr->count; a++) {
                             Vector3 normal = {
-                                .x = verts[n + 0],
-                                .y = verts[n + 1],
-                                .z = verts[n + 2],
+                                .x = verts[3 * a + 0],
+                                .y = verts[3 * a + 1],
+                                .z = verts[3 * a + 2],
                             };
                             model->meshes[mesh_idx].vertices[a].normal = normal;
                         }
-                    }
-                    break;
+                    } break;
                 case cgltf_attribute_type_tangent:
                 case cgltf_attribute_type_texcoord:
                 case cgltf_attribute_type_color:
@@ -238,14 +220,18 @@ bool load_gltf(Model *model)
             /* load indices */
             if (data->meshes[i].primitives[j].indices != NULL) {
                 cgltf_accessor *attr = data->meshes[i].primitives[j].indices;
+                float *indices = (float *)attr->buffer_view->buffer->data +
+                                          attr->buffer_view->offset / sizeof(float) +
+                                          attr->offset / sizeof(float);
                 if (attr->component_type != cgltf_component_type_r_16u) {
                     printf("received component type %d, must be r16u\n", attr->component_type);
                     nob_return_defer(false);
                 }
-                model->meshes[mesh_idx].indices = malloc(attr->count * sizeof(unsigned short));
-                model->meshes[mesh_idx].idx_buff.size = attr->count * sizeof(unsigned short);
+                size_t size = attr->count * sizeof(unsigned short);
+                model->meshes[mesh_idx].indices = malloc(size);
+                model->meshes[mesh_idx].idx_buff.size = size;
                 model->meshes[mesh_idx].idx_buff.count = attr->count;
-                LOAD_ATTR(attr, 1, unsigned short, model->meshes[mesh_idx].indices);
+                memcpy(model->meshes[mesh_idx].indices, indices, size);
             }
 
             /* assign materials to the*/
@@ -323,17 +309,6 @@ bool create_pipeline()
     return true;
 }
 
-Vector4 color_to_vec4(Color color)
-{
-    Vector4 c = {
-        .x = color.r / 255.0f,
-        .y = color.g / 255.0f,
-        .z = color.b / 255.0f,
-        .w = color.a / 255.0f,
-    };
-    return c;
-}
-
 int main()
 {
     Camera camera = {
@@ -377,10 +352,9 @@ int main()
             if (!get_mvp(&mvp)) return 1;
             float16 f16_mvp = MatrixToFloatV(mvp);
             for (size_t i = 0; i < robot.mesh_count; i++) {
-                Vector4 color = color_to_vec4(robot.albedos[robot.mesh_albedo_idx[i]]);
                 Push_Const pk = {
                     .mvp = f16_mvp,
-                    .color = color,
+                    .color = robot.albedos[robot.mesh_albedo_idx[i]],
                 };
                 Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
                 Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
