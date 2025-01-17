@@ -74,6 +74,96 @@ const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
     }
 }
 
+bool load_attrs(cgltf_primitive primitive, Mesh *mesh_out)
+{
+    for (size_t i = 0; i < primitive.attributes_count; i++) {
+        cgltf_attribute_type attr_type = primitive.attributes[i].type;
+        const char *attr_type_str = cgltf_attr_type_to_str(attr_type);
+        cgltf_accessor *attr = primitive.attributes[i].data;
+        float *verts = (float *)attr->buffer_view->buffer->data +
+                                attr->buffer_view->offset / sizeof(float) +
+                                attr->offset / sizeof(float);
+        switch (attr_type) {
+        case cgltf_attribute_type_position:
+            if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
+                printf("position must have: component type r_32f, and vec3");
+                return false;
+            } else {
+                if (!mesh_out->vertices) {
+                    size_t size = attr->count * sizeof(Gltf_Vertex);
+                    mesh_out->vertices = malloc(size);
+                    mesh_out->vtx_buff.count = attr->count;
+                    mesh_out->vtx_buff.size  = size;
+                }
+                for (size_t a = 0; a < attr->count; a++) {
+                    Vector3 pos = {
+                        .x = verts[3 * a + 0],
+                        .y = verts[3 * a + 1],
+                        .z = verts[3 * a + 2],
+                    };
+                    mesh_out->vertices[a].pos = pos;
+                }
+            } break;
+        case cgltf_attribute_type_normal:
+            if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
+                printf("normal must have: component type r_32f, and vec3");
+                return false;
+            } else {
+                if (!mesh_out->vertices) {
+                    size_t size = attr->count * sizeof(Gltf_Vertex);
+                    mesh_out->vertices = malloc(size);
+                    mesh_out->vtx_buff.count = attr->count;
+                    mesh_out->vtx_buff.size  = size;
+                }
+                for (size_t a = 0; a < attr->count; a++) {
+                    Vector3 normal = {
+                        .x = verts[3 * a + 0],
+                        .y = verts[3 * a + 1],
+                        .z = verts[3 * a + 2],
+                    };
+                    mesh_out->vertices[a].normal = normal;
+                }
+            } break;
+        case cgltf_attribute_type_tangent:
+        case cgltf_attribute_type_texcoord:
+        case cgltf_attribute_type_color:
+        case cgltf_attribute_type_joints:
+        case cgltf_attribute_type_weights:
+        case cgltf_attribute_type_custom:
+        case cgltf_attribute_type_invalid:
+        default:
+#ifdef LOG_MISSING_ATTR
+            printf("attribute type: '%s' not supported, attr count: %zu\n", attr_type_str, attr->count);
+#else
+            (void)attr_type_str;
+#endif
+        }
+    }
+
+    return true;
+}
+
+bool load_indices(cgltf_primitive primitive, Mesh *mesh_out)
+{
+    cgltf_accessor *attr = NULL;
+    if ((attr = primitive.indices)) {
+        float *indices = (float *)attr->buffer_view->buffer->data +
+                                  attr->buffer_view->offset / sizeof(float) +
+                                  attr->offset / sizeof(float);
+        if (attr->component_type != cgltf_component_type_r_16u) {
+            printf("received component type %d, must be r16u\n", attr->component_type);
+            return false;
+        }
+        size_t size = attr->count * sizeof(unsigned short);
+        mesh_out->indices = malloc(size);
+        mesh_out->idx_buff.size = size;
+        mesh_out->idx_buff.count = attr->count;
+        memcpy(mesh_out->indices, indices, size);
+    }
+
+    return true;
+}
+
 bool load_gltf(Model *model)
 {
     bool result = true;
@@ -155,84 +245,10 @@ bool load_gltf(Model *model)
             /* only support triangles for now */
             if (data->meshes[i].primitives[j].type != cgltf_primitive_type_triangles) continue;
 
-            /* load attributes */
-            for (size_t k = 0; k < data->meshes[i].primitives[j].attributes_count; k++) {
-                cgltf_attribute_type attr_type = data->meshes[i].primitives[j].attributes[k].type;
-                const char *attr_type_str = cgltf_attr_type_to_str(attr_type);
-                cgltf_accessor *attr = data->meshes[i].primitives[j].attributes[k].data;
-                float *verts = (float *)attr->buffer_view->buffer->data +
-                                        attr->buffer_view->offset / sizeof(float) +
-                                        attr->offset / sizeof(float);
-                switch (attr_type) {
-                case cgltf_attribute_type_position:
-                    if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
-                        printf("position must have: component type r_32f, and vec3");
-                        nob_return_defer(false);
-                    } else {
-                        if (!model->meshes[mesh_idx].vertices) {
-                            size_t size = attr->count * sizeof(Gltf_Vertex);
-                            model->meshes[mesh_idx].vertices = malloc(size);
-                            model->meshes[mesh_idx].vtx_buff.count = attr->count;
-                            model->meshes[mesh_idx].vtx_buff.size  = size;
-                        }
-                        for (size_t a = 0; a < attr->count; a++) {
-                            Vector3 pos = {
-                                .x = verts[3 * a + 0],
-                                .y = verts[3 * a + 1],
-                                .z = verts[3 * a + 2],
-                            };
-                            model->meshes[mesh_idx].vertices[a].pos = pos;
-                        }
-                    } break;
-                case cgltf_attribute_type_normal:
-                    if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
-                        printf("normal must have: component type r_32f, and vec3");
-                        nob_return_defer(false);
-                    } else {
-                        if (!model->meshes[mesh_idx].vertices) {
-                            size_t size = attr->count * sizeof(Gltf_Vertex);
-                            model->meshes[mesh_idx].vertices = malloc(size);
-                            model->meshes[mesh_idx].vtx_buff.count = attr->count;
-                            model->meshes[mesh_idx].vtx_buff.size  = size;
-                        }
-                        for (size_t a = 0; a < attr->count; a++) {
-                            Vector3 normal = {
-                                .x = verts[3 * a + 0],
-                                .y = verts[3 * a + 1],
-                                .z = verts[3 * a + 2],
-                            };
-                            model->meshes[mesh_idx].vertices[a].normal = normal;
-                        }
-                    } break;
-                case cgltf_attribute_type_tangent:
-                case cgltf_attribute_type_texcoord:
-                case cgltf_attribute_type_color:
-                case cgltf_attribute_type_joints:
-                case cgltf_attribute_type_weights:
-                case cgltf_attribute_type_custom:
-                case cgltf_attribute_type_invalid:
-                default:
-                    // printf("attribute type: '%s' not supported, attr count: %zu\n", attr_type_str, attr->count);
-                    (void)attr_type_str;
-                }
-            }
-
-            /* load indices */
-            if (data->meshes[i].primitives[j].indices != NULL) {
-                cgltf_accessor *attr = data->meshes[i].primitives[j].indices;
-                float *indices = (float *)attr->buffer_view->buffer->data +
-                                          attr->buffer_view->offset / sizeof(float) +
-                                          attr->offset / sizeof(float);
-                if (attr->component_type != cgltf_component_type_r_16u) {
-                    printf("received component type %d, must be r16u\n", attr->component_type);
-                    nob_return_defer(false);
-                }
-                size_t size = attr->count * sizeof(unsigned short);
-                model->meshes[mesh_idx].indices = malloc(size);
-                model->meshes[mesh_idx].idx_buff.size = size;
-                model->meshes[mesh_idx].idx_buff.count = attr->count;
-                memcpy(model->meshes[mesh_idx].indices, indices, size);
-            }
+            Mesh *mesh = &model->meshes[mesh_idx];
+            cgltf_primitive primitive = data->meshes[i].primitives[j];
+            if (!load_attrs(primitive, mesh)) nob_return_defer(false);
+            if (!load_indices(primitive, mesh)) nob_return_defer(false);
 
             /* assign materials to the*/
             for (size_t m = 0; m < data->materials_count; m++) {
