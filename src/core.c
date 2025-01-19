@@ -590,6 +590,14 @@ int get_last_btn_pressed()
     return gamepad.last_button_pressed;
 }
 
+void add_matrix(Matrix matrix)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(matrix, mat_stack[mat_stack_p - 1]);
+    else
+        vk_log(VK_ERROR, "no matrix available on current stack");
+}
+
 void translate(float x, float y, float z)
 {
     if (mat_stack_p > 0)

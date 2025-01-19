@@ -8,6 +8,11 @@
 
 #define DEFAULT_ALBEDO (Vector4){1.0f, 0.0f, 1.0f, 0.0f}
 
+#define GLTF_ATTR_PTR(accessor_ptr, out_type) \
+    (out_type *)(accessor_ptr)->buffer_view->buffer->data + \
+    (accessor_ptr)->buffer_view->offset / sizeof(out_type) + \
+    (accessor_ptr)->offset / sizeof(out_type)
+
 typedef struct {
     Vector3 pos;
     Vector3 normal;
@@ -15,10 +20,19 @@ typedef struct {
 
 typedef struct {
     Gltf_Vertex *vertices;
+    // Gltf_Vertex *anim_vertices;
     unsigned short *indices;
     Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
+    unsigned char *bone_ids;
+    float *bone_weights;
 } Mesh;
+
+typedef struct {
+    size_t *parent_idxs;
+    Matrix *matrices;
+    size_t count;
+} Bones;
 
 typedef struct {
     const char *file_name;
@@ -26,6 +40,7 @@ typedef struct {
     Mesh *meshes;
     size_t mesh_count;
     size_t *mesh_albedo_idx;
+    Bones bones;
 } Model;
 
 typedef struct {
@@ -77,16 +92,13 @@ const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
 bool load_attrs(cgltf_primitive primitive, Mesh *mesh_out)
 {
     for (size_t i = 0; i < primitive.attributes_count; i++) {
-        cgltf_attribute_type attr_type = primitive.attributes[i].type;
-        const char *attr_type_str = cgltf_attr_type_to_str(attr_type);
+        const char *attr_name = cgltf_attr_type_to_str(primitive.attributes[i].type);
         cgltf_accessor *attr = primitive.attributes[i].data;
-        float *verts = (float *)attr->buffer_view->buffer->data +
-                                attr->buffer_view->offset / sizeof(float) +
-                                attr->offset / sizeof(float);
-        switch (attr_type) {
+
+        switch (primitive.attributes[i].type) {
         case cgltf_attribute_type_position:
             if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
-                printf("position must have: component type r_32f, and vec3");
+                printf("position must have: component type r_32f, and attr type vec3");
                 return false;
             } else {
                 if (!mesh_out->vertices) {
@@ -95,6 +107,7 @@ bool load_attrs(cgltf_primitive primitive, Mesh *mesh_out)
                     mesh_out->vtx_buff.count = attr->count;
                     mesh_out->vtx_buff.size  = size;
                 }
+                float *verts = GLTF_ATTR_PTR(attr, float);
                 for (size_t a = 0; a < attr->count; a++) {
                     Vector3 pos = {
                         .x = verts[3 * a + 0],
@@ -106,7 +119,7 @@ bool load_attrs(cgltf_primitive primitive, Mesh *mesh_out)
             } break;
         case cgltf_attribute_type_normal:
             if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec3) {
-                printf("normal must have: component type r_32f, and vec3");
+                printf("normal must have: component type r_32f, and attr type vec3");
                 return false;
             } else {
                 if (!mesh_out->vertices) {
@@ -115,27 +128,46 @@ bool load_attrs(cgltf_primitive primitive, Mesh *mesh_out)
                     mesh_out->vtx_buff.count = attr->count;
                     mesh_out->vtx_buff.size  = size;
                 }
+                float *normals = GLTF_ATTR_PTR(attr, float);
                 for (size_t a = 0; a < attr->count; a++) {
                     Vector3 normal = {
-                        .x = verts[3 * a + 0],
-                        .y = verts[3 * a + 1],
-                        .z = verts[3 * a + 2],
+                        .x = normals[3 * a + 0],
+                        .y = normals[3 * a + 1],
+                        .z = normals[3 * a + 2],
                     };
                     mesh_out->vertices[a].normal = normal;
                 }
             } break;
+        case cgltf_attribute_type_joints:
+            if (attr->component_type != cgltf_component_type_r_8u && attr->type != cgltf_type_vec4) {
+                printf("joint must have: component type r_8u, and attr type vec4");
+                return false;
+            } else {
+                unsigned char *bone_ids = GLTF_ATTR_PTR(attr, unsigned char);
+                size_t size = mesh_out->vtx_buff.count * 4 * sizeof(unsigned char);
+                mesh_out->bone_ids = malloc(size);
+                memcpy(mesh_out->bone_ids, bone_ids, size);
+            } break;
+        case cgltf_attribute_type_weights:
+            if (attr->component_type != cgltf_component_type_r_32f && attr->type != cgltf_type_vec4) {
+                printf("weight must have: component type r_32f, and attr type vec4");
+                return false;
+            } else {
+                float *weights = GLTF_ATTR_PTR(attr, float);
+                size_t size = mesh_out->vtx_buff.count * 4 * sizeof(float);
+                mesh_out->bone_weights = malloc(size);
+                memcpy(mesh_out->bone_weights, weights, size);
+            } break;
         case cgltf_attribute_type_tangent:
         case cgltf_attribute_type_texcoord:
         case cgltf_attribute_type_color:
-        case cgltf_attribute_type_joints:
-        case cgltf_attribute_type_weights:
         case cgltf_attribute_type_custom:
         case cgltf_attribute_type_invalid:
         default:
-#ifdef LOG_MISSING_ATTR
-            printf("attribute type: '%s' not supported, attr count: %zu\n", attr_type_str, attr->count);
+#ifdef LOG_UNHANDLED_ATTR
+            printf("attribute type: '%s' not supported\n", attr_name);
 #else
-            (void)attr_type_str;
+            (void)attr_name;
 #endif
         }
     }
@@ -147,9 +179,7 @@ bool load_indices(cgltf_primitive primitive, Mesh *mesh_out)
 {
     cgltf_accessor *attr = NULL;
     if ((attr = primitive.indices)) {
-        float *indices = (float *)attr->buffer_view->buffer->data +
-                                  attr->buffer_view->offset / sizeof(float) +
-                                  attr->offset / sizeof(float);
+        float *indices = GLTF_ATTR_PTR(attr, float);
         if (attr->component_type != cgltf_component_type_r_16u) {
             printf("received component type %d, must be r16u\n", attr->component_type);
             return false;
@@ -162,6 +192,39 @@ bool load_indices(cgltf_primitive primitive, Mesh *mesh_out)
     }
 
     return true;
+}
+
+void load_bones(cgltf_skin skin, Bones *bones)
+{
+    bones->count = skin.joints_count;
+    bones->parent_idxs = malloc(skin.joints_count * sizeof(*bones->parent_idxs));
+    bones->matrices = malloc(skin.joints_count * sizeof(Matrix));
+
+    for (size_t i = 0; i < skin.joints_count; i++) {
+        cgltf_node node = *skin.joints[i];
+
+        /* load the parent information */
+        bones->parent_idxs[i] = -1;
+        for (size_t j = 0; j < skin.joints_count; j++) {
+            if (skin.joints[i] == node.parent) {
+                bones->parent_idxs[i] = j;
+                break;
+            }
+        }
+
+        /* load each nodes local matrix */
+        memcpy(&bones->matrices[i], node.matrix, sizeof(Matrix));
+    }
+}
+
+void hierarchy_concat(Bones *bones)
+{
+    for (size_t i = 0; i < bones->count; i++) {
+        if (bones->parent_idxs[i] == (size_t)-1) {
+            if (bones->parent_idxs[i] > i) continue;
+            bones->matrices[i] = MatrixMultiply(bones->matrices[i], bones->matrices[bones->parent_idxs[i]]);
+        }
+    }
 }
 
 bool load_gltf(Model *model)
@@ -236,6 +299,15 @@ bool load_gltf(Model *model)
         nob_return_defer(false);
     }
 
+    /* load bones if we have exactly one skin */
+    if (data->skins_count == 1) {
+        cgltf_skin skin = data->skins[0];
+        load_bones(skin, &model->bones);
+        hierarchy_concat(&model->bones);
+    } else if (data->skins_count > 1) {
+        printf("skin count greater than one not being handled\n");
+    }
+
     /* load mesh data */
     model->mesh_count = primitive_count;
     model->meshes = calloc(primitive_count, sizeof(Mesh));
@@ -275,7 +347,11 @@ void unload_model(Model *model)
     for (size_t i = 0; i < model->mesh_count; i++) {
         free(model->meshes[i].vertices);
         free(model->meshes[i].indices);
+        free(model->meshes[i].bone_ids);
+        free(model->meshes[i].bone_weights);
     }
+    free(model->bones.matrices);
+    free(model->bones.parent_idxs);
     free(model->meshes);
 }
 
@@ -365,16 +441,19 @@ int main()
 
             /* draw model */
             Matrix mvp = {0};
-            if (!get_mvp(&mvp)) return 1;
-            float16 f16_mvp = MatrixToFloatV(mvp);
             for (size_t i = 0; i < robot.mesh_count; i++) {
-                Push_Const pk = {
-                    .mvp = f16_mvp,
-                    .color = robot.albedos[robot.mesh_albedo_idx[i]],
-                };
-                Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
-                Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
-                vk_draw_w_push_const(gfx_pl, gfx_pl_layout, vtx_buff, idx_buff, &pk, sizeof(pk));
+                push_matrix();
+                    add_matrix(robot.bones.matrices[i]);
+                    if (!get_mvp(&mvp)) return 1;
+                    float16 f16_mvp = MatrixToFloatV(mvp);
+                    Push_Const pk = {
+                        .mvp = f16_mvp,
+                        .color = robot.albedos[robot.mesh_albedo_idx[i]],
+                    };
+                    Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
+                    Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
+                    vk_draw_w_push_const(gfx_pl, gfx_pl_layout, vtx_buff, idx_buff, &pk, sizeof(pk));
+                pop_matrix();
             }
 
         end_mode_3d();

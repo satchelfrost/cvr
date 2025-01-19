@@ -290,6 +290,7 @@ void log_fps();
 /* transformations */
 void push_matrix();
 void pop_matrix();
+void add_matrix(Matrix matrix);
 void translate(float x, float y, float z);
 void rotate(Vector3 axis, float angle);
 void rotate_x(float angle);
