@@ -31,6 +31,9 @@ typedef struct {
 typedef struct {
     size_t *parent_idxs;
     Matrix *matrices;
+    Vector3 *translations;
+    Quaternion *rotations;
+    Vector3 *scales;
     size_t count;
 } Bones;
 
@@ -197,8 +200,11 @@ bool load_indices(cgltf_primitive primitive, Mesh *mesh_out)
 void load_bones(cgltf_skin skin, Bones *bones)
 {
     bones->count = skin.joints_count;
-    bones->parent_idxs = malloc(skin.joints_count * sizeof(*bones->parent_idxs));
-    bones->matrices = malloc(skin.joints_count * sizeof(Matrix));
+    bones->parent_idxs  = malloc(skin.joints_count * sizeof(*bones->parent_idxs));
+    bones->matrices     = malloc(skin.joints_count * sizeof(Matrix));
+    bones->scales       = malloc(skin.joints_count * sizeof(Vector3));
+    bones->translations = malloc(skin.joints_count * sizeof(Vector3));
+    bones->rotations    = malloc(skin.joints_count * sizeof(Quaternion));
 
     for (size_t i = 0; i < skin.joints_count; i++) {
         cgltf_node node = *skin.joints[i];
@@ -214,6 +220,9 @@ void load_bones(cgltf_skin skin, Bones *bones)
 
         /* load each nodes local matrix */
         memcpy(&bones->matrices[i], node.matrix, sizeof(Matrix));
+        memcpy(&bones->scales[i], node.scale, sizeof(Vector3));
+        memcpy(&bones->rotations[i], node.rotation, sizeof(Quaternion));
+        memcpy(&bones->translations[i], node.translation, sizeof(Vector3));
     }
 }
 
@@ -223,6 +232,10 @@ void hierarchy_concat(Bones *bones)
         if (bones->parent_idxs[i] == (size_t)-1) {
             if (bones->parent_idxs[i] > i) continue;
             bones->matrices[i] = MatrixMultiply(bones->matrices[i], bones->matrices[bones->parent_idxs[i]]);
+            bones->rotations[i] = QuaternionMultiply(bones->rotations[bones->parent_idxs[i]], bones->rotations[i]);
+            bones->translations[i] = Vector3RotateByQuaternion(bones->translations[i], bones->rotations[bones->parent_idxs[i]]);
+            bones->translations[i] = Vector3Add(bones->translations[i], bones->translations[bones->parent_idxs[i]]);
+            bones->scales[i] = Vector3Multiply(bones->scales[i], bones->scales[bones->parent_idxs[i]]);
         }
     }
 }
@@ -351,6 +364,9 @@ void unload_model(Model *model)
         free(model->meshes[i].bone_weights);
     }
     free(model->bones.matrices);
+    free(model->bones.rotations);
+    free(model->bones.scales);
+    free(model->bones.translations);
     free(model->bones.parent_idxs);
     free(model->meshes);
 }
