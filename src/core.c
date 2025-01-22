@@ -6,6 +6,10 @@
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include <time.h>     // used by nanosleep
 #include "geometry.h" // defines some default primitives
 
@@ -584,6 +588,14 @@ float get_gamepad_axis_movement(int axis)
 int get_last_btn_pressed()
 {
     return gamepad.last_button_pressed;
+}
+
+void add_matrix(Matrix matrix)
+{
+    if (mat_stack_p > 0)
+        mat_stack[mat_stack_p - 1] = MatrixMultiply(matrix, mat_stack[mat_stack_p - 1]);
+    else
+        vk_log(VK_ERROR, "no matrix available on current stack");
 }
 
 void translate(float x, float y, float z)

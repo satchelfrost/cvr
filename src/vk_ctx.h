@@ -154,6 +154,7 @@ bool vk_ubo_map(Vk_Buffer *buff);
 bool vk_begin_drawing(); /* Begins recording drawing commands */
 bool vk_end_drawing();   /* Submits drawing commands. */
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
+void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size);
 void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
@@ -287,6 +288,12 @@ bool vk_sampler_init(VkSampler *sampler);
         }                                                                               \
                                                                                         \
         (da)->items[(da)->count++] = (item);                                            \
+    } while (0)
+
+#define vk_da_resize(da, new_size)                                                    \
+    do {                                                                              \
+        (da)->capacity = (da)->count = new_size;                                      \
+        (da)->items = VK_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); \
     } while (0)
 
 #define vk_da_append_many(da, new_items, new_items_count)                                   \
@@ -698,8 +705,7 @@ bool vk_swapchain_init()
     if (VK_SUCCEEDED(vkCreateSwapchainKHR(vk_ctx.device, &swapchain_ci, NULL, &vk_ctx.swapchain.handle))) {
         uint32_t img_count = 0;
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, NULL);
-        vk_ctx.swapchain.imgs.items = VK_REALLOC(vk_ctx.swapchain.imgs.items, img_count * sizeof(VkImage));
-        vk_ctx.swapchain.imgs.count = img_count;
+        vk_da_resize(&vk_ctx.swapchain.imgs, img_count);
         vkGetSwapchainImagesKHR(vk_ctx.device, vk_ctx.swapchain.handle, &img_count, vk_ctx.swapchain.imgs.items);
         return true;
     } else {
@@ -732,8 +738,8 @@ bool vk_img_view_init(Vk_Image img, VkImageView *img_view)
 
 bool vk_img_views_init()
 {
-    for (size_t i = 0; i < vk_ctx.swapchain.imgs.count; i++)  {
-        vk_da_append(&vk_ctx.swapchain.img_views, VK_NULL_HANDLE);
+    vk_da_resize(&vk_ctx.swapchain.img_views, vk_ctx.swapchain.imgs.count);
+    for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++)  {
         Vk_Image img = {
             .handle = vk_ctx.swapchain.imgs.items[i],
             .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1084,8 +1090,8 @@ bool vk_render_pass_init()
 
 bool vk_frame_buffs_init()
 {
+    vk_da_resize(&vk_ctx.swapchain.frame_buffs, vk_ctx.swapchain.img_views.count);
     for (size_t i = 0; i < vk_ctx.swapchain.img_views.count; i++) {
-        vk_da_append(&vk_ctx.swapchain.frame_buffs, VK_NULL_HANDLE);
         VkImageView attachments[] = {vk_ctx.swapchain.img_views.items[i], vk_ctx.depth_img_view};
         VkFramebufferCreateInfo frame_buff_ci = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
@@ -1146,6 +1152,26 @@ void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_B
     vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
     vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
+    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+}
+
+void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size)
+{
+    VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    VkViewport viewport = {
+        .width = (float)vk_ctx.extent.width,
+        .height =(float)vk_ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    VkRect2D scissor = {.extent = vk_ctx.extent};
+    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pk_size, pk);
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 }
 

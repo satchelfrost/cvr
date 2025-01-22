@@ -13,3 +13,5 @@ out.png
 *.mpg
 tags
 *.keystore
+*.glb
+*.gltf

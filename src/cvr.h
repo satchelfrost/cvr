@@ -215,16 +215,6 @@ typedef enum {
     ORTHOGRAPHIC
 } Camera_Projection;
 
-// #if !defined(RL_VECTOR3_TYPE)
-// typedef struct {
-//     float x;
-//     float y;
-//     float z;
-// } Vector3;
-// #define RL_VECTOR3_TYPE
-// #endif
-
-// #define CVR_CAMERA
 typedef struct {
     Vector3 position;
     Vector3 target;
@@ -233,7 +223,6 @@ typedef struct {
     int projection;
 } Camera;
 
-// #define SHAPE_TYPE
 typedef enum {
     SHAPE_CUBE = 0,
     SHAPE_QUAD,
@@ -241,23 +230,6 @@ typedef enum {
     SHAPE_CAM,
     SHAPE_COUNT,
 } Shape_Type;
-
-// #if !defined(RL_MATRIX_TYPE)
-// typedef struct {
-//     float m0, m4, m8, m12;
-//     float m1, m5, m9, m13;
-//     float m2, m6, m10, m14;
-//     float m3, m7, m11, m15;
-// } Matrix;
-// #define RL_MATRIX_TYPE
-// #endif
-//
-// #if !defined(RL_FLOAT_16)
-// typedef struct {
-//     float v[16];
-// } float16;
-// #define RL_FLOAT_16
-// #endif
 
 typedef struct {
     int width;
@@ -318,6 +290,7 @@ void log_fps();
 /* transformations */
 void push_matrix();
 void pop_matrix();
+void add_matrix(Matrix matrix);
 void translate(float x, float y, float z);
 void rotate(Vector3 axis, float angle);
 void rotate_x(float angle);
