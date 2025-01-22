@@ -1,2 +1,1 @@
-src/ext/vulkan/* linguist-vendored
-src/ext/openxr/* linguist-vendored
+src/ext/** linguist-vendored
