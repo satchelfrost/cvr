@@ -1,4 +1,1 @@
-*.c linguist-language=C
-*.h linguist-language=C
 src/ext/* linguist-vendored
-
