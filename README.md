@@ -6,7 +6,7 @@ but with a Vulkan twist. Essentially, it's a basic renderer I use in my research
 The header [vk_ctx.h](src/vk_ctx.h) is meant to be a header-only-ish library that will work outside of cvr.
 I say "ish", because it does rely on linkage with glfw, but in the future I want to make this optional.
 cvr is essentially a few extra conveniences around vk_ctx.h (e.g. a matrix stack, frame timer, a 
-few simple primitives etc.).
+few simple primitives etc.). However, if you are a minimalist, check out the [header only example](header-only-example).
 
 Some examples are going to look familiar to users of raylib like [3d-primitives](examples/3d-primitives/main.c),
 whereas other more complicated ones like [point-raster](examples/point-raster/main.c) are going to be more familiar
