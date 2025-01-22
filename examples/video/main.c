@@ -1,9 +1,18 @@
+/*
+ * This example decodes four videos on one thread,
+ * and renders them on a seperate thread. The result
+ * gets displayed on four quads.
+ *
+ * assets:
+ * https://phoboslab.org/files/bjork-all-is-full-of-love.mpg
+ * */
+
 #include "cvr.h"
 #include <pthread.h>
 #include "geometry.h"
 
 #define PL_MPEG_IMPLEMENTATION
-#include "ext/pl_mpeg.h"
+#include "ext/pl_mpeg.h"     // https://github.com/phoboslab/pl_mpeg
 
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
@@ -11,7 +20,7 @@
 #define FACTOR 50
 #define WIDTH  (16 * FACTOR)
 #define HEIGHT (9 * FACTOR)
-#define DUAL_THREADED     // disabling reverts to a single thread
+#define DUAL_THREADED        // disabling reverts to a single thread
 // #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
 // #define HIGH_RES          // high-res vs. low res videos
 
@@ -22,27 +31,7 @@ typedef enum {
     VIDEO_PLANE_COUNT,
 } Video_Plane_Type;
 
-typedef enum {
-    VIDEO_IDX_SUITE_E,
-    VIDEO_IDX_SUITE_W,
-    VIDEO_IDX_SUITE_NW,
-    VIDEO_IDX_SUITE_SE,
-    VIDEO_IDX_COUNT,
-} Video_Idx;
-
-const char *video_names[] = {
-#ifdef HIGH_RES
-    "suite_e_1280x960",
-    "suite_nw_1280x720",
-    "suite_se_1280x720",
-    "suite_w_1280x960",
-#else
-    "suite_e_960x720",
-    "suite_nw_960x540",
-    "suite_se_960x540",
-    "suite_w_960x720",
-#endif
-};
+#define VIDEO_IDX_COUNT 4
 
 typedef struct {
     Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
@@ -72,7 +61,7 @@ typedef struct {
 
 Video_Queue video_queue = {0};
 
-bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
+bool update_video_texture(void *data, size_t vid_idx, Video_Plane_Type vid_plane_type);
 
 void video_queue_init()
 {
@@ -260,7 +249,7 @@ bool setup_ds_sets()
     return true;
 }
 
-bool init_video_texture(void *data, int width, int height, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+bool init_video_texture(void *data, int width, int height, size_t vid_idx, Video_Plane_Type vid_plane_type)
 {
     bool result = true;
 
@@ -315,7 +304,7 @@ bool init_video_texture(void *data, int width, int height, Video_Idx vid_idx, Vi
     return true;
 }
 
-bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
+bool update_video_texture(void *data, size_t vid_idx, Video_Plane_Type vid_plane_type)
 {
     bool result = true;
 
@@ -405,8 +394,7 @@ int main()
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        const char *file_name = nob_temp_sprintf("res/%s.mpg", video_names[i]);
-        // const char *file_name = "res/bjork-all-is-full-of-love.mpg";
+        const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
             vk_log(VK_ERROR, "could not open file %s", file_name);
@@ -455,7 +443,7 @@ int main()
 
     float vid_update_time = 0.0f;
     bool playback_finished = false;
-    bool playing = false;
+    bool playing = true;
 
     while(!window_should_close() && !playback_finished) {
         /* update */

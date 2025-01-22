@@ -157,27 +157,6 @@ static Example examples[] = {
         .supported_targets[TARGET_LINUX] = true,
     },
     {
-        .name = "arena-point-primitive",
-        .shaders = {
-            .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "point-cloud.vert",
-                "point-cloud.frag",
-                "texture.vert",
-                "texture.frag"
-            },
-            .count = 6
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-        .supported_targets[TARGET_LINUX] = true,
-        .supported_targets[TARGET_WINDOWS] = true,
-        .private = true,
-    },
-    {
         .name = "compute",
         .shaders = {
             .names = (const char *[]) {
@@ -251,7 +230,6 @@ static Example examples[] = {
         },
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
-        .private = true,
     },
     {
         .name = "gltf",

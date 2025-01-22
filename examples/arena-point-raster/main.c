@@ -8,7 +8,7 @@
 #include "ext/pl_mpeg.h"
 
 #define MAX_FPS_REC 100
-#define WORK_GROUP_SZ 1024    // Subgroup size for render.comp
+#define WORK_GROUP_SZ 1024  // Workgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
 #define MAX_LOD 7
 #define NUM_CCTVS 4

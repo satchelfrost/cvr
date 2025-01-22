@@ -1,7 +1,18 @@
+/*
+ * This example renders a simple gltf. Please note:
+ * this is not a generic gltf loader/renderer. It's
+ * highly specific to the asset used; which, can
+ * be found here:
+ *
+ * https://github.com/raysan5/raylib/blob/master/examples/models/resources/models/gltf/robot.glb
+ *
+ * Also, animations aren't currently working :/
+ * */
+
 #include "cvr.h"
 
 #define CGLTF_IMPLEMENTATION
-#include "ext/cgltf.h"
+#include "ext/cgltf.h" // https://github.com/jkuhlmann/cgltf
 
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
@@ -20,7 +31,6 @@ typedef struct {
 
 typedef struct {
     Gltf_Vertex *vertices;
-    // Gltf_Vertex *anim_vertices;
     unsigned short *indices;
     Vk_Buffer vtx_buff;
     Vk_Buffer idx_buff;
