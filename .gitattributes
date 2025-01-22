@@ -1,3 +1,4 @@
-src/ext/* linguist-vendored
+src/ext/vulkan/* linguist-vendored
+src/ext/openxr/* linguist-vendored
 *.cppm linguist-vendored
 *.hpp linguist-vendored
