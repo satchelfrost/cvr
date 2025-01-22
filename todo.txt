@@ -1,3 +1,0 @@
-* need to create an openxr header only file
-* need to pull out (or at least toggle) glfw dependency from vk_ctx.h
-

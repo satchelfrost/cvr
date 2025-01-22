@@ -12,6 +12,9 @@ Some examples are going to look familiar to users of raylib like [3d-primitives]
 whereas other more complicated ones like [point-raster](examples/point-raster/main.c) are going to be more familiar
 to the avid Vulkan user.
 
+> **Note:** The `lib` folder is only used for cross-compiling to windows. Also, the `ext` folder is synonymous
+to third party.
+
 ## Building on Linux
 
 ### Install libraries
@@ -58,22 +61,23 @@ Not yet supported.
 
 ## Additional flags
 
-Specify build target flag, requires that the proper cross-compilers are installed (e.g. x86_64-w64-mingw32-gcc).
-See [nob.c](nob.c) for details.
+Specify build target flag (`-t`), requires that the proper cross-compilers are installed (e.g. x86_64-w64-mingw32-gcc).
+Note that the quest target doesn't work yet.
+
 e.g. usage
 
 ```bash
 ./nob -e 3d-primitives -t windows
 ```
 
-Debug launch (gf2), uses gf2 and expects it to be in your path.
+Debug launch flag (`-g`), uses gf2 and expects it to be in your path.
 e.g. usage
 
 ```bash
-./nob -ed 3d-primitives
+./nob -eg 3d-primitives
 ```
 
-Renderdoc launch, expects renderdoccmd to be in your path. You
+Renderdoc launch (`-r`), expects renderdoccmd to be in your path.
 e.g. usage
 
 ```bash
