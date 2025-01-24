@@ -24,11 +24,26 @@ void main()
 
     ivec2 pixel_coords = ivec2(id);
     int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
+    int pixel_id_above = pixel_id;
+    if (pixel_coords.y - 1 >= 0)
+        pixel_id_above = pixel_coords.x + (pixel_coords.y - 1) * img_size.x;
 
-    vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
-    uint tmp_color = uint(frame_buff[pixel_id] & 0x00FFFFFFUL);
-    if (tmp_color != 0)
-        color = vec4(unpackUnorm4x8(tmp_color));
+    vec3 normal          = vec3(0.0, 0.0, 1.0);
+    vec4 color           = vec4(0.0, 0.0, 0.0, 1.0);
+    uint tmp_color       = uint(frame_buff[pixel_id] & 0x00FFFFFFUL);
+    uint tmp_depth       = uint(frame_buff[pixel_id] >> 32);
+    uint tmp_depth_above = uint(frame_buff[pixel_id_above] >> 32);
+    float depth          = uintBitsToFloat(tmp_depth);
+    float depth_above    = uintBitsToFloat(tmp_depth_above);
+    float dy             = max(depth_above - depth, 0.0);
+    normal.g             = dy * 0.5 + 0.5;
+
+    normal               = normalize(normal);
+    color.rgb            = normal;
+
+
+    //if (tmp_color != 0)
+    //    color = vec4(unpackUnorm4x8(tmp_color));
 
     imageStore(out_img, pixel_coords, color);
     frame_buff[pixel_id] = 0xffffffffff444418UL;
