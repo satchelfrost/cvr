@@ -249,6 +249,18 @@ static Example examples[] = {
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
     },
+    {
+        .name = "mixed-raster",
+        .shaders = {
+            .names = default_shader_names,
+            .count = NOB_ARRAY_LEN(default_shader_names)
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+        .supported_targets[TARGET_LINUX] = true,
+    },
 };
 
 typedef struct {
