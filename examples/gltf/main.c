@@ -63,8 +63,6 @@ typedef struct {
 
 VkPipeline gfx_pl;
 VkPipelineLayout gfx_pl_layout;
-VkDescriptorSetLayout ds_layout_ubo;
-VkDescriptorSet ds_ubo;
 VkDescriptorPool pool;
 
 const char *cgltf_res_to_str(cgltf_result res)
@@ -454,35 +452,37 @@ int main()
         update_camera_free(&camera);
 
         begin_drawing(PURPLE);
-        begin_mode_3d(camera);
-            for (size_t i = 0; i < 6; i++) {
-                push_matrix();
-                    rotate_y(dt + (float)i);
-                    translate(2.0, 0.0, 0.0);
-                    draw_shape_wireframe(SHAPE_CUBE);
-                pop_matrix();
-            }
+            begin_mode_3d(camera);
+                for (size_t i = 0; i < 6; i++) {
+                    push_matrix();
+                        rotate_y(dt + (float)i);
+                        translate(2.0, 0.0, 0.0);
+                        draw_shape_wireframe(SHAPE_CUBE);
+                    pop_matrix();
+                }
 
-            scale(1.0, (sin(2.0f * dt) * 0.5 + 0.5) * 0.2 + 1.0, 1.0);
+                scale(1.0, (sin(2.0f * dt) * 0.5 + 0.5) * 0.2 + 1.0, 1.0);
 
-            /* draw model */
-            Matrix mvp = {0};
-            for (size_t i = 0; i < robot.mesh_count; i++) {
-                push_matrix();
-                    add_matrix(robot.bones.matrices[i]);
-                    if (!get_mvp(&mvp)) return 1;
-                    float16 f16_mvp = MatrixToFloatV(mvp);
-                    Push_Const pk = {
-                        .mvp = f16_mvp,
-                        .color = robot.albedos[robot.mesh_albedo_idx[i]],
-                    };
-                    Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
-                    Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
-                    vk_draw_w_push_const(gfx_pl, gfx_pl_layout, vtx_buff, idx_buff, &pk, sizeof(pk));
-                pop_matrix();
-            }
+                /* draw model */
+                vk_bind_gfx(gfx_pl, gfx_pl_layout, NULL, 0);
+                Matrix mvp = {0};
+                for (size_t i = 0; i < robot.mesh_count; i++) {
+                    push_matrix();
+                        add_matrix(robot.bones.matrices[i]);
+                        if (!get_mvp(&mvp)) return 1;
+                        float16 f16_mvp = MatrixToFloatV(mvp);
+                        Push_Const pk = {
+                            .mvp = f16_mvp,
+                            .color = robot.albedos[robot.mesh_albedo_idx[i]],
+                        };
+                        Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
+                        Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
+                        vk_push_const(gfx_pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(Push_Const), &pk);
+                        vk_draw_buffers(vtx_buff, idx_buff);
+                    pop_matrix();
+                }
 
-        end_mode_3d();
+            end_mode_3d();
         end_drawing();
     }
 

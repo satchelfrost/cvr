@@ -151,11 +151,12 @@ bool vk_ubo_init(Vk_Buffer *buff);
 void vk_ubo_unmap(Vk_Buffer *buff);
 bool vk_ubo_map(Vk_Buffer *buff);
 
-bool vk_begin_drawing(); /* Begins recording drawing commands */
-bool vk_end_drawing();   /* Submits drawing commands. */
+bool vk_wait_to_begin_gfx();
+bool vk_begin_rec_gfx();
+
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
-void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size);
-void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
+void vk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
+void vk_draw_buffers(Vk_Buffer vtx_buff, Vk_Buffer idx_buff);
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
@@ -164,7 +165,7 @@ bool vk_submit_compute();
 bool vk_compute_fence_wait();
 bool vk_end_rec_compute();
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
-void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value);
+void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value);
 void vk_compute_pl_barrier();
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -265,6 +266,9 @@ bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t
 
 
 void vk_begin_render_pass(float r, float g, float b, float a);
+void vk_end_render_pass();
+bool vk_submit_gfx();
+bool vk_end_rec_gfx();
 
 int format_to_size(VkFormat fmt);
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -1135,8 +1139,79 @@ void vk_begin_render_pass(float r, float g, float b, float a)
     vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
+void vk_end_render_pass()
+{
+    vkCmdEndRenderPass(vk_ctx.gfx_buff);
+}
+
+bool vk_end_rec_gfx()
+{
+    VkResult res = vkEndCommandBuffer(vk_ctx.gfx_buff);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to record command buffer");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_submit_gfx()
+{
+    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags wait_stages[] = {
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
+    VkSemaphore wait_sems[] = {vk_ctx.compute_fin_sem, vk_ctx.img_avail_sem};
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &vk_ctx.gfx_buff,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &vk_ctx.render_fin_sem,
+        // .waitSemaphoreCount = 1,
+        // .pWaitSemaphores = &vk_ctx.img_avail_sem,
+        // .pWaitDstStageMask = &wait_stage,
+
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &wait_sems[1],
+        .pWaitDstStageMask = &wait_stages[1],
+
+        // .waitSemaphoreCount = 2,
+        // .pWaitSemaphores = wait_sems,
+        // .pWaitDstStageMask = wait_stages,
+    };
+
+    VkResult res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to submit to graphics queue");
+        return false;
+    }
+
+    VkPresentInfoKHR present = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &vk_ctx.render_fin_sem,
+        .swapchainCount = 1,
+        .pSwapchains = &vk_ctx.swapchain.handle,
+        .pImageIndices = &img_idx,
+    };
+    res = vkQueuePresentKHR(vk_ctx.present_queue, &present);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || vk_ctx.swapchain.buff_resized) {
+        vk_ctx.swapchain.buff_resized = false;
+        if (!vk_recreate_swapchain()) return false;
+    } else if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to present queue");
+        return false;
+    }
+
+    return true;
+}
+
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp)
 {
+    assert(0 && "vk_draw deprecated");
+
     VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
@@ -1155,46 +1230,33 @@ void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_B
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 }
 
-void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size)
+void vk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count)
 {
-    VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    VkViewport viewport = {
-        .width = (float)vk_ctx.extent.width,
-        .height =(float)vk_ctx.extent.height,
-        .maxDepth = 1.0f,
-    };
-    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
-    VkRect2D scissor = {.extent = vk_ctx.extent};
-    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    VkCommandBuffer cmd_buff = vk_ctx.gfx_buff;
 
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pk_size, pk);
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
-}
-
-void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp)
-{
-    VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
-
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    vkCmdBindDescriptorSets(vk_ctx.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);
+    vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
         .width    = vk_ctx.extent.width,
         .height   = vk_ctx.extent.height,
         .maxDepth = 1.0f,
     };
-    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    vkCmdSetViewport(cmd_buff, 0, 1, &viewport);
     VkRect2D scissor = {0};
     scissor.extent = vk_ctx.extent;
-    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    vkCmdSetScissor(cmd_buff, 0, 1, &scissor);
+
+    /* bind descriptor sets */
+    for (size_t i = 0; i < ds_count; i++)
+        vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, i, 1, &ds[i], 0, NULL);
+}
+
+void vk_draw_buffers(Vk_Buffer vtx_buff, Vk_Buffer idx_buff)
+{
+    VkCommandBuffer cmd_buff = vk_ctx.gfx_buff;
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buff, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(cmd_buff, idx_buff.count, 1, 0, 0, 0);
 }
 
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
@@ -1204,10 +1266,10 @@ void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, s
     vkCmdDispatch(vk_ctx.compute_buff, x, y, z);
 }
 
-void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value)
+void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value)
 {
     VkCommandBuffer cmd_buff = (flags == VK_SHADER_STAGE_COMPUTE_BIT) ? vk_ctx.compute_buff : vk_ctx.gfx_buff;
-    vkCmdPushConstants(cmd_buff, pl_layout, flags, offset, size, value);
+    vkCmdPushConstants(cmd_buff, pl_layout, flags, 0, size, value);
 }
 
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
@@ -1332,7 +1394,7 @@ void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipe
     vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
 }
 
-bool vk_begin_drawing()
+bool vk_wait_to_begin_gfx()
 {
     VkResult res = vkWaitForFences(vk_ctx.device, 1, &vk_ctx.gfx_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
@@ -1364,70 +1426,15 @@ bool vk_begin_drawing()
         return false;
     }
 
-    VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
-    res = vkBeginCommandBuffer(vk_ctx.gfx_buff, &begin_info);
-    if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR,"failed to begin command buffer");
-        return false;
-    }
-
     return true;
 }
 
-bool vk_end_drawing()
+bool vk_begin_rec_gfx()
 {
-    vkCmdEndRenderPass(vk_ctx.gfx_buff);
-    VkResult res = vkEndCommandBuffer(vk_ctx.gfx_buff);
+    VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
+    VkResult res = vkBeginCommandBuffer(vk_ctx.gfx_buff, &begin_info);
     if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR, "failed to record command buffer");
-        return false;
-    }
-
-    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkPipelineStageFlags wait_stages[] = {
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
-    VkSemaphore wait_sems[] = {vk_ctx.compute_fin_sem, vk_ctx.img_avail_sem};
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &vk_ctx.gfx_buff,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &vk_ctx.render_fin_sem,
-        // .waitSemaphoreCount = 1,
-        // .pWaitSemaphores = &vk_ctx.img_avail_sem,
-        // .pWaitDstStageMask = &wait_stage,
-
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &wait_sems[1],
-        .pWaitDstStageMask = &wait_stages[1],
-
-        // .waitSemaphoreCount = 2,
-        // .pWaitSemaphores = wait_sems,
-        // .pWaitDstStageMask = wait_stages,
-    };
-
-    res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
-    if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR, "failed to submit to graphics queue");
-        return false;
-    }
-
-    VkPresentInfoKHR present = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &vk_ctx.render_fin_sem,
-        .swapchainCount = 1,
-        .pSwapchains = &vk_ctx.swapchain.handle,
-        .pImageIndices = &img_idx,
-    };
-    res = vkQueuePresentKHR(vk_ctx.present_queue, &present);
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || vk_ctx.swapchain.buff_resized) {
-        vk_ctx.swapchain.buff_resized = false;
-        if (!vk_recreate_swapchain()) return false;
-    } else if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR, "failed to present queue");
+        vk_log(VK_ERROR, "failed to begin recording into the default gfx command buffer");
         return false;
     }
 

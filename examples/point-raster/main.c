@@ -206,7 +206,7 @@ bool build_compute_cmds(size_t point_cloud_count)
         size_t batch_size = group_x / NUM_BATCHES;
         for (size_t i = 0; i < NUM_BATCHES; i++) {
             uint32_t offset = i * batch_size * SUBGROUP_SZ;
-            vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+            vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), &offset);
             vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], batch_size, group_y, group_z);
         }
 
@@ -355,11 +355,12 @@ int main()
 
         /* draw command for screen space triangle (sst) */
         start_timer();
-        if (!vk_begin_drawing()) return 1;
+        if (!vk_wait_to_begin_gfx()) return 1;
+            vk_begin_rec_gfx();
             vk_raster_sampler_barrier(storage_tex.img.handle);
             vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-        end_drawing();
+        end_drawing(); // ends gfx rec commands and render pass
     }
 
     wait_idle();

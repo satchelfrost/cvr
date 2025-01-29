@@ -661,6 +661,11 @@ bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_pl
     return result;
 }
 
+typedef struct {
+    uint32_t offset;
+    uint32_t count;
+} Push_Const;
+
 bool build_compute_cmds(size_t highest_lod)
 {
     size_t group_x = 1, group_y = 1, group_z = 1;
@@ -671,10 +676,11 @@ bool build_compute_cmds(size_t highest_lod)
             group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
             size_t batch_size = group_x / NUM_BATCHES;
             for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
-                uint32_t offset = batch * batch_size * WORK_GROUP_SZ;
-                uint32_t count = pc_layers[lod].count;
-                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
-                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), sizeof(uint32_t), &count);
+                Push_Const pk = {
+                    .offset = batch * batch_size * WORK_GROUP_SZ,
+                    .count = pc_layers[lod].count,
+                };
+                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
                 vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
             }
         }
@@ -1082,11 +1088,12 @@ int main(int argc, char **argv)
 
         /* draw command for screen space triangle (sst) */
         start_timer();
-        if (!vk_begin_drawing()) return 1;
+        if (!vk_wait_to_begin_gfx()) return 1;
+            vk_begin_rec_gfx();
             vk_raster_sampler_barrier(storage_tex.img.handle);
             vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-        end_drawing();
+        end_drawing(); // ends gfx recording, renderpass, and submits
     }
 
     /* stop the video producer thread to avoid segfaults */
