@@ -252,8 +252,15 @@ static Example examples[] = {
     {
         .name = "mixed-raster",
         .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
+            .names = (const char *[]) {
+                "default.vert",
+                "default.frag",
+                "sst.vert",
+                "sst.frag",
+                "render.comp",
+                "resolve.comp",
+            },
+            .count = 6,
         },
         .c_files = {
             .names = default_c_file_names,

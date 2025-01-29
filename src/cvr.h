@@ -284,7 +284,7 @@ double get_time();
 int get_fps();
 int get_average_fps();
 void set_target_fps(int fps);
-void start_timer(); // called implicitly by begin_drawing
+void begin_timer();
 void log_fps();
 
 /* transformations */

@@ -3,9 +3,8 @@
 #define MAX_POINTS 100000000 // 100 million
 #define MIN_POINTS 100000    // 100 thousand
 #define FRAME_BUFF_SZ 2048
-#define MAX_FPS_REC 100
-#define SUBGROUP_SZ 1024     // Subgroup size for render.comp
-#define NUM_BATCHES 8        // Number of batches to dispatch
+#define WORKGROUP_SZ 1024
+#define NUM_BATCHES 8
 
 typedef unsigned int uint;
 typedef struct {
@@ -22,14 +21,6 @@ typedef struct {
     const size_t max;
     const size_t min;
 } Point_Cloud;
-
-typedef struct {
-    size_t *items;
-    size_t count;
-    size_t capacity;
-    const size_t max;
-    bool collecting;
-} FPS_Record;
 
 typedef struct {
     Vk_Buffer buff;
@@ -202,10 +193,10 @@ bool build_compute_cmds(size_t point_cloud_count)
     if (!vk_rec_compute()) return false;
 
         /* submit batches of points to render-compute shader */
-        group_x = point_cloud_count / SUBGROUP_SZ + 1;
+        group_x = point_cloud_count / WORKGROUP_SZ + 1;
         size_t batch_size = group_x / NUM_BATCHES;
         for (size_t i = 0; i < NUM_BATCHES; i++) {
-            uint32_t offset = i * batch_size * SUBGROUP_SZ;
+            uint32_t offset = i * batch_size * WORKGROUP_SZ;
             vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), &offset);
             vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], batch_size, group_y, group_z);
         }
@@ -257,7 +248,6 @@ int main()
     Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
-    FPS_Record record = {.max = MAX_FPS_REC};
 
     /* generate initial point cloud */
     size_t num_points = MIN_POINTS;

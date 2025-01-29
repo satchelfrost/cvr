@@ -1087,7 +1087,7 @@ int main(int argc, char **argv)
         end_mode_3d();
 
         /* draw command for screen space triangle (sst) */
-        start_timer();
+        begin_timer();
         if (!vk_wait_to_begin_gfx()) return 1;
             vk_begin_rec_gfx();
             vk_raster_sampler_barrier(storage_tex.img.handle);

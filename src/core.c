@@ -462,27 +462,15 @@ static void wait_time(double seconds)
     while (get_time() < destination_time) {}
 }
 
-void start_timer()
+void begin_timer()
 {
     cvr_time.curr   = get_time();
     cvr_time.update = cvr_time.curr - cvr_time.prev;
     cvr_time.prev   = cvr_time.curr;
 }
 
-void begin_drawing(Color color)
+void end_timer()
 {
-    start_timer();
-    vk_wait_to_begin_gfx();
-    vk_begin_rec_gfx();
-    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
-}
-
-void end_drawing()
-{
-    vk_end_render_pass();
-    vk_end_rec_gfx();
-    vk_submit_gfx();
-
     cvr_time.curr = get_time();
     cvr_time.draw = cvr_time.curr - cvr_time.prev;
     cvr_time.prev = cvr_time.curr;
@@ -497,8 +485,25 @@ void end_drawing()
         cvr_time.frame += wait;
     }
 
-    poll_input_events();
     cvr_time.frame_count++;
+}
+
+void begin_drawing(Color color)
+{
+    begin_timer();
+    vk_wait_to_begin_gfx();
+    vk_begin_rec_gfx();
+    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+}
+
+void end_drawing()
+{
+    vk_end_render_pass();
+    vk_end_rec_gfx();
+    vk_submit_gfx();
+
+    end_timer();
+    poll_input_events();
 }
 
 void push_matrix()
