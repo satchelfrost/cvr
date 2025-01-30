@@ -15,6 +15,8 @@ struct Vertex {
 
 layout(binding = 0) uniform uniform_data {
     mat4 mvp;
+    int width;
+    int height;
 } ubo;
 
 layout(std430, binding = 1) buffer vert_data {
@@ -36,7 +38,7 @@ void main()
     if (pos.w <= 0 || ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0)
         return;
 
-    ivec2 img_size = ivec2(2048, 2048);
+    ivec2 img_size = ivec2(ubo.width, ubo.height);
     vec2 img_pos = (ndc.xy * 0.5 + 0.5) * img_size;
 
     ivec2 pixel_coords = ivec2(img_pos);

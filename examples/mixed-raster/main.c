@@ -2,10 +2,12 @@
 
 #define MAX_POINTS 100000000 // 100 million
 #define MIN_POINTS 100000    // 100 thousand
-#define FRAME_BUFF_SZ 2048
 #define MAX_FPS_REC 100
 #define WORKGROUP_SZ 1024
+#define IMG_WORKGROUP_SZ 16
 #define NUM_BATCHES 8
+#define DEFAULT_WINDOW_WIDTH 1600
+#define DEFAULT_WINDOW_HEIGHT 900
 
 typedef unsigned int uint;
 typedef struct {
@@ -24,20 +26,14 @@ typedef struct {
 } Point_Cloud;
 
 typedef struct {
-    size_t *items;
-    size_t count;
-    size_t capacity;
-    const size_t max;
-    bool collecting;
-} FPS_Record;
-
-typedef struct {
     Vk_Buffer buff;
     void *data;
 } Frame_Buffer;
 
 typedef struct {
     float16 mvp;
+    int width;
+    int height;
 } UBO_Data;
 
 typedef struct {
@@ -54,9 +50,10 @@ typedef struct {
 
 /* pipelines */
 Pipeline prepass_gfx  = {0}; // 1) pre pass for 3d models / fixed function pipeline
-Pipeline comp_render  = {0}; // 2) compute shader rasterization
-Pipeline comp_resolve = {0}; // 3) resolve colors from compute shader raster
-Pipeline sst_gfx      = {0}; // 4) draw resolved colors to a screen space triangle
+Pipeline comp_mix     = {0}; // 2) combine the depth + color from prepass into one framebuff
+Pipeline comp_render  = {0}; // 3) compute shader rasterization
+Pipeline comp_resolve = {0}; // 4) resolve colors from compute shader raster
+Pipeline sst_gfx      = {0}; // 5) draw resolved colors to a screen space triangle
 VkDescriptorPool pool;
 
 void gen_points(size_t num_points, Point_Cloud *pc)
@@ -84,10 +81,10 @@ void gen_points(size_t num_points, Point_Cloud *pc)
     pc->buff.size  = pc->count * sizeof(*pc->items);
 }
 
-Frame_Buffer alloc_frame_buff()
+Frame_Buffer alloc_frame_buff(size_t width, size_t height)
 {
     Frame_Buffer frame = {0};
-    frame.buff.count = FRAME_BUFF_SZ * FRAME_BUFF_SZ;
+    frame.buff.count = width * height;
     frame.buff.size  = sizeof(uint64_t) * frame.buff.count;
     frame.data = malloc(frame.buff.size);
     return frame;
@@ -214,7 +211,8 @@ bool build_compute_cmds(size_t point_cloud_count)
         vk_compute_pl_barrier();
 
         /* resolve the frame buffer */
-        group_x = group_y = FRAME_BUFF_SZ / 16;
+        group_x = ceilf((float)DEFAULT_WINDOW_WIDTH  / IMG_WORKGROUP_SZ);
+        group_y = ceilf((float)DEFAULT_WINDOW_HEIGHT / IMG_WORKGROUP_SZ);
         vk_compute(comp_resolve.pl, comp_resolve.pl_layout, comp_resolve.ds, group_x, group_y, group_z);
 
     /* end recording compute commands */
@@ -236,18 +234,18 @@ bool create_pipelines()
 
     /* compute shader render pipeline */
     if (!vk_pl_layout_init(layout_ci, &comp_render.pl_layout))                                 return false;
-    if (!vk_compute_pl_init("./res/render.comp.spv", comp_render.pl_layout, &comp_render.pl))    return false;
+    if (!vk_compute_pl_init("./res/render.comp.spv", comp_render.pl_layout, &comp_render.pl))  return false;
 
     /* compute shader resolve pipeline */
     layout_ci.pSetLayouts = &comp_resolve.ds_layout;
     layout_ci.pushConstantRangeCount = 0;
-    if (!vk_pl_layout_init(layout_ci, &comp_resolve.pl_layout))                                return false;
+    if (!vk_pl_layout_init(layout_ci, &comp_resolve.pl_layout))                                  return false;
     if (!vk_compute_pl_init("./res/resolve.comp.spv", comp_resolve.pl_layout, &comp_resolve.pl)) return false;
 
     /* screen space triangle + frag image sampler for raster display */
     layout_ci.pSetLayouts = &sst_gfx.ds_layout;
-    if (!vk_pl_layout_init(layout_ci, &sst_gfx.pl_layout))                                       return false;
-    if (!vk_sst_pl_init(sst_gfx.pl_layout, &sst_gfx.pl))                                             return false;
+    if (!vk_pl_layout_init(layout_ci, &sst_gfx.pl_layout)) return false;
+    if (!vk_sst_pl_init(sst_gfx.pl_layout, &sst_gfx.pl))   return false;
 
     return true;
 }
@@ -255,17 +253,16 @@ bool create_pipelines()
 int main()
 {
     Point_Cloud pc = {.min = MIN_POINTS, .max = MAX_POINTS};
-    Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
-    Frame_Buffer frame = alloc_frame_buff();
+    Vk_Texture storage_tex = {.img.extent = {DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT}};
+    Frame_Buffer frame = alloc_frame_buff(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
-    FPS_Record record = {.max = MAX_FPS_REC};
 
     /* generate initial point cloud */
     size_t num_points = MIN_POINTS;
     gen_points(num_points, &pc);
 
     /* initialize window and Vulkan */
-    init_window(1600, 900, "compute based rasterization for a point cloud");
+    init_window(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "mixing rasterization with fixed function");
     Camera camera = {
         .position   = {10.0f, 10.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -331,26 +328,17 @@ int main()
             pc.pending_change = false;
         }
 
-        /* collect the frame rate */
-        if (record.collecting) {
-            vk_da_append(&record, get_fps());
-            if (record.count >= record.max) {
-                /* print results and reset */
-                size_t sum = 0;
-                for (size_t i = 0; i < record.count; i++) sum += record.items[i];
-                float ave = (float) sum / record.count;
-                vk_log(VK_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
-                record.count = 0;
-                record.collecting = false;
-            }
-        }
-
         /* submit compute commands */
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
             vk_compute_fence_wait();
-            if (get_mvp_float16(&ubo.data.mvp)) memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
-            else return 1;
+            if (get_mvp_float16(&ubo.data.mvp)) {
+                ubo.data.width  = DEFAULT_WINDOW_WIDTH;
+                ubo.data.height = DEFAULT_WINDOW_HEIGHT;
+                memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
+            } else {
+                return 1;
+            }
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
 
