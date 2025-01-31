@@ -123,7 +123,11 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
 bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
+bool vk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
+void vk_destroy_render_pass(VkRenderPass render_pass);
 bool vk_frame_buffs_init();
+bool vk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb);
+void vk_destroy_frame_buff(VkFramebuffer frame_buff);
 bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
@@ -1092,6 +1096,22 @@ bool vk_render_pass_init()
     }
 }
 
+
+bool vk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass)
+{
+    if (VK_SUCCEEDED(vkCreateRenderPass(vk_ctx.device, rp_create_info, NULL, render_pass))) {
+        return true;
+    } else {
+        vk_log(VK_ERROR, "failed when calling vkCreateRenderPass");
+        return false;
+    }
+}
+
+void vk_destroy_render_pass(VkRenderPass render_pass)
+{
+    vkDestroyRenderPass(vk_ctx.device, render_pass, NULL);
+}
+
 bool vk_frame_buffs_init()
 {
     vk_da_resize(&vk_ctx.swapchain.frame_buffs, vk_ctx.swapchain.img_views.count);
@@ -1113,6 +1133,30 @@ bool vk_frame_buffs_init()
     }
 
     return true;
+}
+
+bool vk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb)
+{
+    VkFramebufferCreateInfo frame_buff_ci = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = rp,
+        .attachmentCount = att_count,
+        .pAttachments = atts,
+        .width =  w,
+        .height = h,
+        .layers = 1,
+    };
+    if (!VK_SUCCEEDED(vkCreateFramebuffer(vk_ctx.device, &frame_buff_ci, NULL, fb))) {
+        vk_log(VK_ERROR, "failed to create frame buffer");
+        return false;
+    }
+
+    return true;
+}
+
+void vk_destroy_frame_buff(VkFramebuffer frame_buff)
+{
+    vkDestroyFramebuffer(vk_ctx.device, frame_buff, NULL);
 }
 
 void vk_begin_render_pass(float r, float g, float b, float a)

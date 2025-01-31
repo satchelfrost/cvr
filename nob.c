@@ -257,10 +257,11 @@ static Example examples[] = {
                 "default.frag",
                 "sst.vert",
                 "sst.frag",
+                "mix.comp",
                 "render.comp",
                 "resolve.comp",
             },
-            .count = 6,
+            .count = 7,
         },
         .c_files = {
             .names = default_c_file_names,
