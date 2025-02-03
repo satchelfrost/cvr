@@ -17,15 +17,14 @@ typedef struct {
 typedef struct {
     Vector3 pos;
     Vector3 color;
-    Vector2 tex_coord;
 } Vertex; 
 
 #define QUAD_VERT_COUNT 4
 const Vertex quad_verts[QUAD_VERT_COUNT] = {
-    {{-0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{ 0.5f,  0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{ 0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+    {{-0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f,  0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+    {{ 0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
 };
 
 #define QUAD_IDX_COUNT 6
@@ -33,44 +32,26 @@ const uint16_t quad_indices[QUAD_IDX_COUNT] = {
     0, 1, 2, 2, 3, 0
 };
 
-/* for now we just hard code the identity matrix */
-float ident[16] = { 1.0f, 0.0f, 0.0f, 0.0f,
-                    0.0f, 1.0f, 0.0f, 0.0f,
-                    0.0f, 0.0f, 1.0f, 0.0f,
-                    0.0f, 0.0f, 0.0f, 1.0f };
-
 VkPipeline gfx_pl;
 VkPipelineLayout gfx_pl_layout;
 
 bool create_pipeline()
 {
     /* create pipeline layout */
-    VkPushConstantRange pk_range = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .size = sizeof(ident),
-    };
-    VkPipelineLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pk_range,
-    };
+    VkPipelineLayoutCreateInfo layout_ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
         {
             .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .location = 0,
             .offset = offsetof(Vertex, pos),
         },
         {
-            .location = 1,
             .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .location = 1,
             .offset = offsetof(Vertex, color),
-        },
-        {
-            .location = 2,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = offsetof(Vertex, tex_coord),
         },
     };
     VkVertexInputBindingDescription vert_bindings = {
@@ -117,14 +98,20 @@ int main()
     if (!vk_vtx_buff_upload(&quad_vtx_buff, quad_verts))   return 1;
     if (!vk_idx_buff_upload(&quad_idx_buff, quad_indices)) return 1;
 
-    while (!glfwWindowShouldClose(platform.handle)) {
-        glfwPollEvents();
+    int esc = 0;
+    do {
+        vk_wait_to_begin_gfx();
+            vk_begin_rec_gfx();
+                vk_begin_render_pass(0.0, 1.0, 1.0, 1.0);
+                    vk_bind_gfx(gfx_pl, gfx_pl_layout, NULL, 0);
+                    vk_draw_buffers(quad_vtx_buff, quad_idx_buff);
+                vk_end_render_pass();
+            vk_end_rec_gfx();
+        vk_submit_gfx();
 
-        vk_begin_drawing();
-        vk_begin_render_pass(0.0, 1.0, 1.0, 1.0);
-            vk_draw(gfx_pl, gfx_pl_layout, quad_vtx_buff, quad_idx_buff, &ident);
-        vk_end_drawing();
-    }
+        glfwPollEvents();
+        esc = glfwGetKey(platform.handle, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+    } while (!esc && !glfwWindowShouldClose(platform.handle));
 
     /* cleanup */
     vkDeviceWaitIdle(vk_ctx.device);

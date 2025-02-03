@@ -157,6 +157,10 @@ bool vk_ubo_map(Vk_Buffer *buff);
 
 bool vk_wait_to_begin_gfx();
 bool vk_begin_rec_gfx();
+bool vk_end_rec_gfx();
+void vk_begin_render_pass(float r, float g, float b, float a);
+void vk_end_render_pass();
+bool vk_submit_gfx();
 
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
 void vk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
@@ -267,12 +271,6 @@ bool is_device_suitable(VkPhysicalDevice phys_device);
 bool pick_phys_device();
 void cleanup_swapchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
-
-
-void vk_begin_render_pass(float r, float g, float b, float a);
-void vk_end_render_pass();
-bool vk_submit_gfx();
-bool vk_end_rec_gfx();
 
 int format_to_size(VkFormat fmt);
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
