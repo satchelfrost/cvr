@@ -10,7 +10,7 @@
 #define MAX_FPS_REC 100
 #define WORK_GROUP_SZ 1024  // Workgroup size for render.comp
 #define NUM_BATCHES 4       // Number of batches to dispatch
-#define MAX_LOD 7
+#define LOD_COUNT 7
 #define NUM_CCTVS 4
 // #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
 
@@ -24,6 +24,16 @@
         sv.data  += sizeof(attr);             \
         sv.count -= sizeof(attr);             \
     } while(0)
+
+typedef struct {
+    char *program;
+    int x_pos;
+    int y_pos;
+    int width;
+    int height;
+    bool fullscreen;
+    int highest_lod;
+} Config;
 
 typedef unsigned int uint;
 typedef struct {
@@ -158,7 +168,7 @@ VkDescriptorPool pool;
 VkDescriptorSet cs_resolve_ds;
 VkDescriptorSet gfx_sst; // screen space triangle
 
-Point_Cloud_Layer pc_layers[MAX_LOD] = {
+Point_Cloud_Layer pc_layers[LOD_COUNT] = {
     {.name = "res/arena_5060224_f32.vtx"},
     {.name = "res/arena_10120447_f32.vtx"},
     {.name = "res/arena_20240893_f32.vtx"},
@@ -488,12 +498,12 @@ bool setup_ds_layouts()
 
 bool setup_ds_pool()
 {
-     /* 1 in sst.frag + 12 in render.comp * MAX_LOD */
-    size_t sampler_count = 1 + VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT * MAX_LOD;
+     /* 1 in sst.frag + 12 in render.comp * LOD_COUNT */
+    size_t sampler_count = 1 + VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT * LOD_COUNT;
 
     VkDescriptorPoolSize pool_sizes[] = {
         {DS_POOL(UNIFORM_BUFFER, 1)},                    // 1 in render.comp
-        {DS_POOL(STORAGE_BUFFER, 3 * MAX_LOD)},          // (2 in render.comp + 1 in resolve.comp) * MAX_LOD
+        {DS_POOL(STORAGE_BUFFER, 3 * LOD_COUNT)},          // (2 in render.comp + 1 in resolve.comp) * LOD_COUNT
         {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count)},
         {DS_POOL(STORAGE_IMAGE, 1)},                     // 1 in resolve.comp
     };
@@ -502,7 +512,7 @@ bool setup_ds_pool()
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = VK_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
-        .maxSets = 2 + MAX_LOD, // compute shader resolve, graphics sst, compute shader render (x MAX_LOD)
+        .maxSets = 2 + LOD_COUNT, // compute shader resolve, graphics sst, compute shader render (x LOD_COUNT)
     };
 
     if (!vk_create_ds_pool(pool_ci, &pool)) return false;
@@ -869,31 +879,114 @@ Camera cameras[] = {
 
 Camera camera_defaults[4] = {0};
 
+void log_usage(const char *program)
+{
+    vk_log(VK_INFO, "usage: %s <flags> <optional_input>", program);
+    vk_log(VK_INFO, "    --help");
+    vk_log(VK_INFO, "    --fullscreen");
+    vk_log(VK_INFO, "    --log_controls");
+    vk_log(VK_INFO, "    --width       <integer>");
+    vk_log(VK_INFO, "    --height      <integer>");
+    vk_log(VK_INFO, "    --x_pos       <integer>");
+    vk_log(VK_INFO, "    --y_pos       <integer>");
+    vk_log(VK_INFO, "    --highest_lod <integer> (renders all lods up to highest lod; [0, 6])");
+}
+
+bool handle_usr_cmds(int argc, char **argv, Config *out_config)
+{
+    out_config->program = nob_shift_args(&argc, &argv);
+    out_config->width = 1600;
+    out_config->height = 900;
+    while(argc > 0) {
+        char *flag = nob_shift_args(&argc, &argv);
+        if (strcmp("--fullscreen", flag) == 0) {
+            out_config->fullscreen = true;
+        } else if (strcmp("--width", flag) == 0) {
+            if (argc == 0) {
+                vk_log(VK_ERROR, "expected a width after '--width' flag");
+                return false;
+            } else {
+                out_config->width = atoi(nob_shift_args(&argc, &argv));
+            }
+        } else if (strcmp("--height", flag) == 0) {
+            if (argc == 0) {
+                vk_log(VK_ERROR, "expected a width after '--height' flag");
+                return false;
+            } else {
+                out_config->height = atoi(nob_shift_args(&argc, &argv));
+            }
+        } else if (strcmp("--x_pos", flag) == 0) {
+            if (argc == 0) {
+                vk_log(VK_ERROR, "expected a width after '--x_pos' flag");
+                return false;
+            } else {
+                out_config->x_pos = atoi(nob_shift_args(&argc, &argv));
+            }
+        } else if (strcmp("--y_pos", flag) == 0) {
+            if (argc == 0) {
+                vk_log(VK_ERROR, "expected a width after '--x_pos' flag");
+                return false;
+            } else {
+                out_config->y_pos = atoi(nob_shift_args(&argc, &argv));
+            }
+        } else if (strcmp("--highest_lod", flag) == 0) {
+            if (argc == 0) {
+                vk_log(VK_ERROR, "expected a width after '--highest_lod' flag");
+                return false;
+            } else {
+                out_config->highest_lod = atoi(nob_shift_args(&argc, &argv));
+                if (out_config->highest_lod < 0 || out_config->highest_lod >= LOD_COUNT) {
+                    vk_log(VK_ERROR, "valid lods are between 0 and 6 inclusive");
+                    return false;
+                }
+            }
+        } else if (strcmp("--help", flag) == 0) {
+            return false;
+        } else if (strcmp("--log_controls", flag) == 0) {
+            log_controls();
+            return false;
+        } else {
+            vk_log(VK_ERROR, "unrecognized command");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void log_point_count(size_t lod)
+{
+    size_t point_count = 0;
+    for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
+    vk_log(VK_INFO, "point count: %zu points, highest lod: %zu", point_count, lod);
+}
+
 int main(int argc, char **argv)
 {
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     Time_Records records = {.max = MAX_FPS_REC};
-    size_t lod = 0;
-    if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
 
     /* initialize window and Vulkan */
-    if (argc > 4) {
-        init_window(atoi(argv[3]), atoi(argv[4]), "Arena Point Cloud Rasterization (LED Wall)");
-        set_window_pos(atoi(argv[1]), atoi(argv[2]));
-    } else if (argc == 2) {
-        if (strcmp(argv[1], "fullscreen") == 0) {
-            enable_full_screen();
-            init_window(0, 0, "Arena Point Cloud Rasterization");
-        } else {
-            vk_log(VK_ERROR, "unrecognized argument \"%s\"", argv[1]);
-            return 1;
-        }
+    Config config = {0};
+    if (!handle_usr_cmds(argc, argv, &config)) {
+        log_usage(config.program);
+        return 1;
+    }
+    size_t lod = config.highest_lod;
+    for (size_t i = 0; i <= lod; i++) {
+        if (!load_points(pc_layers[i].name, &pc_layers[i])) return 1;
+    }
+    log_point_count(lod);
+
+    if (config.fullscreen) {
+        enable_full_screen();
+        init_window(0, 0, "Arena Point Cloud Rasterization");
     } else {
-        init_window(1600, 900, "Arena Point Cloud Rasterization");
+        init_window(config.width, config.height, "Arena Point Cloud Rasterization");
+        set_window_pos(config.x_pos, config.y_pos);
     }
 
     initial_win_size = get_window_size();
-    vk_log(VK_INFO, "initial window size %d %d", initial_win_size.width, initial_win_size.height);
     Vk_Texture storage_tex = {.img.extent =   {initial_win_size.width,  initial_win_size.height}};
     Frame_Buffer frame_buff = alloc_frame_buff(initial_win_size.width * initial_win_size.height);
 
@@ -934,14 +1027,14 @@ int main(int argc, char **argv)
     int cam_view_idx = 0;
     int cam_move_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
-    log_controls();
     int cam_order[4] = {0};
     Shader_Mode shader_mode = SHADER_MODE_MODEL;
     float vid_update_time = 0.0f;
     bool playing = false;
     bool elevation_based_occlusion = false;
 
-    if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
+    for (size_t i = 0; i <= lod; i++)
+        if (!vk_comp_buff_staged_upload(&pc_layers[i].buff, pc_layers[i].items)) return 1;
     if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))          return 1;
     if (!vk_ubo_init(&ubo.buff))                                                 return 1;
     if (!vk_create_storage_img(&storage_tex))                                    return 1;
@@ -957,11 +1050,13 @@ int main(int argc, char **argv)
     pthread_create(&prod_thread, NULL, producer, NULL);
 
     /* allocate descriptor sets based on layouts */
-    for (size_t i = 0; i < MAX_LOD; i++) {
+    for (size_t i = 0; i < LOD_COUNT; i++) {
         VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&cs_render_ds_layout, 1, pool)};
         if (!vk_alloc_ds(alloc, &pc_layers[i].set)) return false;
     }
-    if (!update_render_ds_sets(ubo.buff, frame_buff.buff, lod))  return 1;
+
+    for (size_t i = 0; i <= lod; i++)
+        if (!update_render_ds_sets(ubo.buff, frame_buff.buff, i))  return 1;
 
     /* create pipelines */
     if (!create_pipelines()) return 1;
@@ -976,7 +1071,7 @@ int main(int argc, char **argv)
 
         /* handle keyboard input */
         if (is_key_pressed(KEY_UP) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) {
-            if (++lod < MAX_LOD) {
+            if (++lod < LOD_COUNT) {
                 wait_idle();
                 if (!pc_layers[lod].buff.handle) {
                     if (!load_points(pc_layers[lod].name, &pc_layers[lod])) return 1;
@@ -986,10 +1081,7 @@ int main(int argc, char **argv)
                     if (!update_render_ds_sets(ubo.buff, frame_buff.buff, lod))  return 1;
                 }
 
-                /* log point count */
-                size_t point_count = 0;
-                for (size_t layer = 0; layer <= lod; layer++) point_count += pc_layers[layer].count;
-                vk_log(VK_INFO, "lod %zu (%zu points)", lod, point_count);
+                log_point_count(lod);
 
                 /* rebuild compute commands */
                 if (!build_compute_cmds(lod)) return 1;
@@ -999,9 +1091,7 @@ int main(int argc, char **argv)
         }
         if (is_key_pressed(KEY_DOWN) || is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_FACE_LEFT)) {
             if (lod != 0) {
-                size_t point_count = 0;
-                for (size_t layer = 0; layer <= lod - 1; layer++) point_count += pc_layers[layer].count;
-                vk_log(VK_INFO, "lod %zu (%zu points)", lod - 1, point_count);
+                log_point_count(lod - 1);
                 --lod;
 
                 /* rebuild compute commands */
@@ -1104,7 +1194,7 @@ int main(int argc, char **argv)
     wait_idle();
     free(frame_buff.data);
     free(tex_buff.data);
-    for (size_t i = 0; i < MAX_LOD; i++) {
+    for (size_t i = 0; i < LOD_COUNT; i++) {
         vk_buff_destroy(&pc_layers[i].buff);
         free(pc_layers[i].items);
     }
