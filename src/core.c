@@ -204,8 +204,8 @@ bool default_pl_fill_init()
     };
     Pipeline_Config config = {
         .pl_layout = pipelines.layouts[DEFAULT_PL_FILL],
-        .vert = "./res/default.vert.spv",
-        .frag = "./res/default.frag.spv",
+        .vert = "./res/default.vert.glsl.spv",
+        .frag = "./res/default.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
@@ -308,8 +308,8 @@ bool default_pl_wireframe_init()
     };
     Pipeline_Config config = {
         .pl_layout = pipelines.layouts[DEFAULT_PL_WIREFRAME],
-        .vert = "./res/default.vert.spv",
-        .frag = "./res/default.frag.spv",
+        .vert = "./res/default.vert.glsl.spv",
+        .frag = "./res/default.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_LINE,
         .vert_attrs = vert_attrs,

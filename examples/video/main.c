@@ -365,8 +365,8 @@ bool create_pipeline()
     };
     Pipeline_Config config = {
         .pl_layout = video_textures.pl_layout,
-        .vert = "./res/texture.vert.spv",
-        .frag = "./res/texture.frag.spv",
+        .vert = "./res/texture.vert.glsl.spv",
+        .frag = "./res/texture.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,

@@ -110,7 +110,7 @@ bool create_pipeline()
         .pSetLayouts = &compute_ds_layout,
     };
     if (!vk_pl_layout_init(layout_ci, &compute_pl_layout))                             return false;
-    if (!vk_compute_pl_init("./res/default.comp.spv", compute_pl_layout, &compute_pl)) return false;
+    if (!vk_compute_pl_init("./res/default.comp.glsl.spv", compute_pl_layout, &compute_pl)) return false;
 
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
     layout_ci.pushConstantRangeCount = 1;

@@ -46,7 +46,7 @@ typedef struct {
     bool private;
 } Example;
 
-static const char *default_shader_names[] = {"default.vert", "default.frag"};
+static const char *default_shader_names[] = {"default.vert.glsl", "default.frag.glsl"};
 static const char *default_c_file_names[] = {"main"};
 
 static Example examples[] = {
@@ -104,10 +104,10 @@ static Example examples[] = {
         .name = "texture",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "texture.vert",
-                "texture.frag"
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "texture.vert.glsl",
+                "texture.frag.glsl"
             },
             .count = 4
         },
@@ -145,8 +145,8 @@ static Example examples[] = {
         .name = "point-cloud",
         .shaders = {
             .names = (const char *[]) {
-                "point-cloud.vert",
-                "point-cloud.frag",
+                "point-cloud.vert.glsl",
+                "point-cloud.frag.glsl",
             },
             .count = 2
         },
@@ -160,11 +160,11 @@ static Example examples[] = {
         .name = "compute",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "default.comp",
-                "particle.vert",
-                "particle.frag",
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "default.comp.glsl",
+                "particle.vert.glsl",
+                "particle.frag.glsl",
             },
             .count = 5,
         },
@@ -179,12 +179,12 @@ static Example examples[] = {
         .name = "point-raster",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "sst.vert",
-                "sst.frag",
-                "render.comp",
-                "resolve.comp",
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "sst.vert.glsl",
+                "sst.frag.glsl",
+                "render.comp.glsl",
+                "resolve.comp.glsl",
             },
             .count = 6,
         },
@@ -198,10 +198,10 @@ static Example examples[] = {
         .name = "arena-point-raster",
         .shaders = {
             .names = (const char *[]) {
-                "sst.vert",
-                "sst.frag",
-                "render.comp",
-                "resolve.comp",
+                "sst.vert.glsl",
+                "sst.frag.glsl",
+                "render.comp.glsl",
+                "resolve.comp.glsl",
             },
             .count = 4,
         },
@@ -217,10 +217,10 @@ static Example examples[] = {
         .name = "video",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "texture.vert",
-                "texture.frag",
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "texture.vert.glsl",
+                "texture.frag.glsl",
             },
             .count = 4,
         },
@@ -235,10 +235,10 @@ static Example examples[] = {
         .name = "gltf",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "gltf.vert",
-                "gltf.frag",
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "gltf.vert.glsl",
+                "gltf.frag.glsl",
             },
             .count = 4,
         },
@@ -253,13 +253,13 @@ static Example examples[] = {
         .name = "mixed-raster",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert",
-                "default.frag",
-                "sst.vert",
-                "sst.frag",
-                "mix.comp",
-                "render.comp",
-                "resolve.comp",
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "sst.vert.glsl",
+                "sst.frag.glsl",
+                "mix.comp.glsl",
+                "render.comp.glsl",
+                "resolve.comp.glsl",
             },
             .count = 7,
         },
@@ -687,6 +687,14 @@ bool build_cvr(Config *config, const char *platform_path)
     }
 }
 
+const char *src_file_to_shader_stage_flag(const char *src)
+{
+    if (strstr(src, "vert.glsl")) return "-fshader-stage=vert";
+    if (strstr(src, "frag.glsl")) return "-fshader-stage=frag";
+    if (strstr(src, "comp.glsl")) return "-fshader-stage=comp";
+    assert(0 && "shader extension unrecognized");
+}
+
 bool compile_shaders(Config config)
 {
     bool result = true;
@@ -717,7 +725,8 @@ bool compile_shaders(Config config)
 
         if (nob_needs_rebuild(shader_dst, &shader_src, 1)) {
             cmd.count = 0;
-            nob_cmd_append(&cmd, "glslc", shader_src, "-o", shader_dst);
+            const char *flag = src_file_to_shader_stage_flag(shader_src);
+            nob_cmd_append(&cmd, "glslc", flag, shader_src, "-o", shader_dst);
             Nob_Proc proc = nob_cmd_run_async(cmd);
             nob_da_append(&procs, proc);
         }

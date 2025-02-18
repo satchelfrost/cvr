@@ -719,14 +719,14 @@ bool create_pipelines()
     };
 
     /* compute shader render pipeline */
-    if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                 return false;
-    if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return false;
+    if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                   return false;
+    if (!vk_compute_pl_init("./res/render.comp.glsl.spv", cs_render_pl_layout, &cs_render_pl)) return false;
 
     /* compute shader resolve pipeline */
     layout_ci.pSetLayouts = &cs_resolve_ds_layout;
     layout_ci.pushConstantRangeCount = 0;
-    if (!vk_pl_layout_init(layout_ci, &cs_resolve_pl_layout))                                return false;
-    if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return false;
+    if (!vk_pl_layout_init(layout_ci, &cs_resolve_pl_layout))                                     return false;
+    if (!vk_compute_pl_init("./res/resolve.comp.glsl.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return false;
 
     /* screen space triangle + frag image sampler for raster display */
     layout_ci.pSetLayouts = &gfx_ds_layout;

@@ -344,18 +344,18 @@ bool create_pipelines()
 
     /* compute shader render pipeline */
     if (!vk_pl_layout_init(layout_ci, &comp_render.pl_layout))                                return false;
-    if (!vk_compute_pl_init("./res/render.comp.spv", comp_render.pl_layout, &comp_render.pl)) return false;
+    if (!vk_compute_pl_init("./res/render.comp.glsl.spv", comp_render.pl_layout, &comp_render.pl)) return false;
 
     /* compute shader resolve pipeline */
     layout_ci.pSetLayouts = &comp_resolve.ds_layout;
     layout_ci.pushConstantRangeCount = 0;
     if (!vk_pl_layout_init(layout_ci, &comp_resolve.pl_layout))                                  return false;
-    if (!vk_compute_pl_init("./res/resolve.comp.spv", comp_resolve.pl_layout, &comp_resolve.pl)) return false;
+    if (!vk_compute_pl_init("./res/resolve.comp.glsl.spv", comp_resolve.pl_layout, &comp_resolve.pl)) return false;
 
     /* compute mix shader render pipeline */
     layout_ci.pSetLayouts = &comp_mix.ds_layout;
     if (!vk_pl_layout_init(layout_ci, &comp_mix.pl_layout))                          return false;
-    if (!vk_compute_pl_init("./res/mix.comp.spv", comp_mix.pl_layout, &comp_mix.pl)) return false;
+    if (!vk_compute_pl_init("./res/mix.comp.glsl.spv", comp_mix.pl_layout, &comp_mix.pl)) return false;
 
     /* screen space triangle + frag image sampler for raster display */
     layout_ci.pSetLayouts = &sst_gfx.ds_layout;

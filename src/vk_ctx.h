@@ -890,8 +890,8 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
             .pName = "main",
         },
     };
-    if (!vk_shader_mod_init("./res/sst.vert.spv", &stages[0].module)) vk_return_defer(false);
-    if (!vk_shader_mod_init("./res/sst.frag.spv", &stages[1].module)) vk_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.vert.glsl.spv", &stages[0].module)) vk_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.frag.glsl.spv", &stages[1].module)) vk_return_defer(false);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};

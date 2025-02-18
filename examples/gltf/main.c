@@ -411,8 +411,8 @@ bool create_pipeline()
     };
     Pipeline_Config config = {
         .pl_layout = gfx_pl_layout,
-        .vert = "./res/gltf.vert.spv",
-        .frag = "./res/gltf.frag.spv",
+        .vert = "./res/gltf.vert.glsl.spv",
+        .frag = "./res/gltf.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
