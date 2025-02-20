@@ -2,7 +2,7 @@
 #include "geometry.h"
 
 #define MAX_POINTS  100000000 // 100 million
-#define MIN_POINTS  100000    // 100 thousand
+#define MIN_POINTS  100    // 100 thousand
 #define MAX_FPS_REC 1000
 
 typedef struct {
@@ -37,24 +37,69 @@ void gen_points(size_t num_points, Point_Cloud *pc)
     /* reset the point count to zero, but leave capacity allocated */
     pc->count = 0;
 
+    // for (size_t i = 0; i < num_points; i++) {
+    //     float theta = PI * rand() / RAND_MAX;
+    //     float phi   = 2.0f * PI * rand() / RAND_MAX;
+    //     float r     = 10.0f * rand() / RAND_MAX;
+    //     Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
+    //     Point_Vert vert = {
+    //         .x = r * sin(theta) * cos(phi),
+    //         .y = r * sin(theta) * sin(phi),
+    //         .z = r * cos(theta),
+    //         .r = color.r,
+    //         .g = color.g,
+    //         .b = color.b,
+    //         .a = 255,
+    //     };
+    //
+    //     vk_da_append(pc, vert);
+    // }
+
+    // (void)num_points;
+    // float angle = M_PI / 16.0f;
+    // for (float theta = angle; theta < M_PI - angle; theta += angle) {
+    //     for (float phi = angle; phi < 2 * M_PI; phi += 2 * angle) {
+    //         float r = 1.0f;
+    //         Color color = color_from_HSV((phi) * 360.0f, 1.0f, 1.0f);
+    //         Point_Vert vert = {
+    //             .x = r * sin(theta) * sin(phi),
+    //             .y = r * cos(theta),
+    //             .z = r * cos(phi) * sin(theta),
+    //             .r = color.r,
+    //             .g = color.g,
+    //             .b = color.b,
+    //             .a = 255,
+    //         };
+    //
+    //         vk_da_append(pc, vert);
+    //     }
+    // }
+    //
+    // vk_log(VK_INFO, "%zu", pc->count);
+
+    float phi = M_PI * (3.0 - sqrt(5.0));
     for (size_t i = 0; i < num_points; i++) {
-        float theta = PI * rand() / RAND_MAX;
-        float phi   = 2.0f * PI * rand() / RAND_MAX;
-        float r     = 10.0f * rand() / RAND_MAX;
+        float y = 1.0 - (i / (float)(num_points - 1) * 2.0);
+        float r = sqrt(1.0 - y * y);
+        float theta = phi * i;
+        float x = cos(theta) * r;
+        float z = sin(theta) * r;
         Color color = color_from_HSV(r * 360.0f, 1.0f, 1.0f);
         Point_Vert vert = {
-            .x = r * sin(theta) * cos(phi),
-            .y = r * sin(theta) * sin(phi),
-            .z = r * cos(theta),
+            // .x = x * r,
+            // .y = y * r, 
+            // .z = z * r,
+            .x = x * 5.0,
+            .y = y * 5.0, 
+            .z = z * 5.0,
             .r = color.r,
             .g = color.g,
             .b = color.b,
             .a = 255,
         };
-
         vk_da_append(pc, vert);
     }
-
+    
     pc->buff.count = pc->count;
     pc->buff.size  = pc->count * sizeof(*pc->items);
 }

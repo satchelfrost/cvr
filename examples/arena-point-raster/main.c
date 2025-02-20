@@ -961,10 +961,46 @@ void log_point_count(size_t lod)
     vk_log(VK_INFO, "point count: %zu points, highest lod: %zu", point_count, lod);
 }
 
+typedef struct {
+    Vector3 *items;
+    size_t count;
+    size_t capacity;
+} Points;
+
+void gen_points_on_sphere(size_t num_points, Points *points, float sphere_radius)
+{
+    // points->count = 0;
+    // float phi = M_PI * (3.0 - sqrt(5.0));
+    // for (size_t i = 0; i < num_points; i++) {
+    //     float y = 1.0 - (i / (float)(num_points - 1) * 2.0);
+    //     float r = sqrt(1.0 - y * y);
+    //     float theta = phi * i;
+    //     float x = cos(theta) * r;
+    //     float z = sin(theta) * r;
+    //     Vector3 vert = {.x = x * sphere_radius, .y = y * sphere_radius, .z = z * sphere_radius};
+    //     vk_da_append(points, vert);
+    // }
+    (void)num_points;
+    float angle = M_PI / 8.0f;
+    for (float theta = angle; theta < M_PI - angle; theta += angle) {
+        for (float phi = angle; phi < 2 * M_PI; phi += 2 * angle) {
+            float r = sphere_radius;
+            Vector3 vert = {
+                .x = r * sin(theta) * sin(phi),
+                .y = r * cos(theta),
+                .z = r * cos(phi) * sin(theta),
+            };
+            vk_da_append(points, vert);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     Time_Records records = {.max = MAX_FPS_REC};
+    Points points = {0};
+    gen_points_on_sphere(16, &points, 100);
 
     /* initialize window and Vulkan */
     Config config = {0};
@@ -1026,6 +1062,7 @@ int main(int argc, char **argv)
     copy_camera_infos(camera_defaults, &cameras[1], VK_ARRAY_LEN(camera_defaults));
     int cam_view_idx = 0;
     int cam_move_idx = 0;
+    int sphere_cam_idx = 0;
     Camera *camera = &cameras[cam_view_idx];
     int cam_order[4] = {0};
     Shader_Mode shader_mode = SHADER_MODE_MODEL;
@@ -1125,7 +1162,17 @@ int main(int argc, char **argv)
         }
         if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
             playing = !playing;
-        if (is_key_pressed(KEY_L)) log_cameras(&cameras[1], NUM_CCTVS);
+        if (is_key_pressed(KEY_L)) log_cameras(&cameras[0], NUM_CCTVS + 1);
+        if (is_key_pressed(KEY_O)) {
+            sphere_cam_idx = (sphere_cam_idx + 1) % points.count;
+            Vector3 look = {-13.34, 10.77, 26.61};
+            cameras[0].position = Vector3Add(points.items[sphere_cam_idx], look);
+            cameras[0].up         = (Vector3){0.0f, 1.0f, 0.0f};
+            cameras[0].target     = (Vector3){look.x, look.y, look.z};
+            vk_log(VK_INFO, "%zu", sphere_cam_idx);
+            Vector3 pos = points.items[sphere_cam_idx];
+            vk_log(VK_INFO, "%.2f, %.2f, %.2f", pos.x, pos.y, pos.z);
+        }
 
         if (playing) vid_update_time += get_frame_time();
 
