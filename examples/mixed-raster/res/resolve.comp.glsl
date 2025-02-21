@@ -35,5 +35,5 @@ void main()
         color = vec4(unpackUnorm4x8(tmp_color));
 
     imageStore(out_img, pixel_coords, color);
-    frame_buff[pixel_id] = 0xffffffffff000010UL;
+    //frame_buff[pixel_id] = 0xffffffffff000010UL;
 }

@@ -124,6 +124,7 @@ bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkP
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
 bool vk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
+VkFormat vk_surface_fmt();
 void vk_destroy_render_pass(VkRenderPass render_pass);
 bool vk_frame_buffs_init();
 bool vk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb);
@@ -147,6 +148,7 @@ typedef struct {
     size_t vert_attr_count;
     VkVertexInputBindingDescription *vert_bindings;
     size_t vert_binding_count;
+    VkRenderPass render_pass;
 } Pipeline_Config;
 
 bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
@@ -157,10 +159,13 @@ bool vk_ubo_map(Vk_Buffer *buff);
 
 bool vk_wait_to_begin_gfx();
 bool vk_begin_rec_gfx();
+bool vk_wait_reset();
 bool vk_end_rec_gfx();
 void vk_begin_render_pass(float r, float g, float b, float a);
+void vk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRenderPass rp, VkFramebuffer fb, VkExtent2D extent);
 void vk_end_render_pass();
 bool vk_submit_gfx();
+bool vk_basic_gfx_submit();
 
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
 void vk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
@@ -801,7 +806,7 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
         .height   = (float) vk_ctx.extent.height,
         .maxDepth = 1.0f,
     };
-    VkRect2D scissor = {.extent = vk_ctx.extent,};
+    VkRect2D scissor = {.extent = vk_ctx.extent};
     VkPipelineViewportStateCreateInfo viewport_state_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
@@ -859,7 +864,7 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
         .pDynamicState = &dynamic_state_ci,
         .pDepthStencilState = &depth_ci,
         .layout = config.pl_layout,
-        .renderPass = vk_ctx.render_pass,
+        .renderPass = (config.render_pass) ? config.render_pass : vk_ctx.render_pass,
         .subpass = 0,
     };
     if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(vk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
@@ -1094,6 +1099,10 @@ bool vk_render_pass_init()
     }
 }
 
+VkFormat vk_surface_fmt()
+{
+    return vk_ctx.surface_fmt.format;
+}
 
 bool vk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass)
 {
@@ -1181,6 +1190,30 @@ void vk_begin_render_pass(float r, float g, float b, float a)
     vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
+void vk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRenderPass rp, VkFramebuffer fb, VkExtent2D extent)
+{
+    VkRenderPassBeginInfo begin_rp = {0};
+    begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    begin_rp.renderPass = rp;
+    begin_rp.framebuffer = fb;
+    begin_rp.renderArea.extent = extent;
+    VkClearValue clear_color = {
+        .color = {
+            {r, g, b, a}
+        }
+    };
+    VkClearValue clear_depth = {
+        .depthStencil = {
+            .depth = 1.0f,
+            .stencil = 0,
+        }
+    };
+    VkClearValue clear_values[] = {clear_color, clear_depth};
+    begin_rp.clearValueCount = VK_ARRAY_LEN(clear_values);
+    begin_rp.pClearValues = clear_values;
+    vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+}
+
 void vk_end_render_pass()
 {
     vkCmdEndRenderPass(vk_ctx.gfx_buff);
@@ -1244,6 +1277,23 @@ bool vk_submit_gfx()
         if (!vk_recreate_swapchain()) return false;
     } else if (!VK_SUCCEEDED(res)) {
         vk_log(VK_ERROR, "failed to present queue");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_basic_gfx_submit()
+{
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &vk_ctx.gfx_buff,
+    };
+
+    VkResult res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to submit to graphics queue");
         return false;
     }
 
@@ -1455,6 +1505,28 @@ bool vk_wait_to_begin_gfx()
         return false;
     } else if (res == VK_SUBOPTIMAL_KHR) {
         vk_log(VK_WARNING, "suboptimal swapchain image");
+    }
+
+    res = vkResetFences(vk_ctx.device, 1, &vk_ctx.gfx_fence);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to reset fences");
+        return false;
+    }
+    res = vkResetCommandBuffer(vk_ctx.gfx_buff, 0);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR,"failed to reset cmd buffer");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_wait_reset()
+{
+    VkResult res = vkWaitForFences(vk_ctx.device, 1, &vk_ctx.gfx_fence, VK_TRUE, UINT64_MAX);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to wait for fences");
+        return false;
     }
 
     res = vkResetFences(vk_ctx.device, 1, &vk_ctx.gfx_fence);

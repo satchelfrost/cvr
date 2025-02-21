@@ -263,7 +263,8 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape].idx_buff;
 
-    vk_bind_gfx(pl, pl_layout, &ds, 1);
+    if (ds) vk_bind_gfx(pl, pl_layout, &ds, 1);
+    else vk_bind_gfx(pl, pl_layout, NULL, 0);
     vk_push_const(pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
     vk_draw_buffers(vtx_buff, idx_buff);
 
