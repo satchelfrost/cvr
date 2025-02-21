@@ -475,6 +475,7 @@ int main()
             vk_begin_offscreen_render_pass(
                 1.0, 0.0, 0.0, 1.0,
                 prepass.rp, prepass.frame_buff, prepass.depth.img.extent);
+            translate(0, 0, 1.9);
             rotate_y(get_time() * 1.0);
             // scale(0.1, 0.1, 0.1);
             if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, SHAPE_QUAD))
