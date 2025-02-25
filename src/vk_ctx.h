@@ -1168,15 +1168,8 @@ void vk_destroy_frame_buff(VkFramebuffer frame_buff)
 
 void vk_begin_render_pass(float r, float g, float b, float a)
 {
-    VkRenderPassBeginInfo begin_rp = {0};
-    begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    begin_rp.renderPass = vk_ctx.render_pass;
-    begin_rp.framebuffer = vk_ctx.swapchain.frame_buffs.items[img_idx];
-    begin_rp.renderArea.extent = vk_ctx.extent;
     VkClearValue clear_color = {
-        .color = {
-            {r, g, b, a}
-        }
+        .color = {{r, g, b, a}}
     };
     VkClearValue clear_depth = {
         .depthStencil = {
@@ -1185,18 +1178,25 @@ void vk_begin_render_pass(float r, float g, float b, float a)
         }
     };
     VkClearValue clear_values[] = {clear_color, clear_depth};
-    begin_rp.clearValueCount = VK_ARRAY_LEN(clear_values);
-    begin_rp.pClearValues = clear_values;
+    VkRenderPassBeginInfo begin_rp = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = vk_ctx.render_pass,
+        .framebuffer = vk_ctx.swapchain.frame_buffs.items[img_idx],
+        .renderArea.extent = vk_ctx.extent,
+        .clearValueCount = VK_ARRAY_LEN(clear_values),
+        .pClearValues = clear_values,
+    };
     vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 void vk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRenderPass rp, VkFramebuffer fb, VkExtent2D extent)
 {
-    VkRenderPassBeginInfo begin_rp = {0};
-    begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    begin_rp.renderPass = rp;
-    begin_rp.framebuffer = fb;
-    begin_rp.renderArea.extent = extent;
+    VkRenderPassBeginInfo begin_rp = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = rp,
+        .framebuffer = fb,
+        .renderArea.extent = extent,
+    };
     VkClearValue clear_color = {
         .color = {
             {r, g, b, a}

@@ -165,6 +165,7 @@ void close_window()
 void enable_full_screen()
 {
     full_screen = true;
+    vk_log(VK_INFO, "fullscreen mode enabled");
 }
 
 bool default_pl_fill_init()

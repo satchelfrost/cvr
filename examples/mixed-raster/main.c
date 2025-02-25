@@ -1,6 +1,6 @@
 #include "cvr.h"
 
-#define POINT_COUNT 1000000
+#define POINT_COUNT 100000
 #define WORKGROUP_SZ 1024
 #define IMG_WORKGROUP_SZ 16
 #define NUM_BATCHES 8
@@ -88,11 +88,15 @@ Point_Cloud gen_point_cloud(size_t num_points)
 
 Frame_Buffer alloc_frame_buff(size_t width, size_t height)
 {
-    Frame_Buffer frame = {0};
-    frame.buff.count = width * height;
-    frame.buff.size  = sizeof(uint64_t) * frame.buff.count;
-    // frame.data = calloc(frame.buff.count, frame.buff.size);
-    frame.data = malloc(frame.buff.size);
+    size_t count = width * height;
+    size_t sz = sizeof(uint64_t) * count;
+    Frame_Buffer frame = {
+        .buff = {
+            .count = count,
+            .size  = sz,
+        },
+        .data = malloc(sz),
+    };
     return frame;
 }
 
@@ -148,11 +152,11 @@ bool setup_prerender_pass()
     return vk_create_render_pass(&render_pass_ci, &prepass.rp);
 }
 
-bool setup_prepass_frame_buff()
+bool setup_prepass_frame_buff(Window_Size win_sz)
 {
     /* create the image */
     prepass.depth.img = (Vk_Image) {
-        .extent = {DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT},
+        .extent = {win_sz.width, win_sz.height},
         .aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT,
         .format = VK_FORMAT_D32_SFLOAT,
     };
@@ -276,9 +280,7 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
         .sampler     = storage_tex.sampler,
     };
     VkDescriptorImageInfo depth_img_info = {
-        // .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
         .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        // .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .imageView   = prepass.depth.view,
         .sampler     = prepass.depth.sampler,
     };
@@ -303,7 +305,7 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
     return true;
 }
 
-bool build_compute_cmds(size_t point_cloud_count)
+bool build_compute_cmds(size_t point_cloud_count, Window_Size win_sz)
 {
     size_t group_x = 1; size_t group_y = 1; size_t group_z = 1;
 
@@ -311,8 +313,8 @@ bool build_compute_cmds(size_t point_cloud_count)
     if (!vk_rec_compute()) return false;
 
         /* mix the frame buffer from prepass fixed-function render */
-        group_x = ceilf((float)DEFAULT_WINDOW_WIDTH  / IMG_WORKGROUP_SZ);
-        group_y = ceilf((float)DEFAULT_WINDOW_HEIGHT / IMG_WORKGROUP_SZ);
+        group_x = ceilf((float)win_sz.width / IMG_WORKGROUP_SZ);
+        group_y = ceilf((float)win_sz.height / IMG_WORKGROUP_SZ);
         vk_compute(comp_mix.pl, comp_mix.pl_layout, comp_mix.ds, group_x, group_y, group_z);
 
         vk_compute_pl_barrier();
@@ -329,8 +331,8 @@ bool build_compute_cmds(size_t point_cloud_count)
         vk_compute_pl_barrier();
 
         /* resolve the frame buffer */
-        group_x = ceilf((float)DEFAULT_WINDOW_WIDTH  / IMG_WORKGROUP_SZ);
-        group_y = ceilf((float)DEFAULT_WINDOW_HEIGHT / IMG_WORKGROUP_SZ);
+        group_x = ceilf((float)win_sz.width / IMG_WORKGROUP_SZ);
+        group_y = ceilf((float)win_sz.height / IMG_WORKGROUP_SZ);
         vk_compute(comp_resolve.pl, comp_resolve.pl_layout, comp_resolve.ds, group_x, group_y, group_z);
 
     /* end recording compute commands */
@@ -402,18 +404,18 @@ bool create_pipelines()
         .pPushConstantRanges = &pk_range,
     };
     /* compute shader render pipeline */
-    if (!vk_pl_layout_init(layout_ci, &comp_render.pl_layout))                                return false;
+    if (!vk_pl_layout_init(layout_ci, &comp_render.pl_layout)) return false;
     if (!vk_compute_pl_init("./res/render.comp.glsl.spv", comp_render.pl_layout, &comp_render.pl)) return false;
 
     /* compute shader resolve pipeline */
     layout_ci.pSetLayouts = &comp_resolve.ds_layout;
     layout_ci.pushConstantRangeCount = 0;
-    if (!vk_pl_layout_init(layout_ci, &comp_resolve.pl_layout))                                  return false;
+    if (!vk_pl_layout_init(layout_ci, &comp_resolve.pl_layout)) return false;
     if (!vk_compute_pl_init("./res/resolve.comp.glsl.spv", comp_resolve.pl_layout, &comp_resolve.pl)) return false;
 
     /* compute mix shader render pipeline */
     layout_ci.pSetLayouts = &comp_mix.ds_layout;
-    if (!vk_pl_layout_init(layout_ci, &comp_mix.pl_layout))                          return false;
+    if (!vk_pl_layout_init(layout_ci, &comp_mix.pl_layout)) return false;
     if (!vk_compute_pl_init("./res/mix.comp.glsl.spv", comp_mix.pl_layout, &comp_mix.pl)) return false;
 
     /* screen space triangle + frag image sampler for raster display */
@@ -424,16 +426,25 @@ bool create_pipelines()
     return create_prepass_pipeline();
 }
 
-int main()
+#define shift(xs_sz, xs) (assert((xs_sz) > 0), (xs_sz)--, *(xs)++)
+
+int main(int argc, char **argv)
 {
-    Vk_Texture storage_tex = {.img.extent = {DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT}};
-    Frame_Buffer frame = alloc_frame_buff(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    shift(argc, argv);
+    if (argc > 0) {
+        const char *option = shift(argc, argv);
+        if (strcmp(option, "--fullscreen") == 0) enable_full_screen();
+    }
+
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
     Point_Cloud pc = gen_point_cloud(POINT_COUNT);
     vk_log(VK_INFO, "point count %zu", pc.count);
 
     /* initialize window and Vulkan */
     init_window(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "mixing rasterization with fixed function");
+    Window_Size win_sz = get_window_size();
+    Vk_Texture storage_tex = {.img.extent = {win_sz.width, win_sz.height}};
+    Frame_Buffer frame = alloc_frame_buff(win_sz.width, win_sz.height);
     Camera camera = {
         .position   = {0.0f, 0.0f, 5.0f},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -450,7 +461,7 @@ int main()
 
     /* setup fixed prepass resources */
     if (!setup_prerender_pass()) return 1;
-    if (!setup_prepass_frame_buff()) return 1;
+    if (!setup_prepass_frame_buff(win_sz)) return 1;
 
     /* setup descriptors */
     if (!setup_ds_layouts())                                        return 1;
@@ -461,12 +472,21 @@ int main()
     if (!create_pipelines()) return 1;
 
     /* record commands for compute buffer */
-    if (!build_compute_cmds(pc.count)) return 1;
+    if (!build_compute_cmds(pc.count, win_sz)) return 1;
+
+    Shape_Type shape = 0;
+    float s = 1.0f;
+    bool spin = true;
+    set_target_fps(100);
 
     /* game loop */
     while (!window_should_close()) {
         /* input */
         update_camera_free(&camera);
+        if (is_key_pressed(KEY_SPACE)) shape = (shape + 1) % SHAPE_COUNT;
+        if (is_key_down(KEY_UP))   s += get_frame_time();
+        if (is_key_down(KEY_DOWN)) s -= get_frame_time();
+        if (is_key_pressed(KEY_ZERO)) spin = !spin;
 
         /* prerender pass for 3d model */
         if (!vk_wait_reset()) return 1;
@@ -475,10 +495,9 @@ int main()
             vk_begin_offscreen_render_pass(
                 1.0, 0.0, 0.0, 1.0,
                 prepass.rp, prepass.frame_buff, prepass.depth.img.extent);
-            translate(0, 0, 1.9);
-            rotate_y(get_time() * 1.0);
-            // scale(0.1, 0.1, 0.1);
-            if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, SHAPE_QUAD))
+            if (spin) rotate_y(get_time() * 1.0);
+            scale(s, s, s);
+            if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, shape))
                 return 1;
             vk_end_render_pass();
             // vk_raster_sampler_barrier(prepass.depth.img.handle);
@@ -488,11 +507,13 @@ int main()
 
         /* submit compute commands */
         begin_mode_3d(camera);
-            // rotate_y(get_time() * 0.5);
+            rotate_x(get_time() * 0.5);
+            float donut_scale = sinf(get_time() * 0.5) + 1.5;
+            scale(donut_scale, donut_scale, donut_scale);
             vk_compute_fence_wait();
             if (get_mvp_float16(&ubo.data.mvp)) {
-                ubo.data.width  = DEFAULT_WINDOW_WIDTH;
-                ubo.data.height = DEFAULT_WINDOW_HEIGHT;
+                ubo.data.width  = win_sz.width;
+                ubo.data.height = win_sz.height;
                 memcpy(ubo.buff.mapped, &ubo.data, ubo.buff.size);
             } else {
                 return 1;
