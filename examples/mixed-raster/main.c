@@ -112,7 +112,7 @@ bool setup_prerender_pass()
         .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
     VkAttachmentReference color_ref = {
         .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -131,26 +131,6 @@ bool setup_prerender_pass()
         .attachment = 1,
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     };
-    // VkSubpassDependency dependencies[2] = {
-    //     {
-    //         .srcSubpass = VK_SUBPASS_EXTERNAL,
-    //         .dstSubpass = 0,
-    //         .srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-    //         .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-    //         .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
-    //         .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-    //         .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-    //     },
-    //     {
-    //         .srcSubpass = 0,
-    //         .dstSubpass = VK_SUBPASS_EXTERNAL,
-    //         .srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-    //         .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-    //         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-    //         .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-    //         .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-    //     },
-    // };
     VkSubpassDependency dependency = {
         .srcSubpass = VK_SUBPASS_EXTERNAL,
         .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
@@ -169,8 +149,6 @@ bool setup_prerender_pass()
         .pAttachments = attachments,
         .subpassCount = 1,
         .pSubpasses = &subpass,
-        // .dependencyCount = VK_ARRAY_LEN(dependencies),
-        // .pDependencies = dependencies,
         .dependencyCount = 1,
         .pDependencies = &dependency,
     };
@@ -557,19 +535,19 @@ int main(int argc, char **argv)
 
         /* prerender pass for 3d model */
         if (!vk_wait_reset()) return 1;
-        begin_mode_3d(camera);
-        vk_begin_rec_gfx();
-        vk_begin_offscreen_render_pass(
-                1.0, 0.0, 0.0, 1.0,
-                prepass.rp, prepass.frame_buff, prepass.depth.img.extent);
-        if (spin) rotate_y(get_time() * 1.0);
-        scale(s, s, s);
-        if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, shape))
-            return 1;
-        vk_end_render_pass();
-        // vk_raster_sampler_barrier(prepass.depth.img.handle);
-        vk_end_rec_gfx();
-        end_mode_3d();
+            begin_mode_3d(camera);
+            vk_begin_rec_gfx();
+            vk_begin_offscreen_render_pass(
+                    1.0, 0.0, 0.0, 1.0,
+                    prepass.rp, prepass.frame_buff, prepass.depth.img.extent);
+            if (spin) rotate_y(get_time() * 1.0);
+            scale(s, s, s);
+            if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, shape))
+                return 1;
+            vk_end_render_pass();
+            // vk_raster_sampler_barrier(prepass.depth.img.handle);
+            vk_end_rec_gfx();
+            end_mode_3d();
         vk_basic_gfx_submit();
 
         /* submit compute commands */
