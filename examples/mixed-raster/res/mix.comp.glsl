@@ -16,6 +16,7 @@ layout(std430, binding = 1) buffer frame_data {
 };
 
 layout(binding = 2) uniform sampler2D depth_buffer;
+layout(binding = 3) uniform sampler2D color_buffer;
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -39,9 +40,13 @@ void main()
 
 
     float depth = texelFetch(depth_buffer, ivec2(gl_GlobalInvocationID.xy), 0).r;
+    vec4 color = texelFetch(color_buffer, ivec2(gl_GlobalInvocationID.xy), 0);
+
+    uint uint_color = uint(color.a*255.0) << 24 | uint(color.b*255.0) << 16 | uint(color.g*255) << 8 | uint(color.r*255.0);
     uint64_t depth64 = floatBitsToUint((linearize_depth(depth)) * (FAR - NEAR));
     // uint clr_color = 0xff444418;
-    uint clr_color = 0xff000000;
-    frame_buff[pixel_id] = depth64 << 32 | uint64_t(clr_color);
+    // uint color = 0xff000000;
+    if (depth == 1.0) uint_color = 0xff000000;
+    frame_buff[pixel_id] = depth64 << 32 | uint64_t(uint_color);
     // frame_buff[pixel_id] = 0xffffffffff000000UL;
 }

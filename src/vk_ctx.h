@@ -77,6 +77,7 @@ typedef struct {
     VkFormat format;
 } Vk_Image;
 
+// TODO: for structures I should clearly delimit what needs to be initialized by the user
 typedef struct {
     VkImageView view;
     VkSampler sampler;
@@ -132,6 +133,8 @@ void vk_destroy_frame_buff(VkFramebuffer frame_buff);
 bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
+VkCommandBuffer vk_get_gfx_buff();
+VkCommandBuffer vk_get_comp_buff();
 
 bool platform_surface_init();
 const char **get_platform_exts(uint32_t *platform_ext_count);
@@ -205,6 +208,7 @@ void vk_pl_barrier(VkImageMemoryBarrier barrier);
 
 /* custom barrier to ensure compute shaders are done before sampling image (useful for software rasterization) */
 void vk_raster_sampler_barrier(VkImage img);
+void vk_swapchain_img_barrier();
 
 /* descriptor set macros */
 #define DS_POOL(DS_TYPE, COUNT)             \
@@ -1015,6 +1019,16 @@ void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout)
     vkDestroyPipelineLayout(vk_ctx.device, pl_layout, NULL);
 }
 
+VkCommandBuffer vk_get_gfx_buff()
+{
+    return vk_ctx.gfx_buff;
+}
+
+VkCommandBuffer vk_get_comp_buff()
+{
+    return vk_ctx.compute_buff;
+}
+
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
     bool result = true;
@@ -1285,10 +1299,14 @@ bool vk_submit_gfx()
 
 bool vk_basic_gfx_submit()
 {
+    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &vk_ctx.gfx_buff,
+       //  .waitSemaphoreCount = 1,
+       //  .pWaitSemaphores = &vk_ctx.img_avail_sem,
+       // . pWaitDstStageMask = &wait_stage,
     };
 
     VkResult res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
@@ -1457,7 +1475,7 @@ void vk_compute_pl_barrier()
     };
     vkCmdPipelineBarrier2(vk_ctx.compute_buff, &dependency);
 }
-#endif // PLATFORM_PLATFORM_DESKTOP_GLFW
+#endif // PLATFORM_DESKTOP_GLFW
 
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
@@ -2477,6 +2495,36 @@ void vk_raster_sampler_barrier(VkImage img)
     vkCmdPipelineBarrier(
         vk_ctx.gfx_buff,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_FLAGS_NONE,
+        0, NULL,
+        0, NULL,
+        1, &barrier
+    );
+}
+
+void vk_swapchain_img_barrier()
+{
+    VkImageMemoryBarrier barrier = {
+       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+       .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+       .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+       .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+       .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+       .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+       .image = vk_ctx.swapchain.imgs.items[img_idx],
+       .subresourceRange = {
+           .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+           .baseMipLevel = 0,
+           .levelCount = 1,
+           .baseArrayLayer = 0,
+           .layerCount = 1,
+       },
+    };
+    vkCmdPipelineBarrier(
+        vk_ctx.compute_buff,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_FLAGS_NONE,
         0, NULL,

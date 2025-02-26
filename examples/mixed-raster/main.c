@@ -39,7 +39,9 @@ typedef struct {
 typedef struct {
     VkFramebuffer frame_buff;
     Vk_Texture depth;
+    Vk_Texture color;
     VkRenderPass rp;
+    VkImageView img_views[2];
 } Prepass;
 
 typedef struct {
@@ -102,7 +104,20 @@ Frame_Buffer alloc_frame_buff(size_t width, size_t height)
 
 bool setup_prerender_pass()
 {
-    VkAttachmentDescription attach_desc = {
+    VkAttachmentDescription color = {
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
+    VkAttachmentReference color_ref = {
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+    VkAttachmentDescription depth = {
         .format = VK_FORMAT_D32_SFLOAT,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -113,40 +128,51 @@ bool setup_prerender_pass()
         .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
     };
     VkAttachmentReference depth_ref = {
+        .attachment = 1,
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     };
+    // VkSubpassDependency dependencies[2] = {
+    //     {
+    //         .srcSubpass = VK_SUBPASS_EXTERNAL,
+    //         .dstSubpass = 0,
+    //         .srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    //         .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+    //         .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+    //         .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    //         .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+    //     },
+    //     {
+    //         .srcSubpass = 0,
+    //         .dstSubpass = VK_SUBPASS_EXTERNAL,
+    //         .srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+    //         .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    //         .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    //         .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+    //         .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+    //     },
+    // };
+    VkSubpassDependency dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+    };
     VkSubpassDescription subpass = {
-        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_ref,
         .pDepthStencilAttachment = &depth_ref,
     };
-    VkSubpassDependency dependencies[2] = {
-        {
-            .srcSubpass = VK_SUBPASS_EXTERNAL,
-            .dstSubpass = 0,
-            .srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-            .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-        },
-        {
-            .srcSubpass = 0,
-            .dstSubpass = VK_SUBPASS_EXTERNAL,
-            .srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-        },
-    };
+    VkAttachmentDescription attachments[] = {color, depth};
     VkRenderPassCreateInfo render_pass_ci = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &attach_desc,
+        .attachmentCount = VK_ARRAY_LEN(attachments),
+        .pAttachments = attachments,
         .subpassCount = 1,
         .pSubpasses = &subpass,
-        .dependencyCount = VK_ARRAY_LEN(dependencies),
-        .pDependencies = dependencies,
+        // .dependencyCount = VK_ARRAY_LEN(dependencies),
+        // .pDependencies = dependencies,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
     };
 
     return vk_create_render_pass(&render_pass_ci, &prepass.rp);
@@ -154,31 +180,62 @@ bool setup_prerender_pass()
 
 bool setup_prepass_frame_buff(Window_Size win_sz)
 {
-    /* create the image */
+    bool result = true;
+
+    /* create the depth image */
     prepass.depth.img = (Vk_Image) {
         .extent = {win_sz.width, win_sz.height},
         .aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT,
         .format = VK_FORMAT_D32_SFLOAT,
     };
-    bool result = vk_img_init(
+    result = vk_img_init(
         &prepass.depth.img,
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    if (!result) return false;
+    if (!result) vk_return_defer(false);
 
-    if (!vk_img_view_init(prepass.depth.img, &prepass.depth.view)) return false;
-    if (!vk_sampler_init(&prepass.depth.sampler))                  return false;
+    if (!vk_img_view_init(prepass.depth.img, &prepass.depth.view)) vk_return_defer(false);
+    if (!vk_sampler_init(&prepass.depth.sampler))                  vk_return_defer(false);
 
+    /* create color image */
+    // uint32_t *data = malloc(win_sz.width * win_sz.height * sizeof(int));
+    // // uint8_t r = 232, g = 18, b = 32;
+    // uint8_t r = 255, g = 0, b = 0;
+    // uint32_t color = (uint32_t)255 << 24 | (uint32_t)b << 16 | (uint32_t)g << 8 | (uint32_t)r;
+    // for (int i = 0; i < win_sz.width * win_sz.height; i++) data[i] = color;
+    // if (!vk_load_texture(data, win_sz.width, win_sz.height, VK_FORMAT_R8G8B8A8_UNORM, &prepass.color))
+    //     vk_return_defer(false);
+
+    /* create the color image */
+    prepass.color.img = (Vk_Image) {
+        .extent = {win_sz.width, win_sz.height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+    };
+    result = vk_img_init(
+        &prepass.color.img,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    if (!result) vk_return_defer(false);
+    if (!vk_img_view_init(prepass.color.img, &prepass.color.view)) vk_return_defer(false);
+    if (!vk_sampler_init(&prepass.color.sampler))                  vk_return_defer(false);
+
+    /* create the frame buffer which combines both depth and color */
+    prepass.img_views[0] = prepass.color.view;
+    prepass.img_views[1] = prepass.depth.view;
     result = vk_create_frame_buff(
-        prepass.depth.img.extent.width,
-        prepass.depth.img.extent.height,
-        &prepass.depth.view,
-        1,
+        win_sz.width,
+        win_sz.height,
+        prepass.img_views,
+        VK_ARRAY_LEN(prepass.img_views),
         prepass.rp,
         &prepass.frame_buff
     );
 
+defer:
+    // free(data);
     return result;
 }
 
@@ -189,6 +246,7 @@ bool setup_ds_layouts()
         {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
+        {DS_BINDING(3, COMBINED_IMAGE_SAMPLER, COMPUTE_BIT)},
     };
     VkDescriptorSetLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -233,7 +291,7 @@ bool setup_ds_pool()
     VkDescriptorPoolSize pool_sizes[] = {
         {DS_POOL(UNIFORM_BUFFER, 3)},
         {DS_POOL(STORAGE_BUFFER, 4)},
-        {DS_POOL(COMBINED_IMAGE_SAMPLER, 2)},
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, 3)},
         {DS_POOL(STORAGE_IMAGE, 1)},
     };
 
@@ -284,11 +342,19 @@ bool setup_ds_sets(Vk_Buffer ubo, Vk_Buffer point_cloud, Vk_Buffer frame_buff, V
         .imageView   = prepass.depth.view,
         .sampler     = prepass.depth.sampler,
     };
+    VkDescriptorImageInfo color_img_info = {
+        // .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        // .imageLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .imageView   = prepass.color.view,
+        .sampler     = prepass.color.sampler,
+    };
     VkWriteDescriptorSet writes[] = {
         /* mix.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, comp_mix.ds, &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, comp_mix.ds, &frame_buff_info)},
         {DS_WRITE_IMG (2, COMBINED_IMAGE_SAMPLER, comp_mix.ds, &depth_img_info)},
+        {DS_WRITE_IMG (3, COMBINED_IMAGE_SAMPLER, comp_mix.ds, &color_img_info)},
         /* render.comp */
         {DS_WRITE_BUFF(0, UNIFORM_BUFFER, comp_render.ds,  &ubo_info)},
         {DS_WRITE_BUFF(1, STORAGE_BUFFER, comp_render.ds,  &pc_info)},
@@ -311,6 +377,7 @@ bool build_compute_cmds(size_t point_cloud_count, Window_Size win_sz)
 
     /* begin recording compute commands */
     if (!vk_rec_compute()) return false;
+        // vk_swapchain_img_barrier();
 
         /* mix the frame buffer from prepass fixed-function render */
         group_x = ceilf((float)win_sz.width / IMG_WORKGROUP_SZ);
@@ -491,17 +558,17 @@ int main(int argc, char **argv)
         /* prerender pass for 3d model */
         if (!vk_wait_reset()) return 1;
         begin_mode_3d(camera);
-            vk_begin_rec_gfx();
-            vk_begin_offscreen_render_pass(
+        vk_begin_rec_gfx();
+        vk_begin_offscreen_render_pass(
                 1.0, 0.0, 0.0, 1.0,
                 prepass.rp, prepass.frame_buff, prepass.depth.img.extent);
-            if (spin) rotate_y(get_time() * 1.0);
-            scale(s, s, s);
-            if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, shape))
-                return 1;
-            vk_end_render_pass();
-            // vk_raster_sampler_barrier(prepass.depth.img.handle);
-            vk_end_rec_gfx();
+        if (spin) rotate_y(get_time() * 1.0);
+        scale(s, s, s);
+        if (!draw_shape_ex(prepass_gfx.pl, prepass_gfx.pl_layout, NULL, shape))
+            return 1;
+        vk_end_render_pass();
+        // vk_raster_sampler_barrier(prepass.depth.img.handle);
+        vk_end_rec_gfx();
         end_mode_3d();
         vk_basic_gfx_submit();
 
@@ -531,11 +598,13 @@ int main(int argc, char **argv)
                 vk_end_render_pass();
             vk_end_rec_gfx();
         vk_submit_gfx();
+        // goto defer;
 
         end_timer();
         poll_input_events();
     }
 
+// defer:
     wait_idle();
     free(pc.items);
     free(frame.data);
@@ -554,6 +623,7 @@ int main(int argc, char **argv)
     vk_destroy_pl_res(prepass_gfx.pl, prepass_gfx.pl_layout);
     vk_unload_texture(&storage_tex);
     vk_unload_texture(&prepass.depth);
+    vk_unload_texture(&prepass.color);
     vk_destroy_frame_buff(prepass.frame_buff);
     vk_destroy_render_pass(prepass.rp);
     close_window();
