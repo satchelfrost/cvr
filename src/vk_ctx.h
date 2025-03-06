@@ -77,6 +77,7 @@ typedef struct {
     VkFormat format;
 } Vk_Image;
 
+// TODO: for structures I should clearly delimit what needs to be initialized by the user
 typedef struct {
     VkImageView view;
     VkSampler sampler;
@@ -123,10 +124,17 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
 bool vk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module);
 bool vk_render_pass_init();
+bool vk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
+VkFormat vk_surface_fmt();
+void vk_destroy_render_pass(VkRenderPass render_pass);
 bool vk_frame_buffs_init();
+bool vk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb);
+void vk_destroy_frame_buff(VkFramebuffer frame_buff);
 bool vk_recreate_swapchain();
 bool vk_depth_init();
 void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
+VkCommandBuffer vk_get_gfx_buff();
+VkCommandBuffer vk_get_comp_buff();
 
 bool platform_surface_init();
 const char **get_platform_exts(uint32_t *platform_ext_count);
@@ -143,6 +151,7 @@ typedef struct {
     size_t vert_attr_count;
     VkVertexInputBindingDescription *vert_bindings;
     size_t vert_binding_count;
+    VkRenderPass render_pass;
 } Pipeline_Config;
 
 bool vk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
@@ -151,11 +160,19 @@ bool vk_ubo_init(Vk_Buffer *buff);
 void vk_ubo_unmap(Vk_Buffer *buff);
 bool vk_ubo_map(Vk_Buffer *buff);
 
-bool vk_begin_drawing(); /* Begins recording drawing commands */
-bool vk_end_drawing();   /* Submits drawing commands. */
+bool vk_wait_to_begin_gfx();
+bool vk_begin_rec_gfx();
+bool vk_wait_reset();
+bool vk_end_rec_gfx();
+void vk_begin_render_pass(float r, float g, float b, float a);
+void vk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRenderPass rp, VkFramebuffer fb, VkExtent2D extent);
+void vk_end_render_pass();
+bool vk_submit_gfx();
+bool vk_basic_gfx_submit();
+
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
-void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size);
-void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp);
+void vk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
+void vk_draw_buffers(Vk_Buffer vtx_buff, Vk_Buffer idx_buff);
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
@@ -164,7 +181,7 @@ bool vk_submit_compute();
 bool vk_compute_fence_wait();
 bool vk_end_rec_compute();
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
-void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value);
+void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value);
 void vk_compute_pl_barrier();
 
 bool vk_buff_init(Vk_Buffer *buffer, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -191,6 +208,7 @@ void vk_pl_barrier(VkImageMemoryBarrier barrier);
 
 /* custom barrier to ensure compute shaders are done before sampling image (useful for software rasterization) */
 void vk_raster_sampler_barrier(VkImage img);
+void vk_swapchain_img_barrier();
 
 /* descriptor set macros */
 #define DS_POOL(DS_TYPE, COUNT)             \
@@ -262,9 +280,6 @@ bool is_device_suitable(VkPhysicalDevice phys_device);
 bool pick_phys_device();
 void cleanup_swapchain();
 bool find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
-
-
-void vk_begin_render_pass(float r, float g, float b, float a);
 
 int format_to_size(VkFormat fmt);
 bool vk_img_init(Vk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -795,7 +810,7 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
         .height   = (float) vk_ctx.extent.height,
         .maxDepth = 1.0f,
     };
-    VkRect2D scissor = {.extent = vk_ctx.extent,};
+    VkRect2D scissor = {.extent = vk_ctx.extent};
     VkPipelineViewportStateCreateInfo viewport_state_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
@@ -853,7 +868,7 @@ bool vk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
         .pDynamicState = &dynamic_state_ci,
         .pDepthStencilState = &depth_ci,
         .layout = config.pl_layout,
-        .renderPass = vk_ctx.render_pass,
+        .renderPass = (config.render_pass) ? config.render_pass : vk_ctx.render_pass,
         .subpass = 0,
     };
     if (!VK_SUCCEEDED(vkCreateGraphicsPipelines(vk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl))) {
@@ -884,8 +899,8 @@ bool vk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
             .pName = "main",
         },
     };
-    if (!vk_shader_mod_init("./res/sst.vert.spv", &stages[0].module)) vk_return_defer(false);
-    if (!vk_shader_mod_init("./res/sst.frag.spv", &stages[1].module)) vk_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.vert.glsl.spv", &stages[0].module)) vk_return_defer(false);
+    if (!vk_shader_mod_init("./res/sst.frag.glsl.spv", &stages[1].module)) vk_return_defer(false);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1004,6 +1019,16 @@ void vk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout)
     vkDestroyPipelineLayout(vk_ctx.device, pl_layout, NULL);
 }
 
+VkCommandBuffer vk_get_gfx_buff()
+{
+    return vk_ctx.gfx_buff;
+}
+
+VkCommandBuffer vk_get_comp_buff()
+{
+    return vk_ctx.compute_buff;
+}
+
 bool vk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
     bool result = true;
@@ -1088,6 +1113,26 @@ bool vk_render_pass_init()
     }
 }
 
+VkFormat vk_surface_fmt()
+{
+    return vk_ctx.surface_fmt.format;
+}
+
+bool vk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass)
+{
+    if (VK_SUCCEEDED(vkCreateRenderPass(vk_ctx.device, rp_create_info, NULL, render_pass))) {
+        return true;
+    } else {
+        vk_log(VK_ERROR, "failed when calling vkCreateRenderPass");
+        return false;
+    }
+}
+
+void vk_destroy_render_pass(VkRenderPass render_pass)
+{
+    vkDestroyRenderPass(vk_ctx.device, render_pass, NULL);
+}
+
 bool vk_frame_buffs_init()
 {
     vk_da_resize(&vk_ctx.swapchain.frame_buffs, vk_ctx.swapchain.img_views.count);
@@ -1111,13 +1156,61 @@ bool vk_frame_buffs_init()
     return true;
 }
 
+bool vk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb)
+{
+    VkFramebufferCreateInfo frame_buff_ci = {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = rp,
+        .attachmentCount = att_count,
+        .pAttachments = atts,
+        .width =  w,
+        .height = h,
+        .layers = 1,
+    };
+    if (!VK_SUCCEEDED(vkCreateFramebuffer(vk_ctx.device, &frame_buff_ci, NULL, fb))) {
+        vk_log(VK_ERROR, "failed to create frame buffer");
+        return false;
+    }
+
+    return true;
+}
+
+void vk_destroy_frame_buff(VkFramebuffer frame_buff)
+{
+    vkDestroyFramebuffer(vk_ctx.device, frame_buff, NULL);
+}
+
 void vk_begin_render_pass(float r, float g, float b, float a)
 {
-    VkRenderPassBeginInfo begin_rp = {0};
-    begin_rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    begin_rp.renderPass = vk_ctx.render_pass;
-    begin_rp.framebuffer = vk_ctx.swapchain.frame_buffs.items[img_idx];
-    begin_rp.renderArea.extent = vk_ctx.extent;
+    VkClearValue clear_color = {
+        .color = {{r, g, b, a}}
+    };
+    VkClearValue clear_depth = {
+        .depthStencil = {
+            .depth = 1.0f,
+            .stencil = 0,
+        }
+    };
+    VkClearValue clear_values[] = {clear_color, clear_depth};
+    VkRenderPassBeginInfo begin_rp = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = vk_ctx.render_pass,
+        .framebuffer = vk_ctx.swapchain.frame_buffs.items[img_idx],
+        .renderArea.extent = vk_ctx.extent,
+        .clearValueCount = VK_ARRAY_LEN(clear_values),
+        .pClearValues = clear_values,
+    };
+    vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+void vk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRenderPass rp, VkFramebuffer fb, VkExtent2D extent)
+{
+    VkRenderPassBeginInfo begin_rp = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = rp,
+        .framebuffer = fb,
+        .renderArea.extent = extent,
+    };
     VkClearValue clear_color = {
         .color = {
             {r, g, b, a}
@@ -1135,8 +1228,100 @@ void vk_begin_render_pass(float r, float g, float b, float a)
     vkCmdBeginRenderPass(vk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
+void vk_end_render_pass()
+{
+    vkCmdEndRenderPass(vk_ctx.gfx_buff);
+}
+
+bool vk_end_rec_gfx()
+{
+    VkResult res = vkEndCommandBuffer(vk_ctx.gfx_buff);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to record command buffer");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_submit_gfx()
+{
+    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags wait_stages[] = {
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
+    VkSemaphore wait_sems[] = {vk_ctx.compute_fin_sem, vk_ctx.img_avail_sem};
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &vk_ctx.gfx_buff,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &vk_ctx.render_fin_sem,
+        // .waitSemaphoreCount = 1,
+        // .pWaitSemaphores = &vk_ctx.img_avail_sem,
+        // .pWaitDstStageMask = &wait_stage,
+
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &wait_sems[1],
+        .pWaitDstStageMask = &wait_stages[1],
+
+        // .waitSemaphoreCount = 2,
+        // .pWaitSemaphores = wait_sems,
+        // .pWaitDstStageMask = wait_stages,
+    };
+
+    VkResult res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to submit to graphics queue");
+        return false;
+    }
+
+    VkPresentInfoKHR present = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &vk_ctx.render_fin_sem,
+        .swapchainCount = 1,
+        .pSwapchains = &vk_ctx.swapchain.handle,
+        .pImageIndices = &img_idx,
+    };
+    res = vkQueuePresentKHR(vk_ctx.present_queue, &present);
+    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || vk_ctx.swapchain.buff_resized) {
+        vk_ctx.swapchain.buff_resized = false;
+        if (!vk_recreate_swapchain()) return false;
+    } else if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to present queue");
+        return false;
+    }
+
+    return true;
+}
+
+bool vk_basic_gfx_submit()
+{
+    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &vk_ctx.gfx_buff,
+       //  .waitSemaphoreCount = 1,
+       //  .pWaitSemaphores = &vk_ctx.img_avail_sem,
+       // . pWaitDstStageMask = &wait_stage,
+    };
+
+    VkResult res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to submit to graphics queue");
+        return false;
+    }
+
+    return true;
+}
+
 void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp)
 {
+    assert(0 && "vk_draw deprecated");
+
     VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
@@ -1155,46 +1340,33 @@ void vk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_B
     vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
 }
 
-void vk_draw_w_push_const(VkPipeline pl, VkPipelineLayout pl_layout, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *pk, size_t pk_size)
+void vk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count)
 {
-    VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    VkViewport viewport = {
-        .width = (float)vk_ctx.extent.width,
-        .height =(float)vk_ctx.extent.height,
-        .maxDepth = 1.0f,
-    };
-    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
-    VkRect2D scissor = {.extent = vk_ctx.extent};
-    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    VkCommandBuffer cmd_buff = vk_ctx.gfx_buff;
 
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, pk_size, pk);
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
-}
-
-void vk_draw2(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Vk_Buffer vtx_buff, Vk_Buffer idx_buff, void *float16_mvp)
-{
-    VkCommandBuffer cmd_buffer = vk_ctx.gfx_buff;
-
-    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    vkCmdBindDescriptorSets(vk_ctx.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);
+    vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
         .width    = vk_ctx.extent.width,
         .height   = vk_ctx.extent.height,
         .maxDepth = 1.0f,
     };
-    vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+    vkCmdSetViewport(cmd_buff, 0, 1, &viewport);
     VkRect2D scissor = {0};
     scissor.extent = vk_ctx.extent;
-    vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+    vkCmdSetScissor(cmd_buff, 0, 1, &scissor);
+
+    /* bind descriptor sets */
+    for (size_t i = 0; i < ds_count; i++)
+        vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, i, 1, &ds[i], 0, NULL);
+}
+
+void vk_draw_buffers(Vk_Buffer vtx_buff, Vk_Buffer idx_buff)
+{
+    VkCommandBuffer cmd_buff = vk_ctx.gfx_buff;
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd_buffer, 0, 1, &vtx_buff.handle, offsets);
-    vkCmdBindIndexBuffer(cmd_buffer, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(cmd_buffer, pl_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, float16_mvp);
-    vkCmdDrawIndexed(cmd_buffer, idx_buff.count, 1, 0, 0, 0);
+    vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buff, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(cmd_buff, idx_buff.count, 1, 0, 0, 0);
 }
 
 void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
@@ -1204,10 +1376,10 @@ void vk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, s
     vkCmdDispatch(vk_ctx.compute_buff, x, y, z);
 }
 
-void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t offset, uint32_t size, void *value)
+void vk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value)
 {
     VkCommandBuffer cmd_buff = (flags == VK_SHADER_STAGE_COMPUTE_BIT) ? vk_ctx.compute_buff : vk_ctx.gfx_buff;
-    vkCmdPushConstants(cmd_buff, pl_layout, flags, offset, size, value);
+    vkCmdPushConstants(cmd_buff, pl_layout, flags, 0, size, value);
 }
 
 void vk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
@@ -1303,7 +1475,7 @@ void vk_compute_pl_barrier()
     };
     vkCmdPipelineBarrier2(vk_ctx.compute_buff, &dependency);
 }
-#endif // PLATFORM_PLATFORM_DESKTOP_GLFW
+#endif // PLATFORM_DESKTOP_GLFW
 
 void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
@@ -1332,7 +1504,7 @@ void vk_draw_points(Vk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipe
     vkCmdDraw(cmd_buffer, vtx_buff.count, 1, 0, 0);
 }
 
-bool vk_begin_drawing()
+bool vk_wait_to_begin_gfx()
 {
     VkResult res = vkWaitForFences(vk_ctx.device, 1, &vk_ctx.gfx_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
@@ -1364,70 +1536,37 @@ bool vk_begin_drawing()
         return false;
     }
 
-    VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
-    res = vkBeginCommandBuffer(vk_ctx.gfx_buff, &begin_info);
+    return true;
+}
+
+bool vk_wait_reset()
+{
+    VkResult res = vkWaitForFences(vk_ctx.device, 1, &vk_ctx.gfx_fence, VK_TRUE, UINT64_MAX);
     if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR,"failed to begin command buffer");
+        vk_log(VK_ERROR, "failed to wait for fences");
+        return false;
+    }
+
+    res = vkResetFences(vk_ctx.device, 1, &vk_ctx.gfx_fence);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR, "failed to reset fences");
+        return false;
+    }
+    res = vkResetCommandBuffer(vk_ctx.gfx_buff, 0);
+    if (!VK_SUCCEEDED(res)) {
+        vk_log(VK_ERROR,"failed to reset cmd buffer");
         return false;
     }
 
     return true;
 }
 
-bool vk_end_drawing()
+bool vk_begin_rec_gfx()
 {
-    vkCmdEndRenderPass(vk_ctx.gfx_buff);
-    VkResult res = vkEndCommandBuffer(vk_ctx.gfx_buff);
+    VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
+    VkResult res = vkBeginCommandBuffer(vk_ctx.gfx_buff, &begin_info);
     if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR, "failed to record command buffer");
-        return false;
-    }
-
-    // VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkPipelineStageFlags wait_stages[] = {
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
-    VkSemaphore wait_sems[] = {vk_ctx.compute_fin_sem, vk_ctx.img_avail_sem};
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &vk_ctx.gfx_buff,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &vk_ctx.render_fin_sem,
-        // .waitSemaphoreCount = 1,
-        // .pWaitSemaphores = &vk_ctx.img_avail_sem,
-        // .pWaitDstStageMask = &wait_stage,
-
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &wait_sems[1],
-        .pWaitDstStageMask = &wait_stages[1],
-
-        // .waitSemaphoreCount = 2,
-        // .pWaitSemaphores = wait_sems,
-        // .pWaitDstStageMask = wait_stages,
-    };
-
-    res = vkQueueSubmit(vk_ctx.gfx_queue, 1, &submit, vk_ctx.gfx_fence);
-    if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR, "failed to submit to graphics queue");
-        return false;
-    }
-
-    VkPresentInfoKHR present = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &vk_ctx.render_fin_sem,
-        .swapchainCount = 1,
-        .pSwapchains = &vk_ctx.swapchain.handle,
-        .pImageIndices = &img_idx,
-    };
-    res = vkQueuePresentKHR(vk_ctx.present_queue, &present);
-    if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || vk_ctx.swapchain.buff_resized) {
-        vk_ctx.swapchain.buff_resized = false;
-        if (!vk_recreate_swapchain()) return false;
-    } else if (!VK_SUCCEEDED(res)) {
-        vk_log(VK_ERROR, "failed to present queue");
+        vk_log(VK_ERROR, "failed to begin recording into the default gfx command buffer");
         return false;
     }
 
@@ -2356,6 +2495,36 @@ void vk_raster_sampler_barrier(VkImage img)
     vkCmdPipelineBarrier(
         vk_ctx.gfx_buff,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_FLAGS_NONE,
+        0, NULL,
+        0, NULL,
+        1, &barrier
+    );
+}
+
+void vk_swapchain_img_barrier()
+{
+    VkImageMemoryBarrier barrier = {
+       .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+       .srcAccessMask = VK_ACCESS_SHADER_READ_BIT,
+       .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+       .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+       .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+       .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+       .image = vk_ctx.swapchain.imgs.items[img_idx],
+       .subresourceRange = {
+           .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+           .baseMipLevel = 0,
+           .levelCount = 1,
+           .baseArrayLayer = 0,
+           .layerCount = 1,
+       },
+    };
+    vkCmdPipelineBarrier(
+        vk_ctx.compute_buff,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_FLAGS_NONE,
         0, NULL,

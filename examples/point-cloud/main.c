@@ -91,8 +91,8 @@ bool create_pipeline()
     };
     Pipeline_Config config = {
         .pl_layout = gfx_pl_layout,
-        .vert = "./res/point-cloud.vert.spv",
-        .frag = "./res/point-cloud.frag.spv",
+        .vert = "./res/point-cloud.vert.glsl.spv",
+        .frag = "./res/point-cloud.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
         .polygon_mode = VK_POLYGON_MODE_POINT,
         .vert_attrs = vert_attrs,

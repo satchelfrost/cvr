@@ -3,9 +3,8 @@
 #define MAX_POINTS 100000000 // 100 million
 #define MIN_POINTS 100000    // 100 thousand
 #define FRAME_BUFF_SZ 2048
-#define MAX_FPS_REC 100
-#define SUBGROUP_SZ 1024     // Subgroup size for render.comp
-#define NUM_BATCHES 8        // Number of batches to dispatch
+#define WORKGROUP_SZ 1024
+#define NUM_BATCHES 8
 
 typedef unsigned int uint;
 typedef struct {
@@ -22,14 +21,6 @@ typedef struct {
     const size_t max;
     const size_t min;
 } Point_Cloud;
-
-typedef struct {
-    size_t *items;
-    size_t count;
-    size_t capacity;
-    const size_t max;
-    bool collecting;
-} FPS_Record;
 
 typedef struct {
     Vk_Buffer buff;
@@ -202,11 +193,11 @@ bool build_compute_cmds(size_t point_cloud_count)
     if (!vk_rec_compute()) return false;
 
         /* submit batches of points to render-compute shader */
-        group_x = point_cloud_count / SUBGROUP_SZ + 1;
+        group_x = point_cloud_count / WORKGROUP_SZ + 1;
         size_t batch_size = group_x / NUM_BATCHES;
         for (size_t i = 0; i < NUM_BATCHES; i++) {
-            uint32_t offset = i * batch_size * SUBGROUP_SZ;
-            vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &offset);
+            uint32_t offset = i * batch_size * WORKGROUP_SZ;
+            vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(uint32_t), &offset);
             vk_compute(cs_render_pl, cs_render_pl_layout, ds_sets[DS_RENDER], batch_size, group_y, group_z);
         }
 
@@ -234,14 +225,14 @@ bool create_pipelines()
     };
 
     /* compute shader render pipeline */
-    if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                 return false;
-    if (!vk_compute_pl_init("./res/render.comp.spv", cs_render_pl_layout, &cs_render_pl))    return false;
+    if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                   return false;
+    if (!vk_compute_pl_init("./res/render.comp.glsl.spv", cs_render_pl_layout, &cs_render_pl)) return false;
 
     /* compute shader resolve pipeline */
     layout_ci.pSetLayouts = &cs_resolve_ds_layout;
     layout_ci.pushConstantRangeCount = 0;
-    if (!vk_pl_layout_init(layout_ci, &cs_resolve_pl_layout))                                return false;
-    if (!vk_compute_pl_init("./res/resolve.comp.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return false;
+    if (!vk_pl_layout_init(layout_ci, &cs_resolve_pl_layout))                                     return false;
+    if (!vk_compute_pl_init("./res/resolve.comp.glsl.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return false;
 
     /* screen space triangle + frag image sampler for raster display */
     layout_ci.pSetLayouts = &gfx_ds_layout;
@@ -257,7 +248,6 @@ int main()
     Vk_Texture storage_tex = {.img.extent = {FRAME_BUFF_SZ, FRAME_BUFF_SZ}};
     Frame_Buffer frame = alloc_frame_buff();
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
-    FPS_Record record = {.max = MAX_FPS_REC};
 
     /* generate initial point cloud */
     size_t num_points = MIN_POINTS;
@@ -310,7 +300,6 @@ int main()
                 vk_log(VK_INFO, "min point count reached");
             }
         }
-        if (is_key_pressed(KEY_R)) record.collecting = true;
 
         /* re-upload point cloud if we've changed point cloud size */
         if (pc.pending_change) {
@@ -330,20 +319,6 @@ int main()
             pc.pending_change = false;
         }
 
-        /* collect the frame rate */
-        if (record.collecting) {
-            vk_da_append(&record, get_fps());
-            if (record.count >= record.max) {
-                /* print results and reset */
-                size_t sum = 0;
-                for (size_t i = 0; i < record.count; i++) sum += record.items[i];
-                float ave = (float) sum / record.count;
-                vk_log(VK_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
-                record.count = 0;
-                record.collecting = false;
-            }
-        }
-
         /* submit compute commands */
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
@@ -354,12 +329,13 @@ int main()
         end_mode_3d();
 
         /* draw command for screen space triangle (sst) */
-        start_timer();
-        if (!vk_begin_drawing()) return 1;
+        begin_timer();
+        if (!vk_wait_to_begin_gfx()) return 1;
+            vk_begin_rec_gfx();
             vk_raster_sampler_barrier(storage_tex.img.handle);
             vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
             vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
-        end_drawing();
+        end_drawing(); // ends gfx rec commands and render pass
     }
 
     wait_idle();

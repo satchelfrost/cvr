@@ -165,6 +165,7 @@ void close_window()
 void enable_full_screen()
 {
     full_screen = true;
+    vk_log(VK_INFO, "fullscreen mode enabled");
 }
 
 bool default_pl_fill_init()
@@ -204,8 +205,8 @@ bool default_pl_fill_init()
     };
     Pipeline_Config config = {
         .pl_layout = pipelines.layouts[DEFAULT_PL_FILL],
-        .vert = "./res/default.vert.spv",
-        .frag = "./res/default.frag.spv",
+        .vert = "./res/default.vert.glsl.spv",
+        .frag = "./res/default.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
@@ -238,7 +239,10 @@ bool draw_shape(Shape_Type shape_type)
     Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
-    vk_draw(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], vtx_buff, idx_buff, &f16_mvp);
+
+    vk_bind_gfx(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], NULL, 0);
+    vk_push_const(pipelines.layouts[DEFAULT_PL_FILL], VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
+    vk_draw_buffers(vtx_buff, idx_buff);
 
     return true;
 }
@@ -259,7 +263,11 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     float16 f16_mvp = MatrixToFloatV(mvp);
     Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
     Vk_Buffer idx_buff = shapes[shape].idx_buff;
-    vk_draw2(pl, pl_layout, ds, vtx_buff, idx_buff, &f16_mvp);
+
+    if (ds) vk_bind_gfx(pl, pl_layout, &ds, 1);
+    else vk_bind_gfx(pl, pl_layout, NULL, 0);
+    vk_push_const(pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
+    vk_draw_buffers(vtx_buff, idx_buff);
 
     return true;
 }
@@ -302,8 +310,8 @@ bool default_pl_wireframe_init()
     };
     Pipeline_Config config = {
         .pl_layout = pipelines.layouts[DEFAULT_PL_WIREFRAME],
-        .vert = "./res/default.vert.spv",
-        .frag = "./res/default.frag.spv",
+        .vert = "./res/default.vert.glsl.spv",
+        .frag = "./res/default.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_LINE,
         .vert_attrs = vert_attrs,
@@ -336,11 +344,11 @@ bool draw_shape_wireframe(Shape_Type shape_type)
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
-    vk_draw(
-        pipelines.handles[DEFAULT_PL_WIREFRAME],
-        pipelines.layouts[DEFAULT_PL_WIREFRAME],
-        vtx_buff, idx_buff, &f16_mvp
-    );
+
+    vk_bind_gfx(pipelines.handles[DEFAULT_PL_WIREFRAME], pipelines.layouts[DEFAULT_PL_WIREFRAME], NULL, 0);
+    vk_push_const(pipelines.layouts[DEFAULT_PL_WIREFRAME], VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
+    vk_draw_buffers(vtx_buff, idx_buff);
+
     return true;
 }
 
@@ -456,24 +464,15 @@ static void wait_time(double seconds)
     while (get_time() < destination_time) {}
 }
 
-void start_timer()
+void begin_timer()
 {
     cvr_time.curr   = get_time();
     cvr_time.update = cvr_time.curr - cvr_time.prev;
     cvr_time.prev   = cvr_time.curr;
 }
 
-void begin_drawing(Color color)
+void end_timer()
 {
-    start_timer();
-    vk_begin_drawing();
-    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
-}
-
-void end_drawing()
-{
-    vk_end_drawing();
-
     cvr_time.curr = get_time();
     cvr_time.draw = cvr_time.curr - cvr_time.prev;
     cvr_time.prev = cvr_time.curr;
@@ -488,8 +487,25 @@ void end_drawing()
         cvr_time.frame += wait;
     }
 
-    poll_input_events();
     cvr_time.frame_count++;
+}
+
+void begin_drawing(Color color)
+{
+    begin_timer();
+    vk_wait_to_begin_gfx();
+    vk_begin_rec_gfx();
+    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+}
+
+void end_drawing()
+{
+    vk_end_render_pass();
+    vk_end_rec_gfx();
+    vk_submit_gfx();
+
+    end_timer();
+    poll_input_events();
 }
 
 void push_matrix()

@@ -277,6 +277,7 @@ float get_gamepad_axis_movement(int axis);
 bool is_mouse_button_down(int button);
 float get_mouse_wheel_move();
 int get_last_btn_pressed();
+void poll_input_events();
 
 /* time */
 double get_frame_time();
@@ -284,7 +285,8 @@ double get_time();
 int get_fps();
 int get_average_fps();
 void set_target_fps(int fps);
-void start_timer(); // called implicitly by begin_drawing
+void begin_timer();
+void end_timer();
 void log_fps();
 
 /* transformations */
