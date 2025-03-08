@@ -79,6 +79,7 @@ typedef struct {
     float16 main_cam_mvp;
     float16 cctv_mvps[NUM_CCTVS];
     Vector4 cctv_pos[NUM_CCTVS];
+    Vector4 main_cam_pos;
     float16 model;
     int shader_mode;
     int cam_order_0;
@@ -359,12 +360,9 @@ typedef enum {
     SHADER_MODE_MODEL,
     SHADER_MODE_FRUSTUM_OVERLAP,
     SHADER_MODE_SINGLE_VID_TEX,
-    SHADER_MODE_MULTI_VID_TEX,
-    SHADER_MODE_MULTI_VID_TEX_BLEND,
-    SHADER_MODE_VERT_COLORED_BY_CCTV,
-    SHADER_MODE_VERT_CLOSEST_CCTV_TEX,
-    SHADER_MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK,
-    SHADER_MODE_SEAM_BLEND,
+    SHADER_MODE_MULTI_VID_VIEW_SEAM_BLEND,
+    SHADER_MODE_WIPE,
+    SHADER_MODE_ANGLE_BLEND,
     SHADER_MODE_COUNT,
 } Shader_Mode;
 
@@ -372,32 +370,17 @@ void log_shader_mode(Shader_Mode mode)
 {
     switch (mode) {
     case SHADER_MODE_MODEL:
-        vk_log(VK_INFO, "Shader mode: just the point cloud model");
-        break;
+        vk_log(VK_INFO, "shader mode model"); break;
     case SHADER_MODE_FRUSTUM_OVERLAP:
-        vk_log(VK_INFO, "Shader mode: cctv frustum overlap view");
-        break;
+        vk_log(VK_INFO, "shader mode frustum overlap"); break;
     case SHADER_MODE_SINGLE_VID_TEX:
-        vk_log(VK_INFO, "Shader mode: single video texture");
-        break;
-    case SHADER_MODE_MULTI_VID_TEX:
-        vk_log(VK_INFO, "Shader mode: multiple video textures");
-        break;
-    case SHADER_MODE_MULTI_VID_TEX_BLEND:
-        vk_log(VK_INFO, "Shader mode: multiple video textures with smooth blend");
-        break;
-    case SHADER_MODE_VERT_COLORED_BY_CCTV:
-        vk_log(VK_INFO, "Shader mode: vertex colored by closest cctv (darker regions cannot be seen by closest cctv)");
-        break;
-    case SHADER_MODE_VERT_CLOSEST_CCTV_TEX:
-        vk_log(VK_INFO, "Shader mode: vertex gets texture color from closest cctv");
-        break;
-    case SHADER_MODE_VERT_CLOSEST_CCTV_TEX_W_FALLBACK:
-        vk_log(VK_INFO, "Shader mode: vertex gets texture color from closest cctv, and fallback texture (next closest)");
-        break;
-    case SHADER_MODE_SEAM_BLEND:
-        vk_log(VK_INFO, "Shader mode: same as MULTI_VID_TEX_BLEND but with seam blending");
-        break;
+        vk_log(VK_INFO, "shader mode single vid_tex"); break;
+    case SHADER_MODE_MULTI_VID_VIEW_SEAM_BLEND:
+        vk_log(VK_INFO, "shader mode multi vid view seam blend"); break;
+    case SHADER_MODE_WIPE:
+        vk_log(VK_INFO, "shader mode wipe"); break;
+    case SHADER_MODE_ANGLE_BLEND:
+        vk_log(VK_INFO, "shader mode angle blend"); break;
     default:
         vk_log(VK_ERROR, "Shader mode: unrecognized %d", mode);
         break;
@@ -768,6 +751,13 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
     ubo->data.cam_order_1 = cam_order[1];
     ubo->data.cam_order_2 = cam_order[2];
     ubo->data.cam_order_3 = cam_order[3];
+    Camera *main_cam = four_cameras - 1;
+    ubo->data.main_cam_pos = (Vector4) {
+        main_cam[0].position.x,
+        main_cam[0].position.y,
+        main_cam[0].position.z,
+        1.0,
+    };
     ubo->data.shader_mode = shader_mode;
     ubo->data.elevation_based_occlusion = (elevation_based_occlusion) ? 1 : 0;
     ubo->data.blend_ratio = blend_ratio;
