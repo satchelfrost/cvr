@@ -202,8 +202,9 @@ static Example examples[] = {
                 "sst.frag.glsl",
                 "render.comp.glsl",
                 "resolve.comp.glsl",
+                "depth_map.comp.glsl",
             },
-            .count = 4,
+            .count = 5,
         },
         .c_files = {
             .names = default_c_file_names,

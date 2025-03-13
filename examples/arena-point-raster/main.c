@@ -48,6 +48,7 @@ typedef struct {
     Vk_Buffer buff;
     const char *name;
     VkDescriptorSet set;
+    VkDescriptorSet depth_ds;
 } Point_Cloud_Layer;
 
 typedef struct {
@@ -71,9 +72,7 @@ typedef struct {
 typedef struct {
     Vk_Buffer buff;
     void *data;
-} Texture_Buffer;
-
-Texture_Buffer tex_buff = {0};
+} Depth_Buffer;
 
 typedef struct {
     float16 main_cam_mvp;
@@ -96,6 +95,16 @@ typedef struct {
     Vk_Buffer buff;
     UBO_Data data;
 } Point_Cloud_UBO;
+
+typedef struct {
+    float16 cctv_mvps[NUM_CCTVS];
+    Vector2 frame_sizes[NUM_CCTVS];
+} Depth_Map_Data;
+
+typedef struct {
+    Vk_Buffer buff;
+    Depth_Map_Data data;
+} Depth_Map_UBO;
 
 typedef enum {
     VIDEO_PLANE_Y,
@@ -138,6 +147,7 @@ typedef struct {
     plm_t *plms[VIDEO_IDX_COUNT];
     float aspects[VIDEO_IDX_COUNT];
     plm_frame_t initial_frames[VIDEO_IDX_COUNT];
+    Depth_Buffer depths;
 } Video_Textures;
 
 Video_Textures video_textures = {0};
@@ -158,6 +168,7 @@ Video_Queue video_queue = {0};
 /* Vulkan state */
 VkDescriptorSetLayout cs_render_ds_layout;
 VkDescriptorSetLayout cs_resolve_ds_layout;
+VkDescriptorSetLayout cs_depth_map_layout;
 VkDescriptorSetLayout gfx_ds_layout;
 VkPipelineLayout cs_render_pl_layout;
 VkPipelineLayout cs_resolve_pl_layout;
@@ -428,13 +439,41 @@ defer:
     return result;
 }
 
-Frame_Buffer alloc_frame_buff(size_t frame_buff_sz)
+Frame_Buffer alloc_frame_buff(size_t width, size_t height)
 {
-    Frame_Buffer frame = {0};
-    frame.buff.count = frame_buff_sz;
-    frame.buff.size  = sizeof(uint64_t) * frame.buff.count;
-    frame.data = malloc(frame.buff.size);
+    size_t count = width * height;
+    size_t sz = count * sizeof(uint64_t);
+    Frame_Buffer frame = {
+        .buff = {
+            .count = count,
+            .size  = sz,
+        },
+        .data = malloc(sz),
+    };
     return frame;
+}
+
+void alloc_depth_buffs()
+{
+    size_t count = 0;
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        plm_frame_t frm = video_textures.initial_frames[i];
+        count += frm.width * frm.height;
+    }
+    size_t sz = sizeof(uint32_t) * count;
+
+    /* note the "depth" buffer is actually multiple (4) */
+    video_textures.depths = (Depth_Buffer) {
+        .buff = {
+            .count = count,
+            .size  = sz,
+        },
+        .data = malloc(sz),
+    };
+
+    /* initialize to max depth */
+    for (size_t i = 0; i < count; i++)
+        ((uint32_t *)video_textures.depths.data)[i] = 0xffffffff;
 }
 
 bool setup_ds_layouts()
@@ -444,8 +483,9 @@ bool setup_ds_layouts()
         {DS_BINDING(0,  UNIFORM_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(1,  STORAGE_BUFFER, COMPUTE_BIT)},
         {DS_BINDING(2,  STORAGE_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(3,  STORAGE_BUFFER, COMPUTE_BIT)},
         {
-            .binding = 3,
+            .binding = 4,
             .descriptorCount = VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -476,6 +516,16 @@ bool setup_ds_layouts()
     layout_ci.pBindings = &gfx_binding;
     if (!vk_create_ds_layout(layout_ci, &gfx_ds_layout)) return false;
 
+    /* depth_maps.comp */
+    VkDescriptorSetLayoutBinding cs_depth_map_bindings[] = {
+        {DS_BINDING(0,  UNIFORM_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(1,  STORAGE_BUFFER, COMPUTE_BIT)},
+        {DS_BINDING(2,  STORAGE_BUFFER, COMPUTE_BIT)},
+    };
+    layout_ci.bindingCount = VK_ARRAY_LEN(cs_depth_map_bindings);
+    layout_ci.pBindings = cs_depth_map_bindings;
+    if (!vk_create_ds_layout(layout_ci, &cs_depth_map_layout)) return false;
+
     return true;
 }
 
@@ -485,10 +535,10 @@ bool setup_ds_pool()
     size_t sampler_count = 1 + VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT * LOD_COUNT;
 
     VkDescriptorPoolSize pool_sizes[] = {
-        {DS_POOL(UNIFORM_BUFFER, 1)},                    // 1 in render.comp
-        {DS_POOL(STORAGE_BUFFER, 3 * LOD_COUNT)},          // (2 in render.comp + 1 in resolve.comp) * LOD_COUNT
-        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count)},
-        {DS_POOL(STORAGE_IMAGE, 1)},                     // 1 in resolve.comp
+        {DS_POOL(UNIFORM_BUFFER, 2)},                      // 1 in render.comp + 1 in depth_map.comp
+        {DS_POOL(STORAGE_BUFFER, 6 * LOD_COUNT)},          // (3 in render.comp + 1 in resolve.comp + 2 in depth_map.comp) * LOD_COUNT
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count)},  // 1 in default.frag
+        {DS_POOL(STORAGE_IMAGE, 1)},                       // 1 in resolve.comp
     };
 
     VkDescriptorPoolCreateInfo pool_ci = {
@@ -548,6 +598,10 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         .buffer = frame_buff.handle,
         .range  = frame_buff.size,
     };
+    VkDescriptorBufferInfo depth_buff_info = {
+        .buffer = video_textures.depths.buff.handle,
+        .range  = video_textures.depths.buff.size,
+    };
     VkDescriptorImageInfo img_infos[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT] = {0};
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
@@ -561,14 +615,19 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
         {DS_WRITE_BUFF(0,  UNIFORM_BUFFER, pc_layers[lod].set, &ubo_info)},
         {DS_WRITE_BUFF(1,  STORAGE_BUFFER, pc_layers[lod].set, &pc_info)},
         {DS_WRITE_BUFF(2,  STORAGE_BUFFER, pc_layers[lod].set, &frame_buff_info)},
+        {DS_WRITE_BUFF(3,  STORAGE_BUFFER, pc_layers[lod].set, &depth_buff_info)},
         {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = pc_layers[lod].set,
-            .dstBinding = 3,
+            .dstBinding = 4,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT,
             .pImageInfo = img_infos,
         },
+        /* depth_map.comp */
+        {DS_WRITE_BUFF(0,  UNIFORM_BUFFER, pc_layers[lod].depth_ds, &ubo_info)},
+        {DS_WRITE_BUFF(1,  STORAGE_BUFFER, pc_layers[lod].depth_ds, &pc_info)},
+        {DS_WRITE_BUFF(2,  STORAGE_BUFFER, pc_layers[lod].depth_ds, &depth_buff_info)},
     };
     vk_update_ds(VK_ARRAY_LEN(writes), writes);
 
@@ -690,6 +749,28 @@ bool build_compute_cmds(size_t highest_lod)
     return true;
 }
 
+bool build_depth_compute_cmds(size_t highest_lod)
+{
+    size_t group_x = 1, group_y = 1, group_z = 1;
+    if (!vk_rec_compute()) return false;
+        /* loop through the lod layers of the point cloud (render.comp shader) */
+        for (size_t lod = 0; lod <= highest_lod; lod++) {
+            /* submit batches of points to render compute shader */
+            group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
+            size_t batch_size = group_x / NUM_BATCHES;
+            for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
+                Push_Const pk = {
+                    .offset = batch * batch_size * WORK_GROUP_SZ,
+                    .count = pc_layers[lod].count,
+                };
+                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
+                vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
+            }
+        }
+    if (!vk_end_rec_compute()) return false;
+    return true;
+}
+
 bool create_pipelines()
 {
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 2 * sizeof(uint32_t)};
@@ -766,6 +847,29 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
 
     memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
 
+    return true;
+}
+
+bool update_depth_map_ubo(Camera *four_cameras, Depth_Map_UBO *ubo)
+{
+    /* calculate mvps for cctvs */
+    Matrix model = {0};
+    if (!get_matrix_tos(&model)) return false;
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        Matrix view = MatrixLookAt(
+            four_cameras[i].position,
+            four_cameras[i].target,
+            four_cameras[i].up
+        );
+        Matrix proj = get_proj_aspect(four_cameras[i], video_textures.aspects[i]);
+        Matrix view_proj = MatrixMultiply(view, proj);
+        Matrix mvp = MatrixMultiply(model, view_proj);
+        ubo->data.cctv_mvps[i] = MatrixToFloatV(mvp);
+
+        plm_frame_t frm = video_textures.initial_frames[i];
+        ubo->data.frame_sizes[i] = (Vector2) {.x = frm.width, .y = frm.height};
+    }
+    memcpy(ubo->buff.mapped, &ubo->data, ubo->buff.size);
     return true;
 }
 
@@ -954,6 +1058,7 @@ void log_point_count(size_t lod)
 int main(int argc, char **argv)
 {
     Point_Cloud_UBO ubo = {.buff = {.count = 1, .size = sizeof(UBO_Data)}};
+    Depth_Map_UBO depth_map_ubo = {.buff = {.count = 1, .size = sizeof(Depth_Map_Data)}};
     Time_Records records = {.max = MAX_FPS_REC};
 
     /* initialize window and Vulkan */
@@ -975,10 +1080,6 @@ int main(int argc, char **argv)
         init_window(config.width, config.height, "Arena Point Cloud Rasterization");
         set_window_pos(config.x_pos, config.y_pos);
     }
-
-    initial_win_size = get_window_size();
-    Vk_Texture storage_tex = {.img.extent =   {initial_win_size.width,  initial_win_size.height}};
-    Frame_Buffer frame_buff = alloc_frame_buff(initial_win_size.width * initial_win_size.height);
 
     /* load videos into plm */
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
@@ -1012,6 +1113,12 @@ int main(int argc, char **argv)
         if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
     }
 
+    /* allocate frame buffers */
+    initial_win_size = get_window_size();
+    Vk_Texture storage_tex = {.img.extent =   {initial_win_size.width,  initial_win_size.height}};
+    Frame_Buffer frame_buff = alloc_frame_buff(initial_win_size.width, initial_win_size.height);
+    alloc_depth_buffs();
+
     /* general state tracking */
     copy_camera_infos(camera_defaults, &cameras[1], VK_ARRAY_LEN(camera_defaults));
     int cam_view_idx = 0;
@@ -1022,12 +1129,17 @@ int main(int argc, char **argv)
     float vid_update_time = 0.0f;
     bool playing = false;
     bool elevation_based_occlusion = false;
+    bool depth_map_needs_update = true;
 
     for (size_t i = 0; i <= lod; i++)
-        if (!vk_comp_buff_staged_upload(&pc_layers[i].buff, pc_layers[i].items)) return 1;
-    if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))          return 1;
-    if (!vk_ubo_init(&ubo.buff))                                                 return 1;
-    if (!vk_create_storage_img(&storage_tex))                                    return 1;
+        if (!vk_comp_buff_staged_upload(&pc_layers[i].buff, pc_layers[i].items))
+            return 1;
+    if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))                       return 1;
+    if (!vk_comp_buff_staged_upload(&video_textures.depths.buff, video_textures.depths.data)) return 1;
+    if (!vk_ubo_init(&ubo.buff))                                                              return 1;
+    if (!vk_ubo_init(&depth_map_ubo.buff))                                                    return 1;
+    NOB_TODO("make sure the img sizes for the depth buffers are passed in the uniform");
+    if (!vk_create_storage_img(&storage_tex))                                                 return 1;
 
     /* setup descriptors */
     if (!setup_ds_layouts())                          return 1;
@@ -1041,8 +1153,10 @@ int main(int argc, char **argv)
 
     /* allocate descriptor sets based on layouts */
     for (size_t i = 0; i < LOD_COUNT; i++) {
-        VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&cs_render_ds_layout, 1, pool)};
-        if (!vk_alloc_ds(alloc, &pc_layers[i].set)) return false;
+        VkDescriptorSetAllocateInfo render_alloc = {DS_ALLOC(&cs_render_ds_layout, 1, pool)};
+        if (!vk_alloc_ds(render_alloc, &pc_layers[i].set)) return false;
+        VkDescriptorSetAllocateInfo depth_alloc = {DS_ALLOC(&cs_depth_map_layout, 1, pool)};
+        if (!vk_alloc_ds(depth_alloc, &pc_layers[i].depth_ds)) return false;
     }
 
     for (size_t i = 0; i <= lod; i++)
@@ -1050,6 +1164,16 @@ int main(int argc, char **argv)
 
     /* create pipelines */
     if (!create_pipelines()) return 1;
+
+    /* do an intial render pass with the depth buffer */
+    if (!build_depth_compute_cmds(size_t highest_lod)) return 1;
+    begin_mode_3d(*camera);
+        translate(0.0f, 0.0f, -100.0f);
+        rotate_x(-PI / 2);
+        if (!update_depth_map_ubo(&cameras[1], &depth_map_ubo)) return 1;
+        if (!vk_submit_compute()) return 1;
+        if (!vk_compute_fence_wait()) return 1;
+    end_mode_3d();
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(lod)) return 1;
@@ -1163,6 +1287,7 @@ int main(int argc, char **argv)
             if (!vk_compute_fence_wait()) return 1;
             elevation_based_occlusion = (camera[0].position.y < -1.5f) ? true : false;
             if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, elevation_based_occlusion)) return 1;
+            if (!update_depth_map_ubo(&cameras[1], &depth_map_ubo)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
 
@@ -1183,7 +1308,6 @@ int main(int argc, char **argv)
 
     wait_idle();
     free(frame_buff.data);
-    free(tex_buff.data);
     for (size_t i = 0; i < LOD_COUNT; i++) {
         vk_buff_destroy(&pc_layers[i].buff);
         free(pc_layers[i].items);
@@ -1199,8 +1323,8 @@ int main(int argc, char **argv)
         }
     }
     vk_buff_destroy(&frame_buff.buff);
+    vk_buff_destroy(&video_textures.depths.buff);
     vk_buff_destroy(&ubo.buff);
-    vk_buff_destroy(&tex_buff.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(cs_render_ds_layout);
     vk_destroy_ds_layout(cs_resolve_ds_layout);

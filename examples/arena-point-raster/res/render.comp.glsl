@@ -62,8 +62,12 @@ layout(std430, binding = 2) buffer frame_data {
    uint64_t frame_buff[ ];
 };
 
-/* uses binding 3 -> 14 */
-layout(binding = 3) uniform sampler2D samplers[NUM_CCTVS * NUM_VIDEO_PLANES];
+layout(std430, binding = 3) buffer depth_data {
+   uint depth_buffs[ ];
+};
+
+/* uses binding 4 -> 15 */
+layout(binding = 4) uniform sampler2D samplers[NUM_CCTVS * NUM_VIDEO_PLANES];
 
 mat4 rec601 = mat4(
     1.16438,  0.00000,  1.59603, -0.87079,
@@ -227,17 +231,6 @@ void main()
         }
 
         out_color = vec3_to_uint(tex_colors[cams_of_interest[0].cam_id].rgb);
-        // if (cam_see_count == 1)
-        //     out_color = vec3_to_uint(tex_colors[cams_of_interest[0].cam_id].rgb);
-        // else {
-        //     float oj = acos(cams_of_interest[0].vtx_dot);
-        //     float ok = acos(cams_of_interest[1].vtx_dot);
-        //     float b = oj / (oj + ok);
-        //     float a = ok / (oj + ok);
-        //     ratio_color = smoothstep(0.35, 0.65, b);
-        //     temp_mix = mix(tex_colors[cams_of_interest[0].cam_id], tex_colors[cams_of_interest[1].cam_id], ratio_color);
-        //     out_color = vec3_to_uint(temp_mix.rgb);
-        // }
         break;
     case MODE_ANGLE_BLEND:
         cams_of_interest[0].vtx_dot = dot(normalize(ubo.cctv_pos[0] - world_vert), to_cam);
