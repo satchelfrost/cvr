@@ -5,12 +5,15 @@
 
 #define NUM_CCTVS 4
 #define NUM_VIDEO_PLANES 3
+#define NEAR 0.01
+#define FAR 1000.0
 
 vec4 tex_colors[NUM_CCTVS];
 int cam_sees[NUM_CCTVS];
 vec4 cam_clip[NUM_CCTVS];
 float distances[NUM_CCTVS];
 float seam_blend_ratios[NUM_CCTVS];
+bool in_shadow[NUM_CCTVS];
 
 struct Camera {
     float vtx_dot;
@@ -52,6 +55,7 @@ layout(binding = 0) uniform uniform_data {
     int frame_width;
     int frame_height;
     int elevation_based_occlusion;
+    vec2 img_sizes[NUM_CCTVS]; 
 } ubo;
 
 layout(std430, binding = 1) buffer vert_data {
@@ -96,10 +100,12 @@ void main()
         return;
 
     /* fake occlusion by limiting the height to a little under the stadium floor */
-    int shader_mode = (ubo.elevation_based_occlusion == 1 && vert.z < -1.5) ? MODE_MODEL : ubo.shader_mode;
+    // int shader_mode = (ubo.elevation_based_occlusion == 1 && vert.z < -1.5) ? MODE_MODEL : ubo.shader_mode;
+    int shader_mode = ubo.shader_mode;
 
     /* don't incur the cost of texture sampling if we are only interested in the colors from the model */
     if (shader_mode != MODE_MODEL) {
+        int offset = 0;
         for (int i = 0; i < NUM_CCTVS; i++) {
             /* convert the vertex into each cctvs clip coordinate space */
             vec4 cam_clip = ubo.mvps[i] * vec4(vert.x, vert.y, vert.z, 1.0);
@@ -116,6 +122,18 @@ void main()
             cam_sees[i] = int((-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
                               (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
                               (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
+
+            /* occlusion check */
+            // ivec2 pixel_coords = ivec2(uv * ubo.img_sizes[i]);
+            // ivec2 img_size = ivec2(ubo.img_sizes[i]);
+            vec2 img_sizes = vec2(1280.0, 960.0);
+            ivec2 pixel_coords = ivec2(uv * img_sizes);
+            ivec2 img_size = ivec2(img_sizes);
+            int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
+            // pixel_id += offset;
+            float depth = uintBitsToFloat(depth_buffs[pixel_id]);
+            in_shadow[i] = (depth < cam_clip.w) ? true : false;
+            // offset += img_size.x * img_size.y;
 
             // TODO: possibly move this outside of the loop
             /* calculate the distances from the vertex to the cctvs in world space */
@@ -157,6 +175,7 @@ void main()
         break;
     case MODE_SINGLE_VID_TEX:
         out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
+        if (in_shadow[ubo.cam_order_0]) out_color = vert.color;
         break;
     case MODE_SEAM_AND_VIEW_BLEND:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);

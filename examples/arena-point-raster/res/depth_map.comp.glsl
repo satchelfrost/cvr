@@ -12,7 +12,7 @@ struct Vertex {
 
 layout(binding = 0) uniform uniform_data {
     mat4 mvps[NUM_CCTVS]; // cctv camera's view-proj w/ model
-    ivec2 img_sizes[NUM_CCTVS]; 
+    vec2 img_sizes[NUM_CCTVS]; 
 } ubo;
 
 layout(std430, binding = 1) buffer vert_data {
@@ -38,7 +38,7 @@ void main()
     Vertex vert = vertices[index];
 
     int offset = 0;
-    for (int i = 0; i < NUM_CCTVS; i++) {
+    for (int i = 0; i < 1; i++) {
         vec4 cam_clip = ubo.mvps[i] * vec4(vert.x, vert.y, vert.z, 1.0);
         bool cam_sees = (-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
                         (-cam_clip.w < cam_clip.y && cam_clip.y < cam_clip.w) &&
@@ -47,14 +47,18 @@ void main()
 
         vec3 ndc = cam_clip.xyz / cam_clip.w;
         vec2 uv = ndc.xy * 0.5 + 0.5;
-        ivec2 pixel_coords = ivec2(uv * ubo.img_sizes[i]);
-        int pixel_id = pixel_coords.x + pixel_coords.y * ubo.img_sizes[i].x;
-        pixel_id = pixel_id + offset;
+        // ivec2 pixel_coords = ivec2(uv * ubo.img_sizes[i]);
+        // ivec2 img_size = ivec2(ubo.img_sizes[i]);
+        vec2 img_sizes = vec2(1280.0, 960.0);
+        ivec2 pixel_coords = ivec2(uv * img_sizes);
+        ivec2 img_size = ivec2(img_sizes);
+        int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
+        // pixel_id += offset;
         uint depth = floatBitsToUint(cam_clip.w);
 
         if (depth < depth_buffs[pixel_id])
             atomicMin(depth_buffs[pixel_id], depth);
 
-        offset += ubo.img_sizes[i].x * ubo.img_sizes[i].y
+        // offset += img_size.x * img_size.y;
     }
 }

@@ -89,6 +89,7 @@ typedef struct {
     int frame_width;
     int frame_height;
     int elevation_based_occlusion;
+    Vector2 frame_sizes[NUM_CCTVS];
 } UBO_Data;
 
 typedef struct {
@@ -171,9 +172,11 @@ VkDescriptorSetLayout cs_resolve_ds_layout;
 VkDescriptorSetLayout cs_depth_map_layout;
 VkDescriptorSetLayout gfx_ds_layout;
 VkPipelineLayout cs_render_pl_layout;
+VkPipelineLayout cs_depth_map_pl_layout;
 VkPipelineLayout cs_resolve_pl_layout;
 VkPipelineLayout gfx_pl_layout;
 VkPipeline cs_render_pl;
+VkPipeline cs_depth_map_pl;
 VkPipeline cs_resolve_pl;
 VkPipeline gfx_pl;
 VkDescriptorPool pool;
@@ -535,17 +538,17 @@ bool setup_ds_pool()
     size_t sampler_count = 1 + VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT * LOD_COUNT;
 
     VkDescriptorPoolSize pool_sizes[] = {
-        {DS_POOL(UNIFORM_BUFFER, 2)},                      // 1 in render.comp + 1 in depth_map.comp
-        {DS_POOL(STORAGE_BUFFER, 6 * LOD_COUNT)},          // (3 in render.comp + 1 in resolve.comp + 2 in depth_map.comp) * LOD_COUNT
-        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count)},  // 1 in default.frag
-        {DS_POOL(STORAGE_IMAGE, 1)},                       // 1 in resolve.comp
+        {DS_POOL(UNIFORM_BUFFER, 2)},                     // 1 in render.comp + 1 in depth_map.comp
+        {DS_POOL(STORAGE_BUFFER, 6 * LOD_COUNT)},         // (3 in render.comp + 1 in resolve.comp + 2 in depth_map.comp) * LOD_COUNT
+        {DS_POOL(COMBINED_IMAGE_SAMPLER, sampler_count)}, // 1 in default.frag
+        {DS_POOL(STORAGE_IMAGE, 1)},                      // 1 in resolve.comp
     };
 
     VkDescriptorPoolCreateInfo pool_ci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = VK_ARRAY_LEN(pool_sizes),
         .pPoolSizes = pool_sizes,
-        .maxSets = 2 + LOD_COUNT, // compute shader resolve, graphics sst, compute shader render (x LOD_COUNT)
+        .maxSets = 3 + LOD_COUNT * 2, // TODO: I feel like it should only need 2 + LOD_COUNT * 2...
     };
 
     if (!vk_create_ds_pool(pool_ci, &pool)) return false;
@@ -583,12 +586,16 @@ bool setup_ds_sets(Vk_Buffer frame_buff, Vk_Texture storage_tex)
     return true;
 }
 
-bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
+bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer depth_ubo, Vk_Buffer frame_buff, size_t lod)
 {
     /* update descriptor sets */
     VkDescriptorBufferInfo ubo_info = {
         .buffer = ubo.handle,
         .range  = ubo.size,
+    };
+    VkDescriptorBufferInfo depth_ubo_info = {
+        .buffer = depth_ubo.handle,
+        .range  = depth_ubo.size,
     };
     VkDescriptorBufferInfo pc_info = {
         .buffer = pc_layers[lod].buff.handle,
@@ -625,7 +632,7 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer frame_buff, size_t lod)
             .pImageInfo = img_infos,
         },
         /* depth_map.comp */
-        {DS_WRITE_BUFF(0,  UNIFORM_BUFFER, pc_layers[lod].depth_ds, &ubo_info)},
+        {DS_WRITE_BUFF(0,  UNIFORM_BUFFER, pc_layers[lod].depth_ds, &depth_ubo_info)},
         {DS_WRITE_BUFF(1,  STORAGE_BUFFER, pc_layers[lod].depth_ds, &pc_info)},
         {DS_WRITE_BUFF(2,  STORAGE_BUFFER, pc_layers[lod].depth_ds, &depth_buff_info)},
     };
@@ -722,6 +729,24 @@ bool build_compute_cmds(size_t highest_lod)
 {
     size_t group_x = 1, group_y = 1, group_z = 1;
     if (!vk_rec_compute()) return false;
+
+        /* loop through the lod layers of the point cloud (render.comp shader) */
+        // for (size_t lod = 0; lod <= highest_lod; lod++) {
+        //     /* submit batches of points to render compute shader */
+        //     group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
+        //     size_t batch_size = group_x / NUM_BATCHES;
+        //     for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
+        //         Push_Const pk = {
+        //             .offset = batch * batch_size * WORK_GROUP_SZ,
+        //             .count = pc_layers[lod].count,
+        //         };
+        //         vk_push_const(cs_depth_map_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
+        //         vk_compute(cs_depth_map_pl, cs_depth_map_pl_layout, pc_layers[lod].depth_ds, batch_size, group_y, group_z);
+        //     }
+        // }
+
+        vk_compute_pl_barrier();
+
         /* loop through the lod layers of the point cloud (render.comp shader) */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
             /* submit batches of points to render compute shader */
@@ -763,8 +788,8 @@ bool build_depth_compute_cmds(size_t highest_lod)
                     .offset = batch * batch_size * WORK_GROUP_SZ,
                     .count = pc_layers[lod].count,
                 };
-                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
-                vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
+                vk_push_const(cs_depth_map_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
+                vk_compute(cs_depth_map_pl, cs_depth_map_pl_layout, pc_layers[lod].depth_ds, batch_size, group_y, group_z);
             }
         }
     if (!vk_end_rec_compute()) return false;
@@ -785,6 +810,11 @@ bool create_pipelines()
     /* compute shader render pipeline */
     if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                   return false;
     if (!vk_compute_pl_init("./res/render.comp.glsl.spv", cs_render_pl_layout, &cs_render_pl)) return false;
+
+    /* compute shader render pipeline */
+    layout_ci.pSetLayouts = &cs_depth_map_layout;
+    if (!vk_pl_layout_init(layout_ci, &cs_depth_map_pl_layout))                                          return false;
+    if (!vk_compute_pl_init("./res/depth_map.comp.glsl.spv", cs_depth_map_pl_layout, &cs_depth_map_pl)) return false;
 
     /* compute shader resolve pipeline */
     layout_ci.pSetLayouts = &cs_resolve_ds_layout;
@@ -825,6 +855,8 @@ bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float 
             four_cameras[i].position.z,
             1.0,
         };
+        plm_frame_t frm = video_textures.initial_frames[i];
+        ubo->data.frame_sizes[i] = (Vector2) {.x = frm.width, .y = frm.height};
     }
 
     ubo->data.model = MatrixToFloatV(model);
@@ -1129,7 +1161,7 @@ int main(int argc, char **argv)
     float vid_update_time = 0.0f;
     bool playing = false;
     bool elevation_based_occlusion = false;
-    bool depth_map_needs_update = true;
+    // bool depth_map_needs_update = true;
 
     for (size_t i = 0; i <= lod; i++)
         if (!vk_comp_buff_staged_upload(&pc_layers[i].buff, pc_layers[i].items))
@@ -1138,7 +1170,6 @@ int main(int argc, char **argv)
     if (!vk_comp_buff_staged_upload(&video_textures.depths.buff, video_textures.depths.data)) return 1;
     if (!vk_ubo_init(&ubo.buff))                                                              return 1;
     if (!vk_ubo_init(&depth_map_ubo.buff))                                                    return 1;
-    NOB_TODO("make sure the img sizes for the depth buffers are passed in the uniform");
     if (!vk_create_storage_img(&storage_tex))                                                 return 1;
 
     /* setup descriptors */
@@ -1160,20 +1191,24 @@ int main(int argc, char **argv)
     }
 
     for (size_t i = 0; i <= lod; i++)
-        if (!update_render_ds_sets(ubo.buff, frame_buff.buff, i))  return 1;
+        if (!update_render_ds_sets(ubo.buff, depth_map_ubo.buff, frame_buff.buff, i)) return 1;
 
     /* create pipelines */
     if (!create_pipelines()) return 1;
 
     /* do an intial render pass with the depth buffer */
-    if (!build_depth_compute_cmds(size_t highest_lod)) return 1;
+    if (!build_depth_compute_cmds(lod)) return 1;
     begin_mode_3d(*camera);
         translate(0.0f, 0.0f, -100.0f);
         rotate_x(-PI / 2);
         if (!update_depth_map_ubo(&cameras[1], &depth_map_ubo)) return 1;
-        if (!vk_submit_compute()) return 1;
         if (!vk_compute_fence_wait()) return 1;
+        if (!vk_submit_compute()) return 1;
     end_mode_3d();
+
+    wait_idle();
+
+    // if (!vk_compute_fence_wait()) return 1;
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(lod)) return 1;
@@ -1192,7 +1227,7 @@ int main(int argc, char **argv)
 
                     /* upload new buffer and update descriptor sets */
                     if (!vk_comp_buff_staged_upload(&pc_layers[lod].buff, pc_layers[lod].items)) return 1;
-                    if (!update_render_ds_sets(ubo.buff, frame_buff.buff, lod))  return 1;
+                    if (!update_render_ds_sets(ubo.buff, depth_map_ubo.buff, frame_buff.buff, lod))  return 1;
                 }
 
                 log_point_count(lod);
@@ -1287,7 +1322,6 @@ int main(int argc, char **argv)
             if (!vk_compute_fence_wait()) return 1;
             elevation_based_occlusion = (camera[0].position.y < -1.5f) ? true : false;
             if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, elevation_based_occlusion)) return 1;
-            if (!update_depth_map_ubo(&cameras[1], &depth_map_ubo)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
 
@@ -1325,11 +1359,14 @@ int main(int argc, char **argv)
     vk_buff_destroy(&frame_buff.buff);
     vk_buff_destroy(&video_textures.depths.buff);
     vk_buff_destroy(&ubo.buff);
+    vk_buff_destroy(&depth_map_ubo.buff);
     vk_destroy_ds_pool(pool);
     vk_destroy_ds_layout(cs_render_ds_layout);
+    vk_destroy_ds_layout(cs_depth_map_layout);
     vk_destroy_ds_layout(cs_resolve_ds_layout);
     vk_destroy_ds_layout(gfx_ds_layout);
     vk_destroy_pl_res(cs_render_pl, cs_render_pl_layout);
+    vk_destroy_pl_res(cs_depth_map_pl, cs_depth_map_pl_layout);
     vk_destroy_pl_res(cs_resolve_pl, cs_resolve_pl_layout);
     vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     vk_unload_texture(&storage_tex);
