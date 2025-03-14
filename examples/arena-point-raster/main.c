@@ -731,27 +731,10 @@ bool build_compute_cmds(size_t highest_lod)
     if (!vk_rec_compute()) return false;
 
         /* loop through the lod layers of the point cloud (render.comp shader) */
-        // for (size_t lod = 0; lod <= highest_lod; lod++) {
-        //     /* submit batches of points to render compute shader */
-        //     group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
-        //     size_t batch_size = group_x / NUM_BATCHES;
-        //     for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
-        //         Push_Const pk = {
-        //             .offset = batch * batch_size * WORK_GROUP_SZ,
-        //             .count = pc_layers[lod].count,
-        //         };
-        //         vk_push_const(cs_depth_map_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
-        //         vk_compute(cs_depth_map_pl, cs_depth_map_pl_layout, pc_layers[lod].depth_ds, batch_size, group_y, group_z);
-        //     }
-        // }
-
-        vk_compute_pl_barrier();
-
-        /* loop through the lod layers of the point cloud (render.comp shader) */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
             /* submit batches of points to render compute shader */
-            group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
-            size_t batch_size = group_x / NUM_BATCHES;
+            group_x = ceil((float)pc_layers[lod].count / WORK_GROUP_SZ);
+            size_t batch_size = ceil((float)group_x / NUM_BATCHES);
             for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
                 Push_Const pk = {
                     .offset = batch * batch_size * WORK_GROUP_SZ,
@@ -766,8 +749,8 @@ bool build_compute_cmds(size_t highest_lod)
         vk_compute_pl_barrier();
 
         /* resolve the frame buffer (resolve.comp shader) */
-        group_x = initial_win_size.width / 16 + 1;
-        group_y = initial_win_size.height / 16 + 1;
+        group_x = ceil(initial_win_size.width  / 16.0f);
+        group_y = ceil(initial_win_size.height / 16.0f);
         vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
 
     if (!vk_end_rec_compute()) return false;
@@ -781,8 +764,8 @@ bool build_depth_compute_cmds(size_t highest_lod)
         /* loop through the lod layers of the point cloud (render.comp shader) */
         for (size_t lod = 0; lod <= highest_lod; lod++) {
             /* submit batches of points to render compute shader */
-            group_x = pc_layers[lod].count / WORK_GROUP_SZ + 1;
-            size_t batch_size = group_x / NUM_BATCHES;
+            group_x = ceil((float)pc_layers[lod].count / WORK_GROUP_SZ);
+            size_t batch_size = ceil((float)group_x / NUM_BATCHES);
             for (size_t batch = 0; batch < NUM_BATCHES; batch++) {
                 Push_Const pk = {
                     .offset = batch * batch_size * WORK_GROUP_SZ,
@@ -967,9 +950,12 @@ void log_controls()
 
 Camera cameras[] = {
     { // Camera to rule all cameras
-        .position   = {38.54, 23.47, 42.09},
-        .up         = {0.0f, 1.0f, 0.0f},
-        .target     = {25.18, 16.37, 38.97},
+        // .position   = {38.54, 23.47, 42.09},
+        // .up         = {0.0f, 1.0f, 0.0f},
+        // .target     = {25.18, 16.37, 38.97},
+        .position   = {35.41, 18.88, 40.50},
+        .up         = {0.00, 1.00, 0.00},
+        .target     = {30.62, 17.51, 39.46},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },

@@ -34,10 +34,9 @@ layout(push_constant) uniform constants
 void main()
 {
     uint index = gl_GlobalInvocationID.x + push_const.offset;
-    if (index > push_const.point_count) return;
+    if (index >= push_const.point_count) return;
     Vertex vert = vertices[index];
 
-    int offset = 0;
     for (int i = 0; i < 1; i++) {
         vec4 cam_clip = ubo.mvps[i] * vec4(vert.x, vert.y, vert.z, 1.0);
         bool cam_sees = (-cam_clip.w < cam_clip.x && cam_clip.x < cam_clip.w) &&
@@ -47,18 +46,12 @@ void main()
 
         vec3 ndc = cam_clip.xyz / cam_clip.w;
         vec2 uv = ndc.xy * 0.5 + 0.5;
-        // ivec2 pixel_coords = ivec2(uv * ubo.img_sizes[i]);
-        // ivec2 img_size = ivec2(ubo.img_sizes[i]);
-        vec2 img_sizes = vec2(1280.0, 960.0);
-        ivec2 pixel_coords = ivec2(uv * img_sizes);
-        ivec2 img_size = ivec2(img_sizes);
+        ivec2 pixel_coords = ivec2(uv * vec2(1280.0, 960.0));
+        ivec2 img_size = ivec2(1280, 960);
         int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
-        // pixel_id += offset;
         uint depth = floatBitsToUint(cam_clip.w);
 
         if (depth < depth_buffs[pixel_id])
             atomicMin(depth_buffs[pixel_id], depth);
-
-        // offset += img_size.x * img_size.y;
     }
 }
