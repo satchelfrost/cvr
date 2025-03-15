@@ -40,10 +40,34 @@ typedef enum {
 /* Data necessary for compiling an example */
 typedef struct {
     const char *name;
-    const Shaders shaders; // TODO: alternatively I could just read the whole directory looking for file extensions .vert, .frag, & .comp
-    const CFiles c_files;
+    const Shaders shaders;
     bool supported_targets[TARGET_COUNT];
     bool private;
+
+    /* WARNING: Please note that if there are any other c files, other than main.c, in the example directory,
+     * they will not compiled as separate translation units, but instead require files to be included
+     * directly into main.c (i.e. a "unity build").
+     *
+     * For example:
+     *
+     *  .c_files = {
+     *      .names = (const char *[]) {
+     *          "main",
+     *          "input",
+     *          "cmd_and_log",
+     *      },
+     *      .count = 3
+     *  },
+     *
+     *  implies that main.c has done the following:
+     *
+     *  #include "input.c"
+     *  #include "cmd_and_log.c"
+     *
+     *  If you make changes to any of these, there will be an automatic recompile,
+     *  however neither input.o, nor cmd_and_log.o will ever be generated.
+     */ 
+    const CFiles c_files;
 } Example;
 
 static const char *default_shader_names[] = {"default.vert.glsl", "default.frag.glsl"};
@@ -207,8 +231,12 @@ static Example examples[] = {
             .count = 5,
         },
         .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
+            .names = (const char *[]) {
+                "main",
+                "input",
+                "cmd_and_log"
+            },
+            .count = 3
         },
         .supported_targets[TARGET_LINUX] = true,
         .supported_targets[TARGET_WINDOWS] = true,
@@ -742,48 +770,27 @@ defer:
 
 bool build_example_linux(Config config, const char *build_path)
 {
-    const char **c_files = config.example->c_files.names;
     const Example *example = config.example;
     const char *example_path = nob_temp_sprintf("examples/%s", example->name);
     bool result = true;
     Nob_Cmd cmd = {0};
-    Nob_Procs procs = {0};
-    Nob_File_Paths obj_files = {0};
+    Nob_File_Paths c_files = {0};
 
-    /* build example */
-    for (size_t i = 0; i < example->c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
-        nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
-            cmd.count = 0;
-            nob_cmd_append(&cmd, "cc");
-            nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-I./src");
-            nob_cmd_append(&cmd, "-c", input_path);
-            nob_cmd_append(&cmd, "-o", output_path);
-            Nob_Proc proc = nob_cmd_run_async(cmd);
-            nob_da_append(&procs, proc);
-        }
-    }
+    for (size_t i = 0; i < example->c_files.count; i++)
+        nob_da_append(&c_files, nob_temp_sprintf("%s/%s.c", example_path, example->c_files.names[i]));
 
-    if (!nob_procs_wait(procs)) nob_return_defer(false);
-
-    /* link with libraries */
+    /* build and link */
     const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.a", target_names[config.target]);
     const char *exec_path = nob_temp_sprintf("%s/%s", build_path, example->name);
-    bool obj_updated = nob_needs_rebuild(exec_path, obj_files.items, obj_files.count);
-    bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
-    if (obj_updated || cvrlib_updated) {
+    bool c_files_updated = nob_needs_rebuild(exec_path, c_files.items, example->c_files.count);
+    bool libcvr_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
+    if (c_files_updated || libcvr_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
         nob_cmd_append(&cmd, "-o", exec_path);
-        for (size_t i = 0; i < obj_files.count; i++) {
-            const char *input_path = nob_temp_sprintf("%s", obj_files.items[i]);
-            nob_cmd_append(&cmd, input_path);
-        }
+        nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
         nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
         nob_cmd_append(&cmd, "-lvulkan", "-ldl", "-lpthread", "-lX11", "-lXxf86vm", "-lXrandr", "-lXi", "-lm");
@@ -791,9 +798,8 @@ bool build_example_linux(Config config, const char *build_path)
     }
 
 defer:
+    nob_cmd_free(c_files);
     nob_cmd_free(cmd);
-    nob_cmd_free(procs);
-    nob_cmd_free(obj_files);
     return result;
 }
 
@@ -814,48 +820,28 @@ bool copy_file_if_not_exists(const char *src, const char *dst)
 
 bool build_example_win(Config config, const char *build_path)
 {
-    const char **c_files = config.example->c_files.names;
     const Example *example = config.example;
     const char *example_path = nob_temp_sprintf("examples/%s", example->name);
     bool result = true;
     Nob_Cmd cmd = {0};
     Nob_Procs procs = {0};
-    Nob_File_Paths obj_files = {0};
+    Nob_File_Paths c_files = {0};
 
-    /* build example */
-    for (size_t i = 0; i < example->c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, c_files[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s.c", example_path, c_files[i]);
-        nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
-            cmd.count = 0;
-            nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-            nob_cmd_append(&cmd, "-I./src");
-            nob_cmd_append(&cmd, "-I./src/ext");
-            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-            nob_cmd_append(&cmd, "-c", input_path);
-            nob_cmd_append(&cmd, "-o", output_path);
-            Nob_Proc proc = nob_cmd_run_async(cmd);
-            nob_da_append(&procs, proc);
-        }
-    }
+    for (size_t i = 0; i < example->c_files.count; i++)
+        nob_da_append(&c_files, nob_temp_sprintf("%s/%s.c", example_path, example->c_files.names[i]));
 
-    if (!nob_procs_wait(procs)) nob_return_defer(false);
-
-    /* link with libraries */
+    /* build and link */
     const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.dll", target_names[config.target]);
     const char *exec_path = nob_temp_sprintf("%s/%s", build_path, example->name);
-    bool obj_updated = nob_needs_rebuild(exec_path, obj_files.items, obj_files.count);
-    bool cvrlib_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
-    if (obj_updated || cvrlib_updated) {
+    bool c_files_updated = nob_needs_rebuild(exec_path, example->c_files.names, example->c_files.count);
+    bool libcvr_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
+    if (c_files_updated || libcvr_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
         nob_cmd_append(&cmd, "-I./src");
+        nob_cmd_append(&cmd, "-I./src/ext");
         nob_cmd_append(&cmd, "-o", exec_path);
-        for (size_t i = 0; i < obj_files.count; i++) {
-            const char *input_path = nob_temp_sprintf("%s", obj_files.items[i]);
-            nob_cmd_append(&cmd, input_path);
-        }
+        nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
         nob_cmd_append(&cmd, cvr_path, "-l:libcvr.dll");
         nob_cmd_append(&cmd, "-L./lib", "-l:vulkan-1.lib", "-lwinmm", "-lgdi32", "-lpthread");
@@ -868,48 +854,28 @@ bool build_example_win(Config config, const char *build_path)
     
 defer:
     nob_cmd_free(cmd);
-    nob_cmd_free(procs);
-    nob_cmd_free(obj_files);
+    nob_cmd_free(c_files);
     return result;
 }
 
 bool build_example_quest(Config config, const char *example_build_path, const char *lib_arch_path)
 {
-    const char **c_files = config.example->c_files.names;
     const Example *example = config.example;
-    const char *example_src_path = nob_temp_sprintf("examples/%s", example->name);
+    const char *example_path = nob_temp_sprintf("examples/%s", example->name);
     bool result = true;
     Nob_Cmd cmd = {0};
-    Nob_Procs procs = {0};
-    Nob_File_Paths obj_files = {0};
+    Nob_File_Paths c_files = {0};
 
     /* build example */
-    for (size_t i = 0; i < example->c_files.count; i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.o", example_build_path, c_files[i]);
-        const char *input_path = nob_temp_sprintf("%s/%s.c", example_src_path, c_files[i]);
-        nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, example->c_files.count)) {
-            cmd.count = 0;
-            nob_cmd_append(&cmd, config.android.cc);
-            nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-target", "aarch64-linux-android" ANDROID_VERSION);
-            nob_cmd_append(&cmd, "-I./src");
-            nob_cmd_append(&cmd, "-fPIC");
-            nob_cmd_append(&cmd, "-c", input_path);
-            nob_cmd_append(&cmd, "-o", output_path);
-            Nob_Proc proc = nob_cmd_run_async(cmd);
-            nob_da_append(&procs, proc);
-        }
-    }
-
-    if (!nob_procs_wait(procs)) nob_return_defer(false);
+    for (size_t i = 0; i < example->c_files.count; i++)
+        nob_da_append(&c_files, nob_temp_sprintf("%s/%s.c", example_path, example->c_files.names[i]));
 
     /* link with libraries */
     const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.a", target_names[config.target]);
     const char *app_path = nob_temp_sprintf("%s/lib%s.so", lib_arch_path, example->name);
-    bool obj_updated = nob_needs_rebuild(app_path, obj_files.items, obj_files.count);
-    bool cvrlib_updated = nob_needs_rebuild(app_path, &libcvr_path, 1);
-    if (obj_updated || cvrlib_updated) {
+    bool c_files_updated = nob_needs_rebuild(app_path, example->c_files.names, example->c_files.count);
+    bool libcvr_updated = nob_needs_rebuild(app_path, &libcvr_path, 1);
+    if (c_files_updated || libcvr_updated) {
         cmd.count = 0;
         nob_cmd_append(&cmd, config.android.cc);
         nob_cmd_append(&cmd, "-DPLATFORM_ANDROID_QUEST");
@@ -923,10 +889,7 @@ bool build_example_quest(Config config, const char *example_build_path, const ch
         nob_cmd_append(&cmd, "-o", app_path);
         nob_cmd_append(&cmd, "./src/ext/android/android_native_app_glue.c");
         nob_cmd_append(&cmd, "-fPIC");
-        for (size_t i = 0; i < obj_files.count; i++) {
-            const char *input_path = nob_temp_sprintf("%s", obj_files.items[i]);
-            nob_cmd_append(&cmd, input_path);
-        }
+        nob_cmd_append(&cmd, nob_temp_sprintf("%s/android_main.c", example_path));
         nob_cmd_append(&cmd, "./lib/arm64-v8a/Debug/libopenxr_loader.so");
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
         nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
@@ -939,8 +902,7 @@ bool build_example_quest(Config config, const char *example_build_path, const ch
 
 defer:
     nob_cmd_free(cmd);
-    nob_cmd_free(procs);
-    nob_cmd_free(obj_files);
+    nob_cmd_free(c_files);
     return result;
 }
 
