@@ -31,6 +31,8 @@ layout(push_constant) uniform constants
     uint point_count;
 } push_const;
 
+#define RES 1.0
+
 void main()
 {
     uint index = gl_GlobalInvocationID.x + push_const.offset;
@@ -46,8 +48,8 @@ void main()
 
         vec3 ndc = cam_clip.xyz / cam_clip.w;
         vec2 uv = ndc.xy * 0.5 + 0.5;
-        ivec2 pixel_coords = ivec2(uv * vec2(1280.0, 960.0));
-        ivec2 img_size = ivec2(1280, 960);
+        ivec2 pixel_coords = ivec2(uv * vec2(1280.0 * RES, 960.0 * RES));
+        ivec2 img_size = ivec2(1280 * RES, 960 * RES);
         int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
         uint depth = floatBitsToUint(cam_clip.w);
 

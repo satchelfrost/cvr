@@ -459,10 +459,12 @@ Frame_Buffer alloc_frame_buff(size_t width, size_t height)
 void alloc_depth_buffs()
 {
     size_t count = 0;
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        plm_frame_t frm = video_textures.initial_frames[i];
-        count += frm.width * frm.height;
-    }
+    // for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+    //     plm_frame_t frm = video_textures.initial_frames[i];
+    //     count += frm.width * frm.height;
+    // }
+    plm_frame_t frm = video_textures.initial_frames[0];
+    count += frm.width * frm.height * 5 * 5;
     size_t sz = sizeof(uint32_t) * count;
 
     /* note the "depth" buffer is actually multiple (4) */
@@ -950,12 +952,12 @@ void log_controls()
 
 Camera cameras[] = {
     { // Camera to rule all cameras
-        // .position   = {38.54, 23.47, 42.09},
-        // .up         = {0.0f, 1.0f, 0.0f},
-        // .target     = {25.18, 16.37, 38.97},
-        .position   = {35.41, 18.88, 40.50},
-        .up         = {0.00, 1.00, 0.00},
-        .target     = {30.62, 17.51, 39.46},
+        .position   = {38.54, 23.47, 42.09},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .target     = {25.18, 16.37, 38.97},
+        // .position   = {35.41, 18.88, 40.50},
+        // .up         = {0.00, 1.00, 0.00},
+        // .target     = {30.62, 17.51, 39.46},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },

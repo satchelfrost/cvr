@@ -96,6 +96,10 @@ float linearize_depth(float depth)
     return (2.0 * n) / (f + n - z * (f - n));
 }
 
+#define RES 1.0
+#define BIAS 0.0f
+#define USE_DEPTH_MAP true
+
 void main()
 {
     uint index = gl_GlobalInvocationID.x + push_const.offset;
@@ -132,11 +136,11 @@ void main()
                               (-cam_clip.w < cam_clip.z && cam_clip.z < cam_clip.w));
 
             /* occlusion check */
-            ivec2 pixel_coords = ivec2(uv * vec2(1280.0, 960.0));
-            ivec2 img_size = ivec2(1280, 960);
+            ivec2 pixel_coords = ivec2(uv * vec2(1280.0 * RES, 960.0 * RES));
+            ivec2 img_size = ivec2(1280 * RES, 960 * RES);
             int pixel_id = pixel_coords.x + pixel_coords.y * img_size.x;
             float depth = uintBitsToFloat(depth_buffs[pixel_id]);
-            in_shadow[i] = (depth + 0.5 < cam_clip.w) ? true : false;
+            in_shadow[i] = (depth + BIAS < cam_clip.w) ? true : false;
 
             // TODO: possibly move this outside of the loop
             /* calculate the distances from the vertex to the cctvs in world space */
@@ -177,9 +181,8 @@ void main()
         out_color = brightness << 16 | brightness << 8 | brightness;
         break;
     case MODE_SINGLE_VID_TEX:
-        // out_color = (cam_sees[ubo.cam_order_0] > 0 && !in_shadow[ubo.cam_order_0]) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
         out_color = (cam_sees[ubo.cam_order_0] > 0) ? vec3_to_uint(tex_colors[ubo.cam_order_0].rgb) : vert.color;
-        if (in_shadow[ubo.cam_order_0]) out_color = vert.color;
+        if (in_shadow[ubo.cam_order_0] && USE_DEPTH_MAP) out_color = vert.color;
         break;
     case MODE_SEAM_AND_VIEW_BLEND:
         if (cam_sees[ubo.cam_order_3] > 0) out_color = vec3_to_uint(tex_colors[ubo.cam_order_3].rgb);
