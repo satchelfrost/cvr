@@ -4,6 +4,7 @@
 #define PL_MPEG_IMPLEMENTATION
 #include "ext/pl_mpeg.h"
 
+#define NOB_STRIP_PREFIX
 #define NOB_IMPLEMENTATION
 #include "../nob.h"
 
@@ -47,14 +48,7 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer depth_ubo, Vk_Buffer frame_b
 /* unity build includes */
 #include "cmd_and_log.c"
 #include "input.c"
-
-#define read_attr(attr, sv)                   \
-    do {                                      \
-        memcpy(&attr, sv.data, sizeof(attr)); \
-        sv.data  += sizeof(attr);             \
-        sv.count -= sizeof(attr);             \
-    } while(0)
-
+#include "video.c"
 
 typedef struct {
     Vk_Buffer buff;
@@ -65,6 +59,8 @@ typedef struct {
     Vk_Buffer buff;
     void *data;
 } Depth_Buffer;
+
+Depth_Buffer depths = {0};
 
 typedef struct {
     float16 main_cam_mvp;
@@ -99,52 +95,6 @@ typedef struct {
     Depth_Map_Data data;
 } Depth_Map_UBO;
 
-typedef enum {
-    VIDEO_PLANE_Y,
-    VIDEO_PLANE_CB,
-    VIDEO_PLANE_CR,
-    VIDEO_PLANE_COUNT,
-} Video_Plane_Type;
-
-typedef enum {
-    VIDEO_IDX_SUITE_E,
-    VIDEO_IDX_SUITE_W,
-    VIDEO_IDX_SUITE_NW,
-    VIDEO_IDX_SUITE_SE,
-    VIDEO_IDX_COUNT,
-} Video_Idx;
-
-const char *video_names[] = {
-    "suite_e_1280x960",
-    "suite_w_1280x960",
-    "suite_se_1280x720",
-    "suite_nw_1280x720",
-};
-
-typedef struct {
-    Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
-    Vk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
-    plm_t *plms[VIDEO_IDX_COUNT];
-    float aspects[VIDEO_IDX_COUNT];
-    plm_frame_t initial_frames[VIDEO_IDX_COUNT];
-    Depth_Buffer depths;
-} Video_Textures;
-
-Video_Textures video_textures = {0};
-
-#define MAX_QUEUED_FRAMES 20
-typedef struct {
-    plm_frame_t frames[VIDEO_IDX_COUNT * MAX_QUEUED_FRAMES];
-    int head;
-    int tail;
-    int size;
-    pthread_mutex_t mutex;
-    pthread_cond_t not_full;
-    pthread_cond_t not_empty;
-} Video_Queue;
-
-Video_Queue video_queue = {0};
-
 /* Vulkan state */
 VkDescriptorSetLayout cs_render_ds_layout;
 VkDescriptorSetLayout cs_resolve_ds_layout;
@@ -169,118 +119,6 @@ VkDescriptorSet ds_sets[DS_COUNT] = {0};
 /* we store the initial window size so we don't have to deal with resizing the frame buffer (compute buffer),
  * as a consequence, resizing the window means we are either over/under-resolving */
 Window_Size initial_win_size = {0};
-
-bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type);
-
-void video_queue_init()
-{
-    pthread_mutex_init(&video_queue.mutex, NULL);
-    pthread_cond_init(&video_queue.not_full, NULL);
-    pthread_cond_init(&video_queue.not_empty, NULL);
-
-    /* use a initial frame to determine memory requirements */
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        for (size_t j = 0; j < MAX_QUEUED_FRAMES; j++) {
-            plm_frame_t *frame = &video_textures.initial_frames[i];
-            video_queue.frames[i + j * VIDEO_IDX_COUNT] = *frame; // shallow copy first
-            size_t y_size  = frame->y.width  * frame->y.height;
-            size_t cb_size = frame->cb.width * frame->cb.height;
-            size_t cr_size = frame->cr.width * frame->cr.height;
-            video_queue.frames[i + j * VIDEO_IDX_COUNT].y.data  = malloc(y_size);
-            video_queue.frames[i + j * VIDEO_IDX_COUNT].cb.data = malloc(cb_size);
-            video_queue.frames[i + j * VIDEO_IDX_COUNT].cr.data = malloc(cr_size);
-        }
-    }
-}
-
-void video_queue_destroy()
-{
-    pthread_mutex_destroy(&video_queue.mutex);
-    pthread_cond_destroy(&video_queue.not_full);
-    pthread_cond_destroy(&video_queue.not_empty);
-
-    for (size_t i = 0; i < MAX_QUEUED_FRAMES * VIDEO_IDX_COUNT; i++) {
-        free(video_queue.frames[i].y.data);
-        free(video_queue.frames[i].cb.data);
-        free(video_queue.frames[i].cr.data);
-    }
-}
-
-bool video_enqueue()
-{
-    /* first decode the frames */
-    plm_frame_t temp_frames[VIDEO_IDX_COUNT];
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
-        if (!frame) return false;
-
-        size_t y_size  = frame->y.width  * frame->y.height;
-        size_t cb_size = frame->cb.width * frame->cb.height;
-        size_t cr_size = frame->cr.width * frame->cr.height;
-        temp_frames[i] = *frame; // shallow copy first
-        memcpy(temp_frames[i].y.data , frame->y.data,  y_size);
-        memcpy(temp_frames[i].cb.data, frame->cb.data, cb_size);
-        memcpy(temp_frames[i].cr.data, frame->cr.data, cr_size);
-    }
-
-    pthread_mutex_lock(&video_queue.mutex);
-        /* if queue is full then wait for consumer */
-        if (video_queue.size == MAX_QUEUED_FRAMES)
-            pthread_cond_wait(&video_queue.not_full, &video_queue.mutex);
-
-        /* decode the next "VIDEO_IDX_COUNT" video frames and enqueue */
-        for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-            plm_frame_t *saved = &video_queue.frames[i + video_queue.head * VIDEO_IDX_COUNT];
-            size_t y_size  = temp_frames[i].y.width  * temp_frames[i].y.height;
-            size_t cb_size = temp_frames[i].cb.width * temp_frames[i].cb.height;
-            size_t cr_size = temp_frames[i].cr.width * temp_frames[i].cr.height;
-            memcpy(saved->y.data , temp_frames[i].y.data,  y_size);
-            memcpy(saved->cb.data, temp_frames[i].cb.data, cb_size);
-            memcpy(saved->cr.data, temp_frames[i].cr.data, cr_size);
-        }
-        video_queue.head = (video_queue.head + 1) % MAX_QUEUED_FRAMES;
-        video_queue.size++;
-        pthread_cond_signal(&video_queue.not_empty);
-    pthread_mutex_unlock(&video_queue.mutex);
-
-    return true;
-}
-
-bool video_dequeue()
-{
-    pthread_mutex_lock(&video_queue.mutex);
-        /* if queue is empty then wait for producer */
-        if (video_queue.size == 0)
-            pthread_cond_wait(&video_queue.not_empty, &video_queue.mutex);
-
-        /* dequeue the next four video frames */
-        for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-            plm_frame_t *saved = &video_queue.frames[i + video_queue.tail * VIDEO_IDX_COUNT];
-            if (!update_video_texture(saved->y.data, i, VIDEO_PLANE_Y))   return false;
-            if (!update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB)) return false;
-            if (!update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR)) return false;
-        }
-        video_queue.tail = (video_queue.tail + 1) % MAX_QUEUED_FRAMES;
-        video_queue.size--;
-        pthread_cond_signal(&video_queue.not_full);
-    pthread_mutex_unlock(&video_queue.mutex);
-
-    return true;
-}
-
-void *producer(void *arg)
-{
-    (void)arg;
-    while (true) {
-        if (!video_enqueue()) {
-            /* loop all videos even if just one has finished */
-            for (size_t i = 0; i < VIDEO_IDX_COUNT; i++)
-                plm_rewind(video_textures.plms[i]);
-        }
-    };
-    vk_log(VK_INFO, "producer finished");
-    return NULL;
-}
 
 typedef struct {
     int idx;
@@ -325,6 +163,13 @@ float calc_blend_ratio(const Camera *cameras, const int *cam_order)
     return Vector3DotProduct(a, b) / Vector3LengthSqr(b);
 }
 
+#define read_attr(attr, sv)                   \
+    do {                                      \
+        memcpy(&attr, sv.data, sizeof(attr)); \
+        sv.data  += sizeof(attr);             \
+        sv.count -= sizeof(attr);             \
+    } while(0)
+
 bool load_points(const char *file, Point_Cloud_Layer *pc)
 {
     bool result = true;
@@ -333,16 +178,17 @@ bool load_points(const char *file, Point_Cloud_Layer *pc)
     pc->count = 0;
 
     vk_log(VK_INFO, "reading vtx file %s", file);
-    Nob_String_Builder sb = {0};
-    if (!nob_read_entire_file(file, &sb)) nob_return_defer(false);
+    String_Builder sb = {0};
+    if (!read_entire_file(file, &sb)) return_defer(false);
 
-    Nob_String_View sv = nob_sv_from_parts(sb.items, sb.count);
+    String_View sv = sv_from_parts(sb.items, sb.count);
     size_t vtx_count = 0;
     read_attr(vtx_count, sv);
 
     for (size_t i = 0; i < vtx_count; i++) {
         float x, y, z;
         uint8_t r, g, b;
+
         read_attr(x, sv);
         read_attr(y, sv);
         read_attr(z, sv);
@@ -355,13 +201,13 @@ bool load_points(const char *file, Point_Cloud_Layer *pc)
             .x = x, .y = y, .z = z,
             .color = uint_color,
         };
-        nob_da_append(pc, vert);
+        da_append(pc, vert);
     }
     pc->buff.count = vtx_count;
     pc->buff.size = sizeof(Point_Vert) * vtx_count;
 
 defer:
-    nob_sb_free(sb);
+    sb_free(sb);
     return result;
 }
 
@@ -382,16 +228,14 @@ Frame_Buffer alloc_frame_buff(size_t width, size_t height)
 void alloc_depth_buffs()
 {
     size_t count = 0;
-    // for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-    //     plm_frame_t frm = video_textures.initial_frames[i];
-    //     count += frm.width * frm.height;
-    // }
-    plm_frame_t frm = video_textures.initial_frames[0];
-    count += frm.width * frm.height;
+    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
+        plm_frame_t frm = video_textures.initial_frames[i];
+        count += frm.width * frm.height;
+    }
     size_t sz = sizeof(uint32_t) * count;
 
     /* note the "depth" buffer is actually multiple (4) */
-    video_textures.depths = (Depth_Buffer) {
+    depths = (Depth_Buffer) {
         .buff = {
             .count = count,
             .size  = sz,
@@ -401,7 +245,7 @@ void alloc_depth_buffs()
 
     /* initialize to max depth */
     for (size_t i = 0; i < count; i++)
-        ((uint32_t *)video_textures.depths.data)[i] = 0xffffffff;
+        ((uint32_t *)depths.data)[i] = 0xffffffff;
 }
 
 bool setup_ds_layouts()
@@ -531,8 +375,8 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer depth_ubo, Vk_Buffer frame_b
         .range  = frame_buff.size,
     };
     VkDescriptorBufferInfo depth_buff_info = {
-        .buffer = video_textures.depths.buff.handle,
-        .range  = video_textures.depths.buff.size,
+        .buffer = depths.buff.handle,
+        .range  = depths.buff.size,
     };
     VkDescriptorImageInfo img_infos[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT] = {0};
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
@@ -564,85 +408,6 @@ bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer depth_ubo, Vk_Buffer frame_b
     vk_update_ds(VK_ARRAY_LEN(writes), writes);
 
     return true;
-}
-
-bool init_video_texture(void *data, int width, int height, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
-{
-    bool result = true;
-
-    /* create staging buffer for image */
-    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
-    stg_buff->size  = width * height * format_to_size(VK_FORMAT_R8_UNORM);
-    stg_buff->count = width * height;
-    if (!vk_stg_buff_init(stg_buff, data, true)) return false;
-
-    /* create the image */
-    Vk_Image vk_img = {
-        .extent  = {width, height},
-        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = VK_FORMAT_R8_UNORM,
-    };
-    result = vk_img_init(
-        &vk_img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    if (!result) return false;
-
-    transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
-    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
-    transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
-
-    /* create image view */
-    VkImageView img_view;
-    if (!vk_img_view_init(vk_img, &img_view)) {
-        vk_log(VK_ERROR, "failed to create image view");
-        return false;
-    };
-
-    VkSampler sampler;
-    if (!vk_sampler_init(&sampler)) return false;
-
-    Vk_Texture plane = {
-        .view = img_view,
-        .sampler = sampler,
-        .img = vk_img,
-    };
-    video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT] = plane;
-
-    return true;
-}
-
-bool update_video_texture(void *data, Video_Idx vid_idx, Video_Plane_Type vid_plane_type)
-{
-    bool result = true;
-
-    /* create staging buffer for image */
-    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
-    memcpy(stg_buff->mapped, data, stg_buff->size);
-
-    Vk_Image vk_img = video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT].img;
-    transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
-    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
-    transition_img_layout(
-        vk_img.handle,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
-
-    return result;
 }
 
 typedef struct {
@@ -878,50 +643,18 @@ int main(int argc, char **argv)
         set_window_pos(config.x_pos, config.y_pos);
     }
 
-    /* load videos into plm */
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        const char *file_name = nob_temp_sprintf("res/%s.mpg", video_names[i]);
-        plm_t *plm = plm_create_with_filename(file_name);
-        if (!plm) {
-            vk_log(VK_ERROR, "could not open file %s", file_name);
-            return 1;
-        } else {
-            video_textures.plms[i] = plm;
-            plm_set_audio_enabled(plm, FALSE);
-            int width  = plm_get_width(plm);
-            int height = plm_get_height(plm);
-            video_textures.aspects[i] = (float)width / height;
-        }
-    }
-
-    /* decode one frame initialize from each video */
-    plm_frame_t *frame = NULL;
-    for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        frame = plm_decode_video(video_textures.plms[i]);
-        size_t y_size  = frame->y.width  * frame->y.height;
-        size_t cb_size = frame->cb.width * frame->cb.height;
-        size_t cr_size = frame->cr.width * frame->cr.height;
-        video_textures.initial_frames[i] = *frame; // do a shallow copy first
-        video_textures.initial_frames[i].y.data  = malloc(y_size);
-        video_textures.initial_frames[i].cb.data = malloc(cb_size);
-        video_textures.initial_frames[i].cr.data = malloc(cr_size);
-        if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
-        if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
-        if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
-    }
+    /* load videos, and decode one initial frame from each video */
+    if (!load_videos()) return 1;
+    if (!decode_initial_vid_frames()) return 1;
 
     /* allocate frame buffers */
     initial_win_size = get_window_size();
-    Vk_Texture storage_tex = {.img.extent =   {initial_win_size.width,  initial_win_size.height}};
-    Frame_Buffer frame_buff = alloc_frame_buff(initial_win_size.width, initial_win_size.height);
+    Vk_Texture storage_tex = {.img.extent = {initial_win_size.width,  initial_win_size.height}};
+    Frame_Buffer frame = alloc_frame_buff(initial_win_size.width, initial_win_size.height);
     alloc_depth_buffs();
 
     /* general state tracking */
-    NOB_TODO("move video into its own c file");
     save_camera_defaults(&cameras[1]);
-    int cam_view_idx = 0;
-    // NOB_TODO("Separate");
-    Camera *camera = &cameras[cam_view_idx];
     int cam_order[4] = {0};
     float vid_update_time = 0.0f;
     bool playing = false;
@@ -931,8 +664,8 @@ int main(int argc, char **argv)
     for (size_t i = 0; i <= lod; i++)
         if (!vk_comp_buff_staged_upload(&pc_layers[i].buff, pc_layers[i].items))
             return 1;
-    if (!vk_comp_buff_staged_upload(&frame_buff.buff, frame_buff.data))                       return 1;
-    if (!vk_comp_buff_staged_upload(&video_textures.depths.buff, video_textures.depths.data)) return 1;
+    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                       return 1;
+    if (!vk_comp_buff_staged_upload(&depths.buff, depths.data)) return 1;
     if (!vk_ubo_init(&ubo.buff))                                                              return 1;
     if (!vk_ubo_init(&depth_map_ubo.buff))                                                    return 1;
     if (!vk_create_storage_img(&storage_tex))                                                 return 1;
@@ -940,12 +673,10 @@ int main(int argc, char **argv)
     /* setup descriptors */
     if (!setup_ds_layouts())                          return 1;
     if (!setup_ds_pool())                             return 1;
-    if (!setup_ds_sets(frame_buff.buff, storage_tex)) return 1;
+    if (!setup_ds_sets(frame.buff, storage_tex)) return 1;
 
-    /* start the decoder thread */
+    /* launch a separate thread to start decoding video */
     video_queue_init();
-    pthread_t prod_thread;
-    pthread_create(&prod_thread, NULL, producer, NULL);
 
     /* allocate descriptor sets based on layouts */
     for (size_t i = 0; i < LOD_COUNT; i++) {
@@ -956,24 +687,21 @@ int main(int argc, char **argv)
     }
 
     for (size_t i = 0; i <= lod; i++)
-        if (!update_render_ds_sets(ubo.buff, depth_map_ubo.buff, frame_buff.buff, i)) return 1;
+        if (!update_render_ds_sets(ubo.buff, depth_map_ubo.buff, frame.buff, i)) return 1;
 
     /* create pipelines */
     if (!create_pipelines()) return 1;
 
     /* do an intial render pass with the depth buffer */
     if (!build_depth_compute_cmds(lod)) return 1;
-    begin_mode_3d(*camera);
+    begin_mode_3d(cameras[cam_view_idx]);
         translate(0.0f, 0.0f, -100.0f);
         rotate_x(-PI / 2);
         if (!update_depth_map_ubo(&cameras[1], &depth_map_ubo)) return 1;
         if (!vk_compute_fence_wait()) return 1;
         if (!vk_submit_compute()) return 1;
     end_mode_3d();
-
     wait_idle();
-
-    // if (!vk_compute_fence_wait()) return 1;
 
     /* record commands for compute buffer */
     if (!build_compute_cmds(lod)) return 1;
@@ -981,8 +709,7 @@ int main(int argc, char **argv)
     /* game loop */
     while (!window_should_close()) {
         /* input */
-        // NOB_TODO("strip prefix");
-        if (!handle_input(cameras, VK_ARRAY_LEN(cameras), &playing, &lod, ubo.buff, depth_map_ubo.buff, frame_buff.buff))
+        if (!handle_input(cameras, VK_ARRAY_LEN(cameras), &playing, &lod, ubo.buff, depth_map_ubo.buff, frame.buff))
             return 1;
 
         if (playing) vid_update_time += get_frame_time();
@@ -993,7 +720,7 @@ int main(int argc, char **argv)
                 .fps = get_fps(),
                 .ms = get_frame_time() * 1000.0f,
             };
-            nob_da_append(&records, record);
+            da_append(&records, record);
             /* calculate the average frame rate, print results, and reset */
             if (records.count >= records.max) {
                 /* average fps */
@@ -1023,13 +750,13 @@ int main(int argc, char **argv)
         }
 
         /* compute shader submission */
-        begin_mode_3d(*camera);
+        begin_mode_3d(cameras[cam_view_idx]);
             translate(0.0f, 0.0f, -100.0f);
             rotate_x(-PI / 2);
             get_cam_order(cameras, VK_ARRAY_LEN(cameras), cam_order, VK_ARRAY_LEN(cam_order));
             float blend_ratio = calc_blend_ratio(cameras, cam_order);
             if (!vk_compute_fence_wait()) return 1;
-            elevation_based_occlusion = (camera[0].position.y < -1.5f) ? true : false;
+            elevation_based_occlusion = (cameras[cam_view_idx].position.y < -1.5f) ? true : false;
             if (!update_pc_ubo(&cameras[1], shader_mode, cam_order, blend_ratio, &ubo, elevation_based_occlusion)) return 1;
             if (!vk_submit_compute()) return 1;
         end_mode_3d();
@@ -1044,13 +771,11 @@ int main(int argc, char **argv)
         end_drawing(); // ends gfx recording, renderpass, and submits
     }
 
-    /* stop the video producer thread to avoid segfaults */
-    pthread_cancel(prod_thread);
-    pthread_join(prod_thread, NULL);
+    /* stop the video decoder, also waits for launched thread to stop */
     video_queue_destroy();
 
     wait_idle();
-    free(frame_buff.data);
+    free(frame.data);
     for (size_t i = 0; i < LOD_COUNT; i++) {
         vk_buff_destroy(&pc_layers[i].buff);
         free(pc_layers[i].items);
@@ -1065,8 +790,8 @@ int main(int argc, char **argv)
             vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
-    vk_buff_destroy(&frame_buff.buff);
-    vk_buff_destroy(&video_textures.depths.buff);
+    vk_buff_destroy(&frame.buff);
+    vk_buff_destroy(&depths.buff);
     vk_buff_destroy(&ubo.buff);
     vk_buff_destroy(&depth_map_ubo.buff);
     vk_destroy_ds_pool(pool);

@@ -11,10 +11,11 @@ typedef struct {
     bool collecting;
 } Time_Records;
 
-Shader_Mode shader_mode = SHADER_MODE_MODEL;
-Time_Records records = {.max = MAX_FPS_REC};
-int cam_move_idx = 0;
-Camera camera_defaults[4] = {0};
+static Shader_Mode shader_mode = SHADER_MODE_MODEL;
+static Time_Records records = {.max = MAX_FPS_REC};
+static int cam_move_idx = 0;
+static int cam_view_idx = 0;
+static Camera camera_defaults[NUM_CCTVS] = {0};
 
 void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
 {
@@ -23,7 +24,7 @@ void copy_camera_infos(Camera *dst, const Camera *src, size_t count)
 
 void save_camera_defaults(const Camera *src)
 {
-    copy_camera_infos(camera_defaults, src, VK_ARRAY_LEN(camera_defaults));
+    copy_camera_infos(camera_defaults, src, NUM_CCTVS);
 }
 
 bool handle_input(Camera *cameras, size_t cam_count, bool *playing, size_t *lod, Vk_Buffer ubo_buff, Vk_Buffer depth_map_ubo_buff, Vk_Buffer frame_buff)
@@ -83,10 +84,16 @@ bool handle_input(Camera *cameras, size_t cam_count, bool *playing, size_t *lod,
         vk_log(VK_INFO, "resetting camera defaults");
         copy_camera_infos(&cameras[1], camera_defaults, VK_ARRAY_LEN(camera_defaults));
         cam_move_idx = 0;
+        cam_view_idx = 0;
     }
     if (is_key_pressed(KEY_P) || is_gamepad_button_pressed(GAMEPAD_BUTTON_RIGHT_FACE_RIGHT))
         *playing = !(*playing);
     if (is_key_pressed(KEY_L)) log_cameras(&cameras[1], NUM_CCTVS);
+    if (is_key_pressed(KEY_V)) {
+        /* Number of cctv cameras plus the main viewing camera */
+        cam_view_idx = (cam_view_idx + 1) % (NUM_CCTVS + 1);
+        cam_move_idx = cam_view_idx;
+    }
 
     return true;
 }

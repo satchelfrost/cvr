@@ -114,11 +114,11 @@ void log_controls(void)
 
 bool handle_usr_cmds(int argc, char **argv, Config *out_config)
 {
-    out_config->program = nob_shift_args(&argc, &argv);
+    out_config->program = shift(argv, argc);
     out_config->width = 1600;
     out_config->height = 900;
     while(argc > 0) {
-        char *flag = nob_shift_args(&argc, &argv);
+        char *flag = shift(argv, argc);
         if (strcmp("--fullscreen", flag) == 0) {
             out_config->fullscreen = true;
         } else if (strcmp("--width", flag) == 0) {
@@ -126,35 +126,35 @@ bool handle_usr_cmds(int argc, char **argv, Config *out_config)
                 vk_log(VK_ERROR, "expected a width after '--width' flag");
                 return false;
             } else {
-                out_config->width = atoi(nob_shift_args(&argc, &argv));
+                out_config->width = atoi(shift(argv, argc));
             }
         } else if (strcmp("--height", flag) == 0) {
             if (argc == 0) {
                 vk_log(VK_ERROR, "expected a width after '--height' flag");
                 return false;
             } else {
-                out_config->height = atoi(nob_shift_args(&argc, &argv));
+                out_config->height = atoi(shift(argv, argc));
             }
         } else if (strcmp("--x_pos", flag) == 0) {
             if (argc == 0) {
                 vk_log(VK_ERROR, "expected a width after '--x_pos' flag");
                 return false;
             } else {
-                out_config->x_pos = atoi(nob_shift_args(&argc, &argv));
+                out_config->x_pos = atoi(shift(argv, argc));
             }
         } else if (strcmp("--y_pos", flag) == 0) {
             if (argc == 0) {
                 vk_log(VK_ERROR, "expected a width after '--x_pos' flag");
                 return false;
             } else {
-                out_config->y_pos = atoi(nob_shift_args(&argc, &argv));
+                out_config->y_pos = atoi(shift(argv, argc));
             }
         } else if (strcmp("--highest_lod", flag) == 0) {
             if (argc == 0) {
                 vk_log(VK_ERROR, "expected a width after '--highest_lod' flag");
                 return false;
             } else {
-                out_config->highest_lod = atoi(nob_shift_args(&argc, &argv));
+                out_config->highest_lod = atoi(shift(argv, argc));
                 if (out_config->highest_lod < 0 || out_config->highest_lod >= LOD_COUNT) {
                     vk_log(VK_ERROR, "valid lods are between 0 and 6 inclusive");
                     return false;
