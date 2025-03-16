@@ -45,6 +45,14 @@ bool load_points(const char *file, Point_Cloud_Layer *pc);
 bool build_compute_cmds(size_t highest_lod);
 bool update_render_ds_sets(Vk_Buffer ubo, Vk_Buffer depth_ubo, Vk_Buffer frame_buff, size_t lod);
 
+typedef struct {
+    Vk_Buffer **items;
+    size_t count;
+    size_t capacity;
+} Vk_Buffer_Queue;
+
+static Vk_Buffer_Queue vk_buff_queue = {0};
+
 /* unity build includes */
 #include "cmd_and_log.c"
 #include "input.c"
@@ -95,30 +103,23 @@ typedef struct {
     Depth_Map_Data data;
 } Depth_Map_UBO;
 
-/* Vulkan state */
-VkDescriptorSetLayout cs_render_ds_layout;
-VkDescriptorSetLayout cs_resolve_ds_layout;
-VkDescriptorSetLayout cs_depth_map_layout;
-VkDescriptorSetLayout gfx_ds_layout;
-VkPipelineLayout cs_render_pl_layout;
-VkPipelineLayout cs_depth_map_pl_layout;
-VkPipelineLayout cs_resolve_pl_layout;
-VkPipelineLayout gfx_pl_layout;
-VkPipeline cs_render_pl;
-VkPipeline cs_depth_map_pl;
-VkPipeline cs_resolve_pl;
-VkPipeline gfx_pl;
-VkDescriptorPool pool;
-VkDescriptorSet cs_resolve_ds;
-VkDescriptorSet gfx_sst; // screen space triangle
+typedef struct {
+    VkPipeline pl;
+    VkPipelineLayout pl_layout;
+    VkDescriptorSetLayout ds_layout;
+    VkDescriptorSet ds;
+} Pipeline;
 
-
-typedef enum {DS_RESOLVE, DS_SST, DS_COUNT} DS_SET;
-VkDescriptorSet ds_sets[DS_COUNT] = {0};
+/* pipelines */
+static Pipeline cs_depth_map = {0}; // compute shader depth map
+static Pipeline cs_render    = {0}; // compute shader render pipeline
+static Pipeline cs_resolve   = {0}; // compute shader resolve (does the imageStore)
+static Pipeline gfx_sst      = {0}; // graphics pass to screen space triangle
+static VkDescriptorPool pool;
 
 /* we store the initial window size so we don't have to deal with resizing the frame buffer (compute buffer),
  * as a consequence, resizing the window means we are either over/under-resolving */
-Window_Size initial_win_size = {0};
+static Window_Size initial_win_size = {0};
 
 typedef struct {
     int idx;
@@ -269,7 +270,7 @@ bool setup_ds_layouts()
         .bindingCount = VK_ARRAY_LEN(cs_render_bindings),
         .pBindings = cs_render_bindings,
     };
-    if (!vk_create_ds_layout(layout_ci, &cs_render_ds_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &cs_render.ds_layout)) return false;
 
     /* resolve.comp shader layout */
     VkDescriptorSetLayoutBinding cs_resolve_bindings[] = {
@@ -278,7 +279,7 @@ bool setup_ds_layouts()
     };
     layout_ci.bindingCount = VK_ARRAY_LEN(cs_resolve_bindings);
     layout_ci.pBindings = cs_resolve_bindings;
-    if (!vk_create_ds_layout(layout_ci, &cs_resolve_ds_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &cs_resolve.ds_layout)) return false;
 
     /* texture sampler in fragment shader */
     VkDescriptorSetLayoutBinding gfx_binding = {
@@ -286,7 +287,7 @@ bool setup_ds_layouts()
     };
     layout_ci.bindingCount = 1;
     layout_ci.pBindings = &gfx_binding;
-    if (!vk_create_ds_layout(layout_ci, &gfx_ds_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &gfx_sst.ds_layout)) return false;
 
     /* depth_maps.comp */
     VkDescriptorSetLayoutBinding cs_depth_map_bindings[] = {
@@ -296,7 +297,7 @@ bool setup_ds_layouts()
     };
     layout_ci.bindingCount = VK_ARRAY_LEN(cs_depth_map_bindings);
     layout_ci.pBindings = cs_depth_map_bindings;
-    if (!vk_create_ds_layout(layout_ci, &cs_depth_map_layout)) return false;
+    if (!vk_create_ds_layout(layout_ci, &cs_depth_map.ds_layout)) return false;
 
     return true;
 }
@@ -327,11 +328,11 @@ bool setup_ds_pool()
 
 bool setup_ds_sets(Vk_Buffer frame_buff, Vk_Texture storage_tex)
 {
-    /* allocate descriptor sets based on layouts */
-    VkDescriptorSetLayout layouts[] = {cs_resolve_ds_layout, gfx_ds_layout};
-    size_t count = VK_ARRAY_LEN(layouts);
-    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(layouts, count, pool)};
-    if (!vk_alloc_ds(alloc, ds_sets)) return false;
+    /* allocate descriptor sets based on layouts for compute shader resolve and graphics screen space triangle */
+    VkDescriptorSetAllocateInfo resolve_alloc = {DS_ALLOC(&cs_resolve.ds_layout, 1, pool)};
+    if (!vk_alloc_ds(resolve_alloc, &cs_resolve.ds)) return false;
+    VkDescriptorSetAllocateInfo gfx_alloc = {DS_ALLOC(&gfx_sst.ds_layout, 1, pool)};
+    if (!vk_alloc_ds(gfx_alloc, &gfx_sst.ds)) return false;
 
     /* update descriptor sets */
     VkDescriptorBufferInfo frame_buff_info = {
@@ -345,10 +346,10 @@ bool setup_ds_sets(Vk_Buffer frame_buff, Vk_Texture storage_tex)
     };
     VkWriteDescriptorSet writes[] = {
         /* resolve.comp */
-        {DS_WRITE_BUFF(0, STORAGE_BUFFER, ds_sets[DS_RESOLVE], &frame_buff_info)},
-        {DS_WRITE_IMG (1, STORAGE_IMAGE,  ds_sets[DS_RESOLVE], &img_info)},
+        {DS_WRITE_BUFF(0, STORAGE_BUFFER, cs_resolve.ds, &frame_buff_info)},
+        {DS_WRITE_IMG (1, STORAGE_IMAGE,  cs_resolve.ds, &img_info)},
         /* default.frag */
-        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, ds_sets[DS_SST], &img_info)},
+        {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, gfx_sst.ds, &img_info)},
     };
     vk_update_ds(VK_ARRAY_LEN(writes), writes);
 
@@ -430,8 +431,8 @@ bool build_compute_cmds(size_t highest_lod)
                     .offset = batch * batch_size * WORK_GROUP_SZ,
                     .count = pc_layers[lod].count,
                 };
-                vk_push_const(cs_render_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
-                vk_compute(cs_render_pl, cs_render_pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
+                vk_push_const(cs_render.pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
+                vk_compute(cs_render.pl, cs_render.pl_layout, pc_layers[lod].set, batch_size, group_y, group_z);
             }
         }
 
@@ -441,7 +442,7 @@ bool build_compute_cmds(size_t highest_lod)
         /* resolve the frame buffer (resolve.comp shader) */
         group_x = ceil(initial_win_size.width  / 16.0f);
         group_y = ceil(initial_win_size.height / 16.0f);
-        vk_compute(cs_resolve_pl, cs_resolve_pl_layout, ds_sets[DS_RESOLVE], group_x, group_y, group_z);
+        vk_compute(cs_resolve.pl, cs_resolve.pl_layout, cs_resolve.ds, group_x, group_y, group_z);
 
     if (!vk_end_rec_compute()) return false;
     return true;
@@ -461,8 +462,8 @@ bool build_depth_compute_cmds(size_t highest_lod)
                     .offset = batch * batch_size * WORK_GROUP_SZ,
                     .count = pc_layers[lod].count,
                 };
-                vk_push_const(cs_depth_map_pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
-                vk_compute(cs_depth_map_pl, cs_depth_map_pl_layout, pc_layers[lod].depth_ds, batch_size, group_y, group_z);
+                vk_push_const(cs_depth_map.pl_layout, VK_SHADER_STAGE_COMPUTE_BIT, sizeof(Push_Const), &pk);
+                vk_compute(cs_depth_map.pl, cs_depth_map.pl_layout, pc_layers[lod].depth_ds, batch_size, group_y, group_z);
             }
         }
     if (!vk_end_rec_compute()) return false;
@@ -475,36 +476,36 @@ bool create_pipelines()
     VkPipelineLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
-        .pSetLayouts = &cs_render_ds_layout,
+        .pSetLayouts = &cs_render.ds_layout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
 
     /* compute shader render pipeline */
-    if (!vk_pl_layout_init(layout_ci, &cs_render_pl_layout))                                   return false;
-    if (!vk_compute_pl_init("./res/render.comp.glsl.spv", cs_render_pl_layout, &cs_render_pl)) return false;
+    if (!vk_pl_layout_init(layout_ci, &cs_render.pl_layout))                                   return false;
+    if (!vk_compute_pl_init("./res/render.comp.glsl.spv", cs_render.pl_layout, &cs_render.pl)) return false;
 
     /* compute shader render pipeline */
-    layout_ci.pSetLayouts = &cs_depth_map_layout;
-    if (!vk_pl_layout_init(layout_ci, &cs_depth_map_pl_layout))                                          return false;
-    if (!vk_compute_pl_init("./res/depth_map.comp.glsl.spv", cs_depth_map_pl_layout, &cs_depth_map_pl)) return false;
+    layout_ci.pSetLayouts = &cs_depth_map.ds_layout;
+    if (!vk_pl_layout_init(layout_ci, &cs_depth_map.pl_layout))                                         return false;
+    if (!vk_compute_pl_init("./res/depth_map.comp.glsl.spv", cs_depth_map.pl_layout, &cs_depth_map.pl)) return false;
 
     /* compute shader resolve pipeline */
-    layout_ci.pSetLayouts = &cs_resolve_ds_layout;
+    layout_ci.pSetLayouts = &cs_resolve.ds_layout;
     layout_ci.pushConstantRangeCount = 0;
-    if (!vk_pl_layout_init(layout_ci, &cs_resolve_pl_layout))                                     return false;
-    if (!vk_compute_pl_init("./res/resolve.comp.glsl.spv", cs_resolve_pl_layout, &cs_resolve_pl)) return false;
+    if (!vk_pl_layout_init(layout_ci, &cs_resolve.pl_layout))                                     return false;
+    if (!vk_compute_pl_init("./res/resolve.comp.glsl.spv", cs_resolve.pl_layout, &cs_resolve.pl)) return false;
 
     /* screen space triangle + frag image sampler for raster display */
-    layout_ci.pSetLayouts = &gfx_ds_layout;
-    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout))                                       return false;
-    if (!vk_sst_pl_init(gfx_pl_layout, &gfx_pl))                                             return false;
+    layout_ci.pSetLayouts = &gfx_sst.ds_layout;
+    if (!vk_pl_layout_init(layout_ci, &gfx_sst.pl_layout)) return false;
+    if (!vk_sst_pl_init(gfx_sst.pl_layout, &gfx_sst.pl))   return false;
 
     return true;
 }
 
-bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float blend_ratio, Point_Cloud_UBO *ubo,
-                   bool elevation_based_occlusion)
+bool update_pc_ubo(Camera *four_cameras, int shader_mode, int *cam_order, float blend_ratio,
+                   Point_Cloud_UBO *ubo, bool elevation_based_occlusion)
 {
     /* update mvp for main viewing camera */
     if (!get_mvp_float16(&ubo->data.main_cam_mvp)) return false;
@@ -583,9 +584,6 @@ Camera cameras[] = {
         .position   = {38.54, 23.47, 42.09},
         .up         = {0.0f, 1.0f, 0.0f},
         .target     = {25.18, 16.37, 38.97},
-        // .position   = {35.41, 18.88, 40.50},
-        // .up         = {0.00, 1.00, 0.00},
-        // .target     = {30.62, 17.51, 39.46},
         .fovy       = 45.0f,
         .projection = PERSPECTIVE,
     },
@@ -656,23 +654,27 @@ int main(int argc, char **argv)
     /* general state tracking */
     save_camera_defaults(&cameras[1]);
     int cam_order[4] = {0};
-    float vid_update_time = 0.0f;
-    bool playing = false;
     bool elevation_based_occlusion = false;
     // bool depth_map_needs_update = true;
 
-    for (size_t i = 0; i <= lod; i++)
+    for (size_t i = 0; i <= lod; i++) {
         if (!vk_comp_buff_staged_upload(&pc_layers[i].buff, pc_layers[i].items))
             return 1;
-    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))                       return 1;
+        da_append(&vk_buff_queue, &pc_layers[i].buff);
+    }
+    if (!vk_comp_buff_staged_upload(&frame.buff, frame.data))   return 1;
     if (!vk_comp_buff_staged_upload(&depths.buff, depths.data)) return 1;
-    if (!vk_ubo_init(&ubo.buff))                                                              return 1;
-    if (!vk_ubo_init(&depth_map_ubo.buff))                                                    return 1;
-    if (!vk_create_storage_img(&storage_tex))                                                 return 1;
+    if (!vk_ubo_init(&ubo.buff))                                return 1;
+    if (!vk_ubo_init(&depth_map_ubo.buff))                      return 1;
+    if (!vk_create_storage_img(&storage_tex))                   return 1;
+    da_append(&vk_buff_queue, &frame.buff);
+    da_append(&vk_buff_queue, &depths.buff);
+    da_append(&vk_buff_queue, &ubo.buff);
+    da_append(&vk_buff_queue, &depth_map_ubo.buff);
 
     /* setup descriptors */
-    if (!setup_ds_layouts())                          return 1;
-    if (!setup_ds_pool())                             return 1;
+    if (!setup_ds_layouts())                     return 1;
+    if (!setup_ds_pool())                        return 1;
     if (!setup_ds_sets(frame.buff, storage_tex)) return 1;
 
     /* launch a separate thread to start decoding video */
@@ -680,9 +682,9 @@ int main(int argc, char **argv)
 
     /* allocate descriptor sets based on layouts */
     for (size_t i = 0; i < LOD_COUNT; i++) {
-        VkDescriptorSetAllocateInfo render_alloc = {DS_ALLOC(&cs_render_ds_layout, 1, pool)};
+        VkDescriptorSetAllocateInfo render_alloc = {DS_ALLOC(&cs_render.ds_layout, 1, pool)};
         if (!vk_alloc_ds(render_alloc, &pc_layers[i].set)) return false;
-        VkDescriptorSetAllocateInfo depth_alloc = {DS_ALLOC(&cs_depth_map_layout, 1, pool)};
+        VkDescriptorSetAllocateInfo depth_alloc = {DS_ALLOC(&cs_depth_map.ds_layout, 1, pool)};
         if (!vk_alloc_ds(depth_alloc, &pc_layers[i].depth_ds)) return false;
     }
 
@@ -708,46 +710,10 @@ int main(int argc, char **argv)
 
     /* game loop */
     while (!window_should_close()) {
-        /* input */
         if (!handle_input(cameras, VK_ARRAY_LEN(cameras), &playing, &lod, ubo.buff, depth_map_ubo.buff, frame.buff))
             return 1;
-
-        if (playing) vid_update_time += get_frame_time();
-
-        /* start collecting frame rates to average */
-        if (records.collecting) {
-            Time_Record record = {
-                .fps = get_fps(),
-                .ms = get_frame_time() * 1000.0f,
-            };
-            da_append(&records, record);
-            /* calculate the average frame rate, print results, and reset */
-            if (records.count >= records.max) {
-                /* average fps */
-                size_t fps_sum = 0;
-                for (size_t i = 0; i < records.count; i++) fps_sum += records.items[i].fps;
-                float fps_ave = (float) fps_sum / records.count;
-
-                /* average milliseconds */
-                size_t ms_sum = 0;
-                for (size_t i = 0; i < records.count; i++) ms_sum += records.items[i].ms;
-                float ms_ave = (float) ms_sum / records.count;
-
-                vk_log(VK_INFO, "Average (N=%zu) FPS %.2f (%.2f ms)", records.count, fps_ave, ms_ave);
-                records.count = 0;
-                records.collecting = false;
-            }
-        }
-
-        /* grab the next video frames off of the queue */
-        if (vid_update_time > 1.0f / 30.0f && playing) {
-            if (video_dequeue()) {
-                vid_update_time = 0.0f;
-            } else {
-                vk_log(VK_INFO, "video could not dequeue, this shouldn't happen");
-                return 1;
-            }
-        }
+        if (records.collecting) record_data();
+        if (!try_video_dequeue()) return 1;
 
         /* compute shader submission */
         begin_mode_3d(cameras[cam_view_idx]);
@@ -767,7 +733,7 @@ int main(int argc, char **argv)
             vk_begin_rec_gfx();
             vk_raster_sampler_barrier(storage_tex.img.handle);
             vk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
-            vk_draw_sst(gfx_pl, gfx_pl_layout, ds_sets[DS_SST]);
+            vk_draw_sst(gfx_sst.pl, gfx_sst.pl_layout, gfx_sst.ds);
         end_drawing(); // ends gfx recording, renderpass, and submits
     }
 
@@ -775,11 +741,11 @@ int main(int argc, char **argv)
     video_queue_destroy();
 
     wait_idle();
+
+    // TODO: at some point switch to arenas
     free(frame.data);
-    for (size_t i = 0; i < LOD_COUNT; i++) {
-        vk_buff_destroy(&pc_layers[i].buff);
-        free(pc_layers[i].items);
-    }
+    for (size_t i = 0; i < LOD_COUNT; i++)
+        da_free(pc_layers[i]);
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         plm_destroy(video_textures.plms[i]);
         free(video_textures.initial_frames[i].y.data);
@@ -790,19 +756,20 @@ int main(int argc, char **argv)
             vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
-    vk_buff_destroy(&frame.buff);
-    vk_buff_destroy(&depths.buff);
-    vk_buff_destroy(&ubo.buff);
-    vk_buff_destroy(&depth_map_ubo.buff);
+
+    /* cleanup vulkan resources */
+    for (size_t i = 0; i < vk_buff_queue.count; i++)
+        vk_buff_destroy(vk_buff_queue.items[i]);
+    da_free(vk_buff_queue);
     vk_destroy_ds_pool(pool);
-    vk_destroy_ds_layout(cs_render_ds_layout);
-    vk_destroy_ds_layout(cs_depth_map_layout);
-    vk_destroy_ds_layout(cs_resolve_ds_layout);
-    vk_destroy_ds_layout(gfx_ds_layout);
-    vk_destroy_pl_res(cs_render_pl, cs_render_pl_layout);
-    vk_destroy_pl_res(cs_depth_map_pl, cs_depth_map_pl_layout);
-    vk_destroy_pl_res(cs_resolve_pl, cs_resolve_pl_layout);
-    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
+    vk_destroy_ds_layout(cs_render.ds_layout);
+    vk_destroy_ds_layout(cs_depth_map.ds_layout);
+    vk_destroy_ds_layout(cs_resolve.ds_layout);
+    vk_destroy_ds_layout(gfx_sst.ds_layout);
+    vk_destroy_pl_res(cs_render.pl, cs_render.pl_layout);
+    vk_destroy_pl_res(cs_depth_map.pl, cs_depth_map.pl_layout);
+    vk_destroy_pl_res(cs_resolve.pl, cs_resolve.pl_layout);
+    vk_destroy_pl_res(gfx_sst.pl, gfx_sst.pl_layout);
     vk_unload_texture(&storage_tex);
     close_window();
     return 0;

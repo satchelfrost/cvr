@@ -43,6 +43,8 @@ typedef struct {
 
 static Video_Queue video_queue = {0};
 static pthread_t prod_thread;
+static float vid_update_time = 0.0f;
+static bool playing = false;
 
 void *producer(void *arg);
 
@@ -277,6 +279,25 @@ bool load_videos(void)
             int width  = plm_get_width(plm);
             int height = plm_get_height(plm);
             video_textures.aspects[i] = (float)width / height;
+        }
+    }
+
+    return true;
+}
+
+bool try_video_dequeue(void)
+{
+    if (playing) vid_update_time += get_frame_time();
+
+    /* grab the next video frames off of the queue if enough time has passed */
+    /* note we are hardcoding a frame rate of 30, but it will eventually depend
+     * on the frame rate of the cctvs */
+    if (vid_update_time > 1.0f / 30.0f && playing) {
+        if (video_dequeue()) {
+            vid_update_time = 0.0f;
+        } else {
+            vk_log(VK_INFO, "video could not dequeue, this shouldn't happen");
+            return false;
         }
     }
 

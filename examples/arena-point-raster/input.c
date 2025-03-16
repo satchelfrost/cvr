@@ -40,6 +40,7 @@ bool handle_input(Camera *cameras, size_t cam_count, bool *playing, size_t *lod,
 
                 /* upload new buffer and update descriptor sets */
                 if (!vk_comp_buff_staged_upload(&pc_layers[*lod].buff, pc_layers[*lod].items)) return false;
+                da_append(&vk_buff_queue, &pc_layers[*lod].buff);
                 if (!update_render_ds_sets(ubo_buff, depth_map_ubo_buff, frame_buff, *lod))  return false;
             }
 
@@ -96,4 +97,29 @@ bool handle_input(Camera *cameras, size_t cam_count, bool *playing, size_t *lod,
     }
 
     return true;
+}
+
+void record_data(void)
+{
+    Time_Record record = {
+        .fps = get_fps(),
+        .ms = get_frame_time() * 1000.0f,
+    };
+    da_append(&records, record);
+    /* calculate the average frame rate, print results, and reset */
+    if (records.count >= records.max) {
+        /* average fps */
+        size_t fps_sum = 0;
+        for (size_t i = 0; i < records.count; i++) fps_sum += records.items[i].fps;
+        float fps_ave = (float) fps_sum / records.count;
+
+        /* average milliseconds */
+        size_t ms_sum = 0;
+        for (size_t i = 0; i < records.count; i++) ms_sum += records.items[i].ms;
+        float ms_ave = (float) ms_sum / records.count;
+
+        vk_log(VK_INFO, "Average (N=%zu) FPS %.2f (%.2f ms)", records.count, fps_ave, ms_ave);
+        records.count = 0;
+        records.collecting = false;
+    }
 }

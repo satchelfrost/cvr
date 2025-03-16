@@ -681,6 +681,7 @@ bool vk_device_init()
 
 defer:
     vk_da_free(queue_cis);
+    vk_da_free(unique_fams);
     return result;
 }
 
