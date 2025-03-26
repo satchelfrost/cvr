@@ -1,14 +1,9 @@
 #include "cvr.h"
 
-#ifndef PLATFORM_QUEST
 Shape_Type shape = SHAPE_CUBE;
-#endif
 
 int main()
 {
-#ifdef PLATFORM_ANDROID_QUEST
-    vk_log(VK_INFO, "Hello From CVR on the Quest!");
-#else
     Camera camera = {
         .position   = {0.0f, 2.0f, 5.0f},
         .target     = {0.0f, 0.0f, 0.0f},
@@ -44,7 +39,5 @@ int main()
     }
 
     close_window();
-#endif // PLATFORM_QUEST
-
     return 0;
 }

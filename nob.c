@@ -7,8 +7,6 @@
 #define FILE_EXISTS 1
 #define FILE_CHK_ERR -1 
 
-#define ANDROID_VERSION "33"
-
 typedef struct {
     const char **names;
     size_t count;
@@ -22,14 +20,12 @@ typedef struct {
 typedef enum {
     TARGET_LINUX,
     TARGET_WINDOWS,
-    TARGET_QUEST,
     TARGET_COUNT,
 } Target;
 
 const char *target_names[TARGET_COUNT] = {
     "linux",
     "windows",
-    "quest",
 };
 
 typedef enum {
@@ -41,8 +37,6 @@ typedef enum {
 typedef struct {
     const char *name;
     const Shaders shaders;
-    bool supported_targets[TARGET_COUNT];
-    bool private;
 
     /* WARNING: Please note that if there are any other c files, other than main.c, in the example directory,
      * they will not compiled as separate translation units, but instead require files to be included
@@ -84,9 +78,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
-        .supported_targets[TARGET_WINDOWS] = true,
-        .supported_targets[TARGET_QUEST] = true,
     },
     {
         .name = "orthographic",
@@ -98,7 +89,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "psychedelic",
@@ -110,7 +100,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "waves",
@@ -122,7 +111,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "texture",
@@ -139,7 +127,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "depth",
@@ -151,7 +138,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "movement",
@@ -163,7 +149,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "point-cloud",
@@ -178,7 +163,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
     {
         .name = "compute",
@@ -196,8 +180,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
-        .supported_targets[TARGET_WINDOWS] = true,
     },
     {
         .name = "point-raster",
@@ -216,31 +198,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
-    },
-    {
-        .name = "arena-point-raster",
-        .shaders = {
-            .names = (const char *[]) {
-                "sst.vert.glsl",
-                "sst.frag.glsl",
-                "render.comp.glsl",
-                "resolve.comp.glsl",
-                "depth_map.comp.glsl",
-            },
-            .count = 5,
-        },
-        .c_files = {
-            .names = (const char *[]) {
-                "main",
-                "input",
-                "cmd_and_log"
-            },
-            .count = 3
-        },
-        .supported_targets[TARGET_LINUX] = true,
-        .supported_targets[TARGET_WINDOWS] = true,
-        .private = true,
     },
     {
         .name = "video",
@@ -257,8 +214,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
-        .supported_targets[TARGET_WINDOWS] = true,
     },
     {
         .name = "gltf",
@@ -275,8 +230,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
-        .supported_targets[TARGET_WINDOWS] = true,
     },
     {
         .name = "mixed-raster",
@@ -296,7 +249,6 @@ static Example examples[] = {
             .names = default_c_file_names,
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
-        .supported_targets[TARGET_LINUX] = true,
     },
 };
 
@@ -314,15 +266,6 @@ typedef struct {
     Host host;
     bool debug;
     bool renderdoc;
-    struct {
-        char *home;
-        char *ndk_root;
-        char *cc;
-        char *aapt;
-        char *jar;
-        char *signer;
-        char *zip_align;
-    } android;
 } Config;
 
 void log_usage(const char *program)
@@ -497,9 +440,6 @@ bool build_glfw(Config config, const char *platform_path)
         return build_glfw_linux(platform_path);
     } else if (config.target == TARGET_WINDOWS && config.host == HOST_LINUX) {
         return build_glfw_win(platform_path);
-    } else if (config.target == TARGET_QUEST && config.host == HOST_LINUX) {
-        nob_log(NOB_INFO, "skipping glfw build for target quest");
-        return true; // skip glfw build for quest
     } else {
         nob_log(NOB_ERROR, "glfw target %d not yet supported", config.target);
         return false;
@@ -617,99 +557,12 @@ defer:
     return result;
 }
 
-bool check_android_tools(Config *config)
-{
-    config->android.home = getenv("ANDROID_HOME");
-    if (config->android.home) {
-        nob_log(NOB_INFO, "android home is %s", config->android.home);
-    } else {
-        nob_log(NOB_ERROR, "ANDROID_HOME not set");
-        return false;
-    }
-
-    config->android.ndk_root = getenv("ANDROID_NDK_ROOT");
-    if (config->android.ndk_root) {
-        nob_log(NOB_INFO, "android ndk is %s", config->android.ndk_root);
-    } else {
-        nob_log(NOB_ERROR, "ANDROID_NDK_ROOT not set");
-        return false;
-    }
-
-    // TODO: for the build tools I think I'm okay to just pick the first directory
-    config->android.cc = nob_temp_sprintf("%s/toolchains/llvm/prebuilt/linux-x86_64/bin/clang", config->android.ndk_root);
-    config->android.aapt = nob_temp_sprintf("%s/build-tools/29.0.2/aapt", config->android.home);
-    config->android.jar = nob_temp_sprintf("%s/platforms/android-" ANDROID_VERSION "/android.jar", config->android.home);
-    config->android.signer = nob_temp_sprintf("%s/build-tools/29.0.2/apksigner", config->android.home);
-    config->android.zip_align = nob_temp_sprintf("%s/build-tools/29.0.2/zipalign", config->android.home);
-
-    return true;
-}
-
-bool build_cvr_quest(Config config, const char *platform_path)
-{
-    bool result = true;
-
-    Nob_Cmd cmd = {0};
-    Nob_Procs procs = {0};
-    Nob_File_Paths obj_files = {0};
-
-    /* build modules */
-    const char *build_path = nob_temp_sprintf("%s/cvr", platform_path);
-    if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
-    for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
-        const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
-        const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
-        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
-        nob_da_append(&obj_files, output_path);
-        if (nob_needs_rebuild(output_path, &input_path, 1) ||
-            nob_needs_rebuild(output_path, &header_path, 1)) {
-            cmd.count = 0;
-            nob_cmd_append(&cmd, config.android.cc);
-            nob_cmd_append(&cmd, "-DPLATFORM_ANDROID_QUEST");
-            nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-target", "aarch64-linux-android" ANDROID_VERSION);
-            nob_cmd_append(&cmd, "-I./src/ext");
-            nob_cmd_append(&cmd, "-I./src/ext/android");
-            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-            // nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
-            nob_cmd_append(&cmd, "-fPIC");
-            nob_cmd_append(&cmd, "-c", input_path);
-            nob_cmd_append(&cmd, "-o", output_path);
-            Nob_Proc proc = nob_cmd_run_async(cmd);
-            nob_da_append(&procs, proc);
-        }
-    }
-
-    if (!nob_procs_wait(procs)) nob_return_defer(false);
-
-    /* create library */
-    const char *libcvr_path = nob_temp_sprintf("%s/libcvr.a", build_path);
-    if (nob_needs_rebuild(libcvr_path, obj_files.items, obj_files.count)) {
-        cmd.count = 0;
-        nob_cmd_append(&cmd, "ar", "-crs", libcvr_path);
-        for (size_t i = 0; i < obj_files.count; i++) {
-            const char *input_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
-            nob_cmd_append(&cmd, input_path);
-        }
-        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-    }
-
-defer:
-    nob_cmd_free(cmd);
-    nob_cmd_free(procs);
-    nob_cmd_free(obj_files);
-    return result;
-}
-
 bool build_cvr(Config *config, const char *platform_path)
 {
     if (config->target == TARGET_LINUX) {
         return build_cvr_linux(platform_path);
     } else if (config->target == TARGET_WINDOWS && config->host == HOST_LINUX) {
         return build_cvr_win(platform_path);
-    } else if (config->target == TARGET_QUEST && config->host == HOST_LINUX) {
-        if (!check_android_tools(config)) return false;
-        return build_cvr_quest(*config, platform_path);
     } else {
         nob_log(NOB_ERROR, "cvr target %d not yet supported", config->target);
         return false;
@@ -737,10 +590,7 @@ bool compile_shaders(Config config)
     nob_log(NOB_INFO, "checking shaders for %s", example_path);
 
     char *dst = NULL;
-    if (config.target == TARGET_QUEST)
-        dst = nob_temp_sprintf("./build/%s/%s/pre-apk/assets/res", target_names[config.target], example_path);
-    else
-        dst = nob_temp_sprintf("./build/%s/%s/res", target_names[config.target], example_path);
+    dst = nob_temp_sprintf("./build/%s/%s/res", target_names[config.target], example_path);
     if (!dst) {
         nob_log(NOB_ERROR, "could create destination folder for shaders");
         nob_return_defer(false);
@@ -858,75 +708,12 @@ defer:
     return result;
 }
 
-bool build_example_quest(Config config, const char *example_build_path, const char *lib_arch_path)
-{
-    const Example *example = config.example;
-    const char *example_path = nob_temp_sprintf("examples/%s", example->name);
-    bool result = true;
-    Nob_Cmd cmd = {0};
-    Nob_File_Paths c_files = {0};
-
-    /* build example */
-    for (size_t i = 0; i < example->c_files.count; i++)
-        nob_da_append(&c_files, nob_temp_sprintf("%s/%s.c", example_path, example->c_files.names[i]));
-
-    /* link with libraries */
-    const char *libcvr_path = nob_temp_sprintf("./build/%s/cvr/libcvr.a", target_names[config.target]);
-    const char *app_path = nob_temp_sprintf("%s/lib%s.so", lib_arch_path, example->name);
-    bool c_files_updated = nob_needs_rebuild(app_path, example->c_files.names, example->c_files.count);
-    bool libcvr_updated = nob_needs_rebuild(app_path, &libcvr_path, 1);
-    if (c_files_updated || libcvr_updated) {
-        cmd.count = 0;
-        nob_cmd_append(&cmd, config.android.cc);
-        nob_cmd_append(&cmd, "-DPLATFORM_ANDROID_QUEST");
-        nob_cmd_append(&cmd, "-target", "aarch64-linux-android-"ANDROID_VERSION);
-        nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-        nob_cmd_append(&cmd, "-I./src/ext");
-        nob_cmd_append(&cmd, "-I./src");
-        nob_cmd_append(&cmd, "-I./src/ext/android");
-        nob_cmd_append(&cmd, "-shared", "-uANativeActivity_onCreate");
-        nob_cmd_append(&cmd, "-Wl,-z,defs"); // force compiler error for missing symbols
-        nob_cmd_append(&cmd, "-o", app_path);
-        nob_cmd_append(&cmd, "./src/ext/android/android_native_app_glue.c");
-        nob_cmd_append(&cmd, "-fPIC");
-        nob_cmd_append(&cmd, nob_temp_sprintf("%s/android_main.c", example_path));
-        nob_cmd_append(&cmd, "./lib/arm64-v8a/Debug/libopenxr_loader.so");
-        const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
-        nob_cmd_append(&cmd, cvr_path, "-l:libcvr.a");
-
-        const char *ndk = nob_temp_sprintf("%s/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/" ANDROID_VERSION, config.android.ndk_root);
-        nob_cmd_append(&cmd, nob_temp_sprintf("-L%s", ndk), nob_temp_sprintf("-B%s", ndk));
-        nob_cmd_append(&cmd, "-lvulkan", "-landroid", "-llog", "-lm");
-        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-    }
-
-defer:
-    nob_cmd_free(cmd);
-    nob_cmd_free(c_files);
-    return result;
-}
-
 bool build_example(const char *example_build_path, Config config)
 {
     if (config.target == TARGET_LINUX) {
         return build_example_linux(config, example_build_path);
     } else if (config.target == TARGET_WINDOWS && config.host == HOST_LINUX) {
         return build_example_win(config, example_build_path);
-    } else if (config.target == TARGET_QUEST && config.host == HOST_LINUX) {
-        /* pre-apk is the folder is where we put everything we want to zip into the apk */
-        const char *pre_apk_path     = nob_temp_sprintf("%s/pre-apk",   example_build_path);
-        const char *lib_path         = nob_temp_sprintf("%s/lib",       pre_apk_path);
-        const char *lib_arch_path    = nob_temp_sprintf("%s/arm64-v8a", lib_path);
-        const char *assets_path      = nob_temp_sprintf("%s/assets",    pre_apk_path);
-        const char *cvr_res_path     = nob_temp_sprintf("%s/res",       assets_path);
-        const char *android_res_path = nob_temp_sprintf("%s/res",       pre_apk_path);
-        if (!nob_mkdir_if_not_exists(pre_apk_path))     return false;
-        if (!nob_mkdir_if_not_exists(lib_path))         return false;
-        if (!nob_mkdir_if_not_exists(lib_arch_path))    return false;
-        if (!nob_mkdir_if_not_exists(assets_path))      return false; 
-        if (!nob_mkdir_if_not_exists(cvr_res_path))     return false; 
-        if (!nob_mkdir_if_not_exists(android_res_path)) return false; 
-        return build_example_quest(config, example_build_path, lib_arch_path);
     } else {
         if (0 <= config.target && config.target < NOB_ARRAY_LEN(target_names))
             nob_log(NOB_ERROR, "failed to build example for target %s", target_names[config.target]);
@@ -940,20 +727,8 @@ void print_examples()
 {
     nob_log(NOB_INFO, "run example with: ./nob -e <example name>");
     nob_log(NOB_INFO, "Listing available examples:");
-    for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++) {
-        char *target_list = "";
-        for (size_t j = 0; j < TARGET_COUNT; j++) {
-            if (examples[i].supported_targets[j]) {
-                if (j == 0)
-                    target_list = nob_temp_sprintf("%s", target_names[j]);
-                else
-                    target_list = nob_temp_sprintf("%s, %s", target_list, target_names[j]);
-            }
-
-        }
-        const char *private = (examples[i].private) ? " (private data needed)" : "";
-        nob_log(NOB_INFO, "    %s (%s)%s", examples[i].name, target_list, private);
-    }
+    for (size_t i = 0; i < NOB_ARRAY_LEN(examples); i++)
+        nob_log(NOB_INFO, "    %s", examples[i].name);
 }
 
 bool cd(const char *dir)
@@ -980,11 +755,6 @@ bool find_supported_example(Config *config)
         nob_log(NOB_ERROR, "no such example found: %s", config->supplied_name);
         return false;
     }
-    if (!config->example->supported_targets[config->target]) {
-        nob_log(NOB_ERROR, "target %s not supported for example %s", target_names[config->target], config->example->name);
-        nob_log(NOB_INFO, "try listing examples `./nob -l`");
-        return false;
-    }
 
     return true;
 }
@@ -994,10 +764,7 @@ bool copy_resources(const char *example_build_path, Config config)
     /* get the source and destination resource folder names */
     const char *src_res = nob_temp_sprintf("examples/%s/res", config.example->name);
     char *dst_res = NULL;
-    if (config.target == TARGET_QUEST)
-        dst_res = nob_temp_sprintf("%s/pre-apk/assets/res", example_build_path);
-    else
-        dst_res = nob_temp_sprintf("%s/res", example_build_path);
+    dst_res = nob_temp_sprintf("%s/res", example_build_path);
     if (!dst_res) {
         nob_log(NOB_ERROR, "could create destination folder for resources");
         return false;
@@ -1019,13 +786,6 @@ bool copy_resources(const char *example_build_path, Config config)
         const char *src_path = nob_temp_sprintf("%s/%s", src_res, file_name);
         const char *dst_path = nob_temp_sprintf("%s/%s", dst_res, file_name);
         if (!copy_file_if_not_exists(src_path, dst_path)) return false;
-    }
-
-    /* if we are targeting quest then we will also need the openxr loader */
-    if (config.target == TARGET_QUEST) {
-        const char *openxr_src = "lib/arm64-v8a/Debug/libopenxr_loader.so";
-        const char *openxr_dst = nob_temp_sprintf("%s/pre-apk/lib/arm64-v8a/libopenxr_loader.so", example_build_path);
-        if (!copy_file_if_not_exists(openxr_src, openxr_dst)) return false;
     }
 
     return true;
@@ -1112,7 +872,7 @@ defer:
     return result;
 }
 
-bool run_or_deploy(Config config, const char *example_build_path)
+bool run(Config config, const char *example_build_path)
 {
     if (config.host != HOST_LINUX) {
         nob_log(NOB_ERROR, "currently examples only run on linux");
@@ -1126,179 +886,12 @@ bool run_or_deploy(Config config, const char *example_build_path)
     case TARGET_WINDOWS:
         if (!run_example_win(config, example_build_path)) return false;
         break;
-    case TARGET_QUEST:
-        if (!deploy_example_quest(config, example_build_path)) return false;
-        break;
     default:
         nob_log(NOB_ERROR, "Target %s not yet supported for running or deploying", target_names[config.target]);
         return false;
     }
 
     return true;
-}
-
-bool create_android_manifest(Config config, const char *manifest_path)
-{
-    Nob_String_Builder sb = {0};
-    /* header */
-    nob_sb_append_cstr(&sb, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
-
-    /* package */
-    nob_sb_append_cstr(&sb, "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n");
-    nob_sb_append_cstr(&sb, "\tpackage=\"com.wamwadstudios.blarg\"\n");
-    nob_sb_append_cstr(&sb, "\tandroid:versionCode=\"1\"\n");
-    nob_sb_append_cstr(&sb, "\tandroid:versionName=\"1.0\" android:installLocation=\"auto\" >\n");
-
-    /* permissions */
-    nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"android.permission.MODIFY_AUDIO_SETTINGS\" />\n");
-    nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"android.permission.INTERNET\" />\n");
-    nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"android.hardware.vr.headtracking\" android:required=\"true\" />\n");
-    nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"oculus.software.handtracking\" android:required=\"false\" />\n");
-    nob_sb_append_cstr(&sb, "\t<uses-permission android:name=\"com.oculus.permission.HAND_TRACKING\" />\n");
-    nob_sb_append_cstr(&sb, "\t<uses-feature android:name=\"com.oculus.feature.PASSTHROUGH\" android:required=\"true\" />\n");
-    nob_sb_append_cstr(&sb, nob_temp_sprintf("\t<application android:allowBackup=\"false\" android:label=\"%s\" android:hasCode=\"false\">\n", config.example->name));
-    nob_sb_append_cstr(&sb, "\t<uses-sdk android:minSdkVersion=\"" ANDROID_VERSION "\"\n");
-    nob_sb_append_cstr(&sb, "\t\tandroid:targetSdkVersion=\"" ANDROID_VERSION "\" />\n");
-
-    /* metadata */
-    nob_sb_append_cstr(&sb, "\t<meta-data android:name=\"com.oculus.supportedDevices\" android:value=\"all\" />\n");
-    nob_sb_append_cstr(&sb, "\t\t<activity\n");
-    nob_sb_append_cstr(&sb, "\t\t\tandroid:name=\"android.app.NativeActivity\"\n");
-    nob_sb_append_cstr(&sb, "\t\t\tandroid:exported=\"true\"\n");
-    nob_sb_append_cstr(&sb, "\t\t\tandroid:theme=\"@android:style/Theme.Black.NoTitleBar.Fullscreen\"\n");
-    nob_sb_append_cstr(&sb, "\t\t\tandroid:launchMode=\"singleTask\"\n");
-    nob_sb_append_cstr(&sb, "\t\t\tandroid:screenOrientation=\"landscape\"\n");
-    nob_sb_append_cstr(&sb, "\t\t\tandroid:configChanges=\"screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode\">\n");
-    nob_sb_append_cstr(&sb, nob_temp_sprintf("\t\t\t<meta-data android:name=\"android.app.lib_name\" android:value=\"%s\" />\n", config.example->name));
-    nob_sb_append_cstr(&sb, "\t\t\t<intent-filter>\n");
-    nob_sb_append_cstr(&sb, "\t\t\t\t<action android:name=\"android.intent.action.MAIN\" />\n");
-    nob_sb_append_cstr(&sb, "\t\t\t\t<category android:name=\"com.oculus.intent.category.VR\" />\n");
-    nob_sb_append_cstr(&sb, "\t\t\t\t<category android:name=\"android.intent.category.LAUNCHER\" />\n");
-    nob_sb_append_cstr(&sb, "\t\t\t</intent-filter>\n");
-    nob_sb_append_cstr(&sb, "\t\t</activity>\n");
-    nob_sb_append_cstr(&sb, "\t</application>\n");
-
-    /* footer*/
-    nob_sb_append_cstr(&sb, "</manifest>");
-
-    return nob_write_entire_file(manifest_path, sb.items, sb.count);
-}
-
-bool package_apk(Config config, const char *example_build_path)
-{
-    bool result = true;
-    Nob_Cmd cmd = {0};
-
-    const char *manifest_path = nob_temp_sprintf("%s/AndroidManifest.xml", example_build_path);
-    int ret = nob_file_exists(manifest_path);
-    switch (ret) {
-    case FILE_DOES_NOT_EXIST:
-        if (!create_android_manifest(config, manifest_path))
-            nob_return_defer(false);
-        break;
-    case FILE_CHK_ERR:
-        nob_return_defer(false);
-    case FILE_EXISTS:
-    default:
-    }
-
-    if (!cd(example_build_path)) nob_return_defer(false);
-
-    nob_cmd_append(&cmd, config.android.aapt);
-    nob_cmd_append(&cmd, "package", "-f");
-    nob_cmd_append(&cmd, "-F", "temp.apk");
-    nob_cmd_append(&cmd, "-I", config.android.jar);
-    nob_cmd_append(&cmd, "-M", "./AndroidManifest.xml");
-    // nob_cmd_append(&cmd, "-A", "./pre-apk/assets");
-    // nob_cmd_append(&cmd, "-S", "./pre-apk/res");
-    nob_cmd_append(&cmd, "-v");
-    nob_cmd_append(&cmd, "--target-sdk-version", ANDROID_VERSION);
-
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-    /* unpack apk, compress assets & shared libs, then align*/
-    cmd.count = 0;
-    nob_cmd_append(&cmd, "unzip", "-o", "temp.apk", "-d", "./pre-apk");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-    if (!cd("pre-apk")) nob_return_defer(false);
-
-    cmd.count = 0;
-    nob_cmd_append(&cmd, "zip", "-D4r", "../makecapk.apk", ".");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-    cmd.count = 0;
-    nob_cmd_append(&cmd, "zip", "-D0r", "../makecapk.apk", "./AndroidManifest.xml");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-    if (!cd("..")) nob_return_defer(false);
-
-    cmd.count = 0;
-    nob_cmd_append(&cmd, "rm", "-f", nob_temp_sprintf("%s.apk", config.example->name));
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-    cmd.count = 0;
-    const char *final_apk = nob_temp_sprintf("%s.apk", config.example->name);
-    nob_cmd_append(&cmd, config.android.zip_align, "-v", "4", "makecapk.apk", final_apk);
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-    /* clean up any loose files */
-    cmd.count = 0;
-    nob_cmd_append(&cmd, "rm", "temp.apk", "makecapk.apk");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-    /* cd back to parent directory */
-    if (!cd("../../../../")) nob_return_defer(false);
-
-defer:
-    nob_cmd_free(cmd);
-    return result;
-}
-
-bool make_key_if_not_exists(const char *key_path)
-{
-    bool result = true;
-    Nob_Cmd cmd = {0};
-
-    switch (nob_file_exists(key_path)) {
-    case FILE_DOES_NOT_EXIST:
-        break;
-    case FILE_CHK_ERR:
-        nob_return_defer(false);
-    case FILE_EXISTS:
-    default:
-        nob_return_defer(true);
-    }
-
-    nob_cmd_append(&cmd, "keytool", "-genkey", "-v", "-keystore");
-    nob_cmd_append(&cmd, key_path, "-alias", "standkey");
-	nob_cmd_append(&cmd, "-keyalg", "RSA", "-keysize", "2048");
-    nob_cmd_append(&cmd, "-validity", "10000");
-    nob_cmd_append(&cmd, "-storepass", "password", "-keypass", "password");
-    nob_cmd_append(&cmd, "-dname", "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB");
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-defer:
-    nob_cmd_free(cmd);
-    return result;
-}
-
-bool sign_apk(Config config, const char *example_build_path)
-{
-    bool result = true;
-    Nob_Cmd cmd = {0};
-
-    const char *key_path = nob_temp_sprintf("%s/my-release-key.keystore", example_build_path);
-    if (!make_key_if_not_exists(key_path)) nob_return_defer(false);
-
-    cmd.count = 0;
-    nob_cmd_append(&cmd, config.android.signer);
-    nob_cmd_append(&cmd, "sign", "--ks", key_path);
-    nob_cmd_append(&cmd, "--key-pass", "pass:password", "--ks-pass", "pass:password");
-    nob_cmd_append(&cmd, nob_temp_sprintf("%s/%s.apk", example_build_path, config.example->name));
-    if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-
-defer:
-    nob_cmd_free(cmd);
-    return result;
 }
 
 int main(int argc, char **argv)
@@ -1326,11 +919,7 @@ int main(int argc, char **argv)
     if (!build_example(example_build_path, config)) return 1;
     if (!compile_shaders(config)) return 1;
     if (!copy_resources(example_build_path, config)) return 1;
-    if (config.target == TARGET_QUEST) {
-        if (!package_apk(config, example_build_path)) return 1;
-        if (!sign_apk(config, example_build_path)) return 1;
-    }
-    if (!run_or_deploy(config, example_build_path)) return 1;
+    if (!run(config, example_build_path)) return 1;
 
     nob_cmd_free(cmd);
     return 0;
