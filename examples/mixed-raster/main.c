@@ -423,8 +423,8 @@ bool create_prepass_pipeline()
     assert(prepass.rp != NULL && "prepass renderpass was NULL");
     Pipeline_Config config = {
         .pl_layout = prepass_gfx.pl_layout,
-        .vert = "./res/default.vert.spv",
-        .frag = "./res/default.frag.spv",
+        .vert = "./res/default.vert.glsl.spv",
+        .frag = "./res/default.frag.glsl.spv",
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,

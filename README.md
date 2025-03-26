@@ -52,9 +52,9 @@ To build and run an example use the `-e` flag, e.g.:
 ./nob -e 3d-primitives
 ```
 
-> **Note:** The example `arena-point-raster` contains private data, so it won't run, but you can still examine the source code.
-Also, `video` and `gltf` rely on assets that are not found in this repo, so they won't run properly until you download the
-assets (check their source code comments). The rest of the examples should work out-of-the-box.
+> **Note:** Examples `video` and `gltf` rely on assets that are not found in this repo, so they won't run
+properly until you download the assets (check their source code comments). The rest of the examples should work
+out-of-the-box.
 
 ## Building on Mac/Windows
 Not yet supported.
