@@ -830,7 +830,16 @@ bool run_example_linux(Config config, const char *example_build_path)
         for (int i = 0; i < config.forwarded_argc; i++) {
             nob_cmd_append(&cmd, config.forwarded_argv[i]);
         }
-        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+        if (!nob_cmd_run_sync(cmd)) {
+            if (strcmp(config.example->name, "video") == 0) {
+                nob_log(NOB_WARNING, "Did you forget to download the asset for the video demo?");
+                nob_log(NOB_WARNING, "https://phoboslab.org/files/bjork-all-is-full-of-love.mpg");
+            } else if (strcmp(config.example->name, "gltf") == 0) {
+                nob_log(NOB_WARNING, "Did you forget to download the asset for the gltf demo?");
+                nob_log(NOB_WARNING, "https://github.com/raysan5/raylib/blob/master/examples/models/resources/models/gltf/robot.glb");
+            }
+            nob_return_defer(false);
+        }
     }
     if (!cd("../../../../")) nob_return_defer(false);
 

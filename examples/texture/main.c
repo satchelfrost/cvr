@@ -154,7 +154,7 @@ bool create_pipeline()
 int main()
 {
     Camera camera = {
-        .position   = {0.0f, 1.0f, 4.0f},
+        .position   = {0.0f, 0.0f, 4.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = 45.0f,
@@ -175,22 +175,24 @@ int main()
 
     float time = 0.0f;
     while(!window_should_close()) {
+        update_camera_free(&camera);
         time = get_time();
-        begin_drawing(BLACK);
+        (void)time;
+        begin_drawing(DARKGRAY);
         begin_mode_3d(camera);
-            rotate_y(time);
+            // rotate_y(time);
             push_matrix();
                 scale(textures[DS_MATRIX].aspect, 1.0f, 1.0f);
                 if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_MATRIX], SHAPE_QUAD))
                     return 1;
             pop_matrix();
 
-            scale(textures[DS_STATUE].aspect, 1.0f, 1.0f);
-            translate(0.0f, 0.0f, 1.0f);
-                if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_STATUE], SHAPE_QUAD))
-                    return 1;
-            rotate_x(time);
-            draw_shape_wireframe(SHAPE_CUBE);
+            // scale(textures[DS_STATUE].aspect, 1.0f, 1.0f);
+            // translate(0.0f, 0.0f, 1.0f);
+            // //     if (!draw_shape_ex(gfx_pl, gfx_pl_layout, ds_sets[DS_STATUE], SHAPE_QUAD))
+            // //         return 1;
+            // rotate_x(time);
+            // draw_shape_wireframe(SHAPE_CUBE);
         end_mode_3d();
         end_drawing();
     }

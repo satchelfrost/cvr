@@ -635,39 +635,51 @@ bool vk_device_init()
         queue_ci.pQueuePriorities = &queuePriority;
         vk_da_append(&queue_cis, queue_ci);
     }
-
     VkPhysicalDeviceFeatures features = {
         .samplerAnisotropy = VK_TRUE,
         .fillModeNonSolid = VK_TRUE,
-        .shaderInt64 = VK_TRUE,
-    };
-    VkPhysicalDeviceVulkan13Features features13 = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .synchronization2 = VK_TRUE,
-    };
-    VkPhysicalDeviceVulkan12Features features12 = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .pNext = &features13,
-        .shaderBufferInt64Atomics = VK_TRUE,
-    };
-    VkPhysicalDeviceFeatures2 all_features = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = &features12,
-        .features = features,
     };
     VkDeviceCreateInfo device_ci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &all_features,
-        .pEnabledFeatures = NULL, // necessary when pNext is used
+        .pEnabledFeatures = &features,
         .pQueueCreateInfos = queue_cis.items,
         .queueCreateInfoCount = queue_cis.count,
         .enabledExtensionCount = VK_ARRAY_LEN(device_exts),
         .ppEnabledExtensionNames = device_exts,
-    };
 #ifdef ENABLE_VALIDATION
-    device_ci.enabledLayerCount = VK_ARRAY_LEN(validation_layers);
-    device_ci.ppEnabledLayerNames = validation_layers;
+        .enabledLayerCount = VK_ARRAY_LEN(validation_layers),
+        .ppEnabledLayerNames = validation_layers,
 #endif
+    };
+
+    // VkPhysicalDeviceFeatures features = {
+    //     .samplerAnisotropy = VK_TRUE,
+    //     .fillModeNonSolid = VK_TRUE,
+    //     .shaderInt64 = VK_TRUE,
+    // };
+    // VkPhysicalDeviceVulkan13Features features13 = {
+    //     .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+    //     .synchronization2 = VK_TRUE,
+    // };
+    // VkPhysicalDeviceVulkan12Features features12 = {
+    //     .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    //     .pNext = &features13,
+    //     .shaderBufferInt64Atomics = VK_TRUE,
+    // };
+    // VkPhysicalDeviceFeatures2 all_features = {
+    //     .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+    //     .pNext = &features12,
+    //     .features = features,
+    // };
+    // VkDeviceCreateInfo device_ci = {
+    //     .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+    //     .pNext = &all_features,
+    //     .pEnabledFeatures = NULL, // necessary when pNext is used
+    //     .pQueueCreateInfos = queue_cis.items,
+    //     .queueCreateInfoCount = queue_cis.count,
+    //     .enabledExtensionCount = VK_ARRAY_LEN(device_exts),
+    //     .ppEnabledExtensionNames = device_exts,
+    // };
 
     bool result = true;
     if (VK_SUCCEEDED(vkCreateDevice(vk_ctx.phys_device, &device_ci, NULL, &vk_ctx.device))) {
