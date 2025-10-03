@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vulkan/vulkan_core.h>
-#include "vk_ctx.h"
+#include "rag_vk.h"
 #include "ext/raylib-5.0/raymath.h"
 
 /* 
@@ -224,8 +224,8 @@ typedef struct {
 } Camera;
 
 typedef enum {
-    SHAPE_CUBE = 0,
     SHAPE_QUAD,
+    SHAPE_CUBE,
     SHAPE_TETRAHEDRON,
     SHAPE_CAM,
     SHAPE_COUNT,
@@ -260,7 +260,7 @@ void end_drawing();                                         /* Submits commands,
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
-bool draw_points(Vk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
+bool draw_points(Rvk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 /* gpu compute */
 void begin_compute();

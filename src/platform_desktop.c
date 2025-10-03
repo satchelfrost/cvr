@@ -32,20 +32,20 @@ bool init_platform()
         const GLFWvidmode *mode = glfwGetVideoMode(largest_monitor);
         win_size.width = mode->width;
         win_size.height = mode->height;
-        vk_log(VK_INFO, "full screen mode enabled", mode->width, mode->height);
-        vk_log(VK_INFO, "largest monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
-        platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
-        if (!platform.handle) return false;
+        rvk_log(RVK_INFO, "full screen mode enabled", mode->width, mode->height);
+        rvk_log(RVK_INFO, "largest monitor %s, (width, hieght) = (%d, %d)", name, mode->width, mode->height);
+        rvk_glfw_window = glfwCreateWindow(win_size.width, win_size.height, core_title, largest_monitor, NULL);
+        if (!rvk_glfw_window) return false;
     } else {
-        platform.handle = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
-        if (!platform.handle) return false;
+        rvk_glfw_window = glfwCreateWindow(win_size.width, win_size.height, core_title, NULL, NULL);
+        if (!rvk_glfw_window) return false;
     }
-    glfwSetWindowUserPointer(platform.handle, &vk_ctx);
-    glfwSetFramebufferSizeCallback(platform.handle, frame_buff_resized);
-    glfwSetKeyCallback(platform.handle, key_callback);
-    glfwSetMouseButtonCallback(platform.handle, mouse_button_callback);
-    glfwSetCursorPosCallback(platform.handle, mouse_cursor_pos_callback);
-    glfwSetScrollCallback(platform.handle, mouse_scroll_callback);
+    glfwSetWindowUserPointer(rvk_glfw_window, &rvk_ctx);
+    glfwSetFramebufferSizeCallback(rvk_glfw_window, frame_buff_resized);
+    glfwSetKeyCallback(rvk_glfw_window, key_callback);
+    glfwSetMouseButtonCallback(rvk_glfw_window, mouse_button_callback);
+    glfwSetCursorPosCallback(rvk_glfw_window, mouse_cursor_pos_callback);
+    glfwSetScrollCallback(rvk_glfw_window, mouse_scroll_callback);
     glfwSetJoystickCallback(joystick_callback);
 
     return true;
@@ -53,7 +53,7 @@ bool init_platform()
 
 bool window_should_close()
 {
-    bool result = glfwWindowShouldClose(platform.handle) || is_key_down(KEY_ESCAPE);
+    bool result = glfwWindowShouldClose(rvk_glfw_window) || is_key_down(KEY_ESCAPE);
     glfwPollEvents();
     return result;
 }
@@ -154,7 +154,7 @@ double get_time()
 
 void close_platform()
 {
-    glfwDestroyWindow(platform.handle);
+    glfwDestroyWindow(rvk_glfw_window);
     glfwTerminate();
 }
 
@@ -183,10 +183,10 @@ void mouse_cursor_pos_callback(GLFWwindow *window, double x, double y)
 void joystick_callback(int jid, int event)
 {
     if (event == GLFW_CONNECTED) {
-        vk_log(VK_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+        rvk_log(RVK_INFO, "Connected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
     else if (event == GLFW_DISCONNECTED) {
-        vk_log(VK_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
+        rvk_log(RVK_INFO, "Disconnected jid %d, event %d, name %s", jid, event, glfwGetJoystickName(jid));
     }
 }
 
@@ -194,12 +194,12 @@ void set_window_size(int width, int height)
 {
     win_size.width = width;
     win_size.height = height;
-    glfwSetWindowSize(platform.handle, width, height);
+    glfwSetWindowSize(rvk_glfw_window, width, height);
 }
 
 void set_window_pos(int x, int y)
 {
-    glfwSetWindowPos(platform.handle, x, y);
+    glfwSetWindowPos(rvk_glfw_window, x, y);
 }
 
 void frame_buff_resized(GLFWwindow* window, int width, int height)
@@ -207,5 +207,5 @@ void frame_buff_resized(GLFWwindow* window, int width, int height)
     (void)window;
     win_size.width = width;
     win_size.height = height;
-    vk_ctx.swapchain.buff_resized = true;
+    rvk_ctx.swapchain.buff_resized = true;
 }

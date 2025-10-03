@@ -473,7 +473,7 @@ bool build_cvr_linux(const char *platform_path)
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
             nob_cmd_append(&cmd, "-I./src/ext");
             nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-            nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
+            nob_cmd_append(&cmd, "-DVK_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
             Nob_Proc proc = nob_cmd_run_async(cmd);
