@@ -47,7 +47,7 @@ void update_texture(Rvk_Texture tex, VkDescriptorSet ds)
     rvk_update_ds(1, &write);
 }
 
-bool create_pipeline(VkDescriptorSetLayout *ds_layout)
+void create_pipeline(VkDescriptorSetLayout *ds_layout)
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
@@ -58,7 +58,7 @@ bool create_pipeline(VkDescriptorSetLayout *ds_layout)
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!rvk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
+    rvk_pl_layout_init(layout_ci, &gfx_pl_layout);
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -92,9 +92,7 @@ bool create_pipeline(VkDescriptorSetLayout *ds_layout)
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!rvk_basic_pl_init(config, &gfx_pl)) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &gfx_pl);
 }
 
 int main()
@@ -111,17 +109,8 @@ int main()
 
     Image matrix = load_image("res/matrix.png");
     Image statue = load_image("res/statue.jpg");
-    Rvk_Texture matrix_tex = {0};
-    Rvk_Texture statue_tex = {0};
-
-    if (!rvk_load_texture(matrix.data, matrix.width, matrix.height, VK_FORMAT_R8G8B8A8_SRGB, &matrix_tex)) {
-        rvk_log(RVK_ERROR, "matrix texture failed to upload");
-        return 1;
-    }
-    if (!rvk_load_texture(statue.data, statue.width, statue.height, VK_FORMAT_R8G8B8A8_SRGB, &statue_tex)) {
-        rvk_log(RVK_ERROR, "statue texture failed to upload");
-        return 1;
-    }
+    Rvk_Texture matrix_tex = rvk_load_texture(matrix.data, matrix.width, matrix.height, VK_FORMAT_R8G8B8A8_SRGB);
+    Rvk_Texture statue_tex = rvk_load_texture(statue.data, statue.width, statue.height, VK_FORMAT_R8G8B8A8_SRGB);
 
     /* setup descriptors */
     VkDescriptorSet matrix_ds, statue_ds;
@@ -137,13 +126,13 @@ int main()
     };
     if (!rvk_ds_layout_init(&binding, 1, &texture_layout)) return 1;
 
-    rvk_log_descriptor_pool_usage(arena);
+    // rvk_log_descriptor_pool_usage(arena);
     if (!rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &matrix_ds)) return 1;
     if (!rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &statue_ds)) return 1;
-    rvk_log_descriptor_pool_usage(arena);
+    // rvk_log_descriptor_pool_usage(arena);
     update_texture(matrix_tex, matrix_ds);
     update_texture(statue_tex, statue_ds);
-    if (!create_pipeline(&texture_layout.handle)) return 1;
+    create_pipeline(&texture_layout.handle);
 
     float time = 0.0f;
     while(!window_should_close()) {

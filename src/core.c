@@ -168,7 +168,7 @@ void enable_full_screen()
     rvk_log(RVK_INFO, "fullscreen mode enabled");
 }
 
-bool default_pl_fill_init()
+void default_pl_fill_init()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
@@ -180,7 +180,7 @@ bool default_pl_fill_init()
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!rvk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_FILL])) return false;
+    rvk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_FILL]);
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -214,17 +214,13 @@ bool default_pl_fill_init()
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!rvk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_FILL])) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_FILL]);
 }
 
 bool draw_shape(Shape_Type shape_type)
 {
     /* create basic shape pipeline if it hasn't been created */
-    if (!pipelines.handles[DEFAULT_PL_FILL])
-        if (!default_pl_fill_init()) return false;
-
+    if (!pipelines.handles[DEFAULT_PL_FILL]) default_pl_fill_init();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Matrix model = {0};
@@ -272,7 +268,7 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     return true;
 }
 
-bool default_pl_wireframe_init()
+void default_pl_wireframe_init()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
@@ -284,8 +280,7 @@ bool default_pl_wireframe_init()
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!rvk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_WIREFRAME]))
-        return false;
+    rvk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_WIREFRAME]);
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -319,17 +314,13 @@ bool default_pl_wireframe_init()
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!rvk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_WIREFRAME])) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_WIREFRAME]);
 }
 
 bool draw_shape_wireframe(Shape_Type shape_type)
 {
     /* create basic wireframe pipeline if it hasn't been created */
-    if (!pipelines.handles[DEFAULT_PL_WIREFRAME])
-        if (!default_pl_wireframe_init()) return false;
-
+    if (!pipelines.handles[DEFAULT_PL_WIREFRAME]) default_pl_wireframe_init();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Rvk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
@@ -696,11 +687,8 @@ bool alloc_shape_res(Shape_Type shape_type)
     size = primitives[shape_type].idx_buff.size;
     if (!rvk_idx_buff_init(size, count, data, &shape->idx_buff)) return false;
 
-    if (!rvk_buff_staged_upload(shape->vtx_buff) || !rvk_buff_staged_upload(shape->idx_buff)) {
-        rvk_log(RVK_ERROR, "failed to allocate resources for shape %d", shape_type);
-        return false;
-    }
-
+    rvk_buff_staged_upload(shape->vtx_buff);
+    rvk_buff_staged_upload(shape->idx_buff);
     return true;
 }
 

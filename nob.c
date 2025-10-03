@@ -463,7 +463,7 @@ bool build_cvr_linux(const char *platform_path)
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
-        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
+        const char *header_path = nob_temp_sprintf("./src/rag_vk.h", cvr[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
@@ -516,7 +516,7 @@ bool build_cvr_win(const char *platform_path)
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
-        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
+        const char *header_path = nob_temp_sprintf("./src/rag_vk.h", cvr[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
