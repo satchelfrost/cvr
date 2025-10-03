@@ -224,7 +224,7 @@ double rvk_get_glfw_time();
 void rvk_set_android_asset_man(AAssetManager *aam);
 #endif
 
-bool rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena);
+void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena);
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena);
 bool rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set);
 const char *rvk_desc_type_to_str(Rvk_Descriptor_Type type);
@@ -318,7 +318,7 @@ const char *rvk_buff_type_as_str(Rvk_Buffer_Type type);
 
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
 // TODO: consider using VK_WHOLE_SIZE instead of my weird convention
-bool rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size);
+void rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size);
 
 void rvk_storage_tex_init(Rvk_Texture *texture, VkExtent2D extent);
 void rvk_pl_barrier(VkImageMemoryBarrier barrier);
@@ -331,12 +331,12 @@ void rvk_swapchain_img_barrier(void);
 uint32_t rvk_advance_frame(void);
 uint32_t rvk_get_frame_idx(void);
 
-bool rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, Rvk_Descriptor_Set_Layout *layout);
+void rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, Rvk_Descriptor_Set_Layout *layout);
 // multiplier: the number of times you've used a descriptor set layout to allocate descriptor sets
 // its only for tracking purposes, but tracking descriptor sets is useful
 void rvk_destroy_rvk_descriptor_set_layout(Rvk_Descriptor_Pool_Arena arena, Rvk_Descriptor_Set_Layout layout, uint32_t multiplier);
 
-bool rvk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool);
+void rvk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool);
 void rvk_destroy_ds_pool(VkDescriptorPool pool);
 void rvk_destroy_descriptor_set_layout(VkDescriptorSetLayout layout);
 bool rvk_alloc_ds(VkDescriptorSetAllocateInfo alloc, VkDescriptorSet *sets);
@@ -376,7 +376,7 @@ bool rvk_find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint
 
 // TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
-bool rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
+void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat fmt);
 void rvk_unload_texture(Rvk_Texture texture);
 bool rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
@@ -454,10 +454,10 @@ void rvk_destroy_semaphore(VkSemaphore semaphore);
 void rvk_destroy_fence(VkFence fence);
 
 /* Allocates and begins a temporary command buffer. Easy-to-use, not super efficent. */
-bool rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff);
+void rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff);
 
 /* Ends and frees a temporary command buffer. Easy-to-use, not super efficent. */
-bool rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff);
+void rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff);
 
 typedef struct {
     const char **items;
@@ -2381,33 +2381,31 @@ void rvk_buff_staged_upload(Rvk_Buffer buff)
     rvk_buff_destroy(stg_buff);
 }
 
-bool rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size)
+void rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size)
 {
     VkCommandBuffer tmp_cmd_buff;
-    if (!rvk_cmd_quick_begin(&tmp_cmd_buff)) return false;
+    rvk_cmd_quick_begin(&tmp_cmd_buff);
         VkBufferCopy copy_region = {0};
         if (size) {
             copy_region.size = size;
             if (size > dst_buff.size) {
                 rvk_log(RVK_ERROR, "Cannot copy buffer, size > dst buffer (won't fit)");
-                return false;
+                RVK_EXIT_APP;
             }
             if (size > src_buff.size) {
                 rvk_log(RVK_ERROR, "Cannot copy buffer, size > src buffer (cannot copy more than what's available)");
-                return false;
+                RVK_EXIT_APP;
             }
         } else {
             // size == 0 means copy the entire src to dst
             if (dst_buff.size < src_buff.size) {
                 rvk_log(RVK_ERROR, "Cannot copy buffer, dst buffer < src buffer (won't fit)");
-                return false;
+                RVK_EXIT_APP;
             }
             copy_region.size = src_buff.size;
         }
         vkCmdCopyBuffer(tmp_cmd_buff, src_buff.handle, dst_buff.handle, 1, &copy_region);
-    if (!rvk_cmd_quick_end(&tmp_cmd_buff)) return false;
-
-    return true;
+    rvk_cmd_quick_end(&tmp_cmd_buff);
 }
 
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
@@ -2528,7 +2526,7 @@ void rvk_destroy_fence(VkFence fence)
     vkDestroyFence(rvk_ctx.device, fence, NULL);
 }
 
-bool rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
+void rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
 {
     VkCommandBufferAllocateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -2536,57 +2534,25 @@ bool rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
         .commandPool = rvk_ctx.pool,
         .commandBufferCount = 1,
     };
-    VkResult res = vkAllocateCommandBuffers(rvk_ctx.device, &ci, tmp_cmd_buff);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to create quick cmd");
-        return false;
-    }
+    RAG_VK(vkAllocateCommandBuffers(rvk_ctx.device, &ci, tmp_cmd_buff));
     VkCommandBufferBeginInfo cmd_begin = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    res = vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to begin quick cmd");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin));
 }
 
-bool rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
+void rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
 {
-    bool result = true;
-
-    VkResult res = vkEndCommandBuffer(*tmp_cmd_buff);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to end cmd buffer");
-        rvk_return_defer(false);
-    }
-
+    RAG_VK(vkEndCommandBuffer(*tmp_cmd_buff));
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = tmp_cmd_buff,
     };
-
-    res = vkQueueSubmit(rvk_ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to submit quick cmd");
-        rvk_return_defer(false);
-    }
-
-    /* TODO: perhaps I should use a fence instead of a queue wait idle */
-
-    res = vkQueueWaitIdle(rvk_ctx.gfx_queue);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to wait idle in quick cmd");
-        rvk_return_defer(false);
-    }
-
-defer:
+    RAG_VK(vkQueueSubmit(rvk_ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE));
+    RAG_VK(vkQueueWaitIdle(rvk_ctx.gfx_queue));
     vkFreeCommandBuffers(rvk_ctx.device, rvk_ctx.pool, 1, tmp_cmd_buff);
-    return result;
 }
 
 void transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
@@ -2744,10 +2710,10 @@ void rvk_color_img_barrier(VkImage color_img)
     );
 }
 
-bool rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
+void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
 {
     VkCommandBuffer tmp_cmd_buff;
-    if (!rvk_cmd_quick_begin(&tmp_cmd_buff)) return false;
+    rvk_cmd_quick_begin(&tmp_cmd_buff);
         VkBufferImageCopy region = {
             .imageSubresource = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -2756,17 +2722,8 @@ bool rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
             .imageOffset = {0, 0, 0},
             .imageExtent = {extent.width, extent.height, 1},
         };
-        vkCmdCopyBufferToImage(
-            tmp_cmd_buff,
-            src_buff,
-            dst_img,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1,
-            &region
-        );
-    if (!rvk_cmd_quick_end(&tmp_cmd_buff)) return false;
-
-    return true;
+        vkCmdCopyBufferToImage(tmp_cmd_buff, src_buff, dst_img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    rvk_cmd_quick_end(&tmp_cmd_buff);
 }
 
 int format_to_size(VkFormat fmt)
@@ -2942,18 +2899,12 @@ void rvk_storage_tex_init(Rvk_Texture *texture, VkExtent2D extent)
     texture->info.imageView   = img_view;
 }
 
-bool rvk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool)
+void rvk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool)
 {
-    VkResult res = vkCreateDescriptorPool(rvk_ctx.device, &pool_ci, NULL, pool);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to create descriptor pool");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreateDescriptorPool(rvk_ctx.device, &pool_ci, NULL, pool));
 }
 
-bool rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena)
+void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena)
 {
     VkDescriptorPoolSize pool_sizes[] = {
         {.type = VK_DESCRIPTOR_TYPE_SAMPLER,                .descriptorCount = MAX_DESCRIPTOR_SETS},
@@ -2974,9 +2925,7 @@ bool rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena)
         .pPoolSizes    = pool_sizes,
         .maxSets       = MAX_DESCRIPTOR_SETS,
     };
-    if (!rvk_create_ds_pool(pool_ci, &arena->pool)) return false;
-
-    return true;
+    rvk_create_ds_pool(pool_ci, &arena->pool);
 }
 
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena)
@@ -2986,7 +2935,7 @@ void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena)
     rvk_reset_pool(arena->pool);
 }
 
-bool rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, Rvk_Descriptor_Set_Layout *layout)
+void rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, Rvk_Descriptor_Set_Layout *layout)
 {
     for (size_t i = 0; i < b_count; i++) {
         VkDescriptorSetLayoutBinding binding = bindings[i];
@@ -2997,15 +2946,8 @@ bool rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, 
         .bindingCount = b_count,
         .pBindings = bindings,
     };
-    VkResult res = vkCreateDescriptorSetLayout(rvk_ctx.device, &layout_ci, NULL, &layout->handle);
-    if (!RVK_SUCCEEDED(res)) {
-        rvk_log(RVK_ERROR, "failed to create descriptor set layout");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreateDescriptorSetLayout(rvk_ctx.device, &layout_ci, NULL, &layout->handle));
 }
-
 
 bool rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set)
 {

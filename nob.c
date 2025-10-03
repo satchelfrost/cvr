@@ -113,7 +113,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "texture",
+        .name = "texture3D",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert.glsl",

@@ -1,15 +1,7 @@
 #include "cvr.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "ext/stb_image.h"
-
 VkPipeline gfx_pl;
 VkPipelineLayout gfx_pl_layout;
-
-typedef struct {
-    int width, height;
-    void *data;
-} Image;
 
 typedef struct {
     Vector3 pos;
@@ -17,21 +9,6 @@ typedef struct {
     Vector2 tex_coord;
 } Texture_Vertex; 
 
-Image load_image(const char *file_name)
-{
-    Image img = {0};
-    int channels;
-    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
-
-    if (!img.data) {
-        rvk_log(RVK_ERROR, "image %s could not be loaded", file_name);
-    } else {
-        rvk_log(RVK_INFO, "image %s was successfully loaded", file_name);
-        rvk_log(RVK_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
-    }
-
-    return img;
-}
 
 // TODO: could this be promoted to an API function?
 void update_texture(Rvk_Texture tex, VkDescriptorSet ds)
@@ -107,16 +84,14 @@ int main()
 
     init_window(500, 500, "Load texture");
 
-    Image matrix = load_image("res/matrix.png");
-    Image statue = load_image("res/statue.jpg");
-    Rvk_Texture matrix_tex = rvk_load_texture(matrix.data, matrix.width, matrix.height, VK_FORMAT_R8G8B8A8_SRGB);
-    Rvk_Texture statue_tex = rvk_load_texture(statue.data, statue.width, statue.height, VK_FORMAT_R8G8B8A8_SRGB);
+    Rvk_Texture matrix = load_texture_from_image("res/matrix.png");
+    Rvk_Texture statue = load_texture_from_image("res/statue.jpg");
 
     /* setup descriptors */
     VkDescriptorSet matrix_ds, statue_ds;
     Rvk_Descriptor_Set_Layout texture_layout = {0};
     Rvk_Descriptor_Pool_Arena arena = {0};
-    if (!rvk_descriptor_pool_arena_init(&arena)) return 1;
+    rvk_descriptor_pool_arena_init(&arena);
 
     VkDescriptorSetLayoutBinding binding = {
         .binding = 0,
@@ -124,14 +99,12 @@ int main()
         .descriptorCount = 1,
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
     };
-    if (!rvk_ds_layout_init(&binding, 1, &texture_layout)) return 1;
+    rvk_ds_layout_init(&binding, 1, &texture_layout);
 
-    // rvk_log_descriptor_pool_usage(arena);
     if (!rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &matrix_ds)) return 1;
     if (!rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &statue_ds)) return 1;
-    // rvk_log_descriptor_pool_usage(arena);
-    update_texture(matrix_tex, matrix_ds);
-    update_texture(statue_tex, statue_ds);
+    update_texture(matrix, matrix_ds);
+    update_texture(statue, statue_ds);
     create_pipeline(&texture_layout.handle);
 
     float time = 0.0f;
@@ -141,26 +114,24 @@ int main()
         begin_mode_3d(camera);
             rotate_y(time);
             push_matrix();
-                scale(matrix.width/(float)matrix.height, 1.0f, 1.0f);
-                if (!draw_shape_ex(gfx_pl, gfx_pl_layout, matrix_ds, SHAPE_QUAD))
-                    return 1;
+                scale(matrix.img.extent.width/(float)matrix.img.extent.height, 1.0f, 1.0f);
+                draw_shape_ex(gfx_pl, gfx_pl_layout, matrix_ds, SHAPE_QUAD);
             pop_matrix();
 
-            scale(statue.width/(float)statue.height, 1.0f, 1.0f);
+            scale(statue.img.extent.width/(float)statue.img.extent.height, 1.0f, 1.0f);
             translate(0.0f, 0.0f, 1.0f);
-                if (!draw_shape_ex(gfx_pl, gfx_pl_layout, statue_ds, SHAPE_QUAD))
-                    return 1;
+                draw_shape_ex(gfx_pl, gfx_pl_layout, statue_ds, SHAPE_QUAD);
             rotate_x(time);
             draw_shape_wireframe(SHAPE_CUBE);
         end_mode_3d();
         end_drawing();
     }
 
-    wait_idle();
+    rvk_wait_idle();
     rvk_destroy_descriptor_set_layout(texture_layout.handle);
     rvk_descriptor_pool_arena_destroy(arena);
-    rvk_unload_texture(matrix_tex);
-    rvk_unload_texture(statue_tex);
+    rvk_unload_texture(matrix);
+    rvk_unload_texture(statue);
     rvk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     close_window();
     return 0;

@@ -6,6 +6,9 @@
 #define RAYMATH_IMPLEMENTATION
 #include "ext/raylib-5.0/raymath.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "ext/stb_image.h"
+
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -243,7 +246,7 @@ bool draw_shape(Shape_Type shape_type)
     return true;
 }
 
-bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
+void draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
 {
     if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
 
@@ -252,7 +255,7 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
         model = mat_stack[mat_stack_p - 1];
     } else {
         rvk_log(RVK_ERROR, "No matrix stack, cannot draw.");
-        return false;
+        return;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
@@ -264,8 +267,6 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     else rvk_bind_gfx(pl, pl_layout, NULL, 0);
     rvk_push_const(pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
     rvk_draw_buffers(vtx_buff, idx_buff);
-
-    return true;
 }
 
 void default_pl_wireframe_init()
@@ -981,11 +982,6 @@ Window_Size get_window_size()
     return win_size;
 }
 
-void wait_idle() // TODO: this should be in rvk_ctx.h
-{
-    vkDeviceWaitIdle(rvk_ctx.device);
-}
-
 void log_fps()
 {
     static int fps = -1;
@@ -1005,3 +1001,33 @@ float get_mouse_wheel_move()
 
     return result;
 }
+
+Cvr_Image load_image(const char *file_name)
+{
+    Cvr_Image img = {0};
+    int channels;
+    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
+
+    if (!img.data) {
+        rvk_log(RVK_ERROR, "image %s could not be loaded", file_name);
+    } else {
+        rvk_log(RVK_INFO, "image %s was successfully loaded", file_name);
+        rvk_log(RVK_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
+    }
+
+    return img;
+}
+
+Rvk_Texture load_texture(Cvr_Image img)
+{
+    Rvk_Texture t = rvk_load_texture(img.data, img.width, img.height, VK_FORMAT_R8G8B8A8_SRGB);
+    free(img.data);
+    return t;
+}
+
+Rvk_Texture load_texture_from_image(const char *file_name)
+{
+    return load_texture(load_image(file_name));
+}
+
+
