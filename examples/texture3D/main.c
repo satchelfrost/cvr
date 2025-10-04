@@ -101,8 +101,8 @@ int main()
     };
     rvk_ds_layout_init(&binding, 1, &texture_layout);
 
-    if (!rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &matrix_ds)) return 1;
-    if (!rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &statue_ds)) return 1;
+    rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &matrix_ds);
+    rvk_descriptor_pool_arena_alloc_set(&arena, &texture_layout, &statue_ds);
     update_texture(matrix, matrix_ds);
     update_texture(statue, statue_ds);
     create_pipeline(&texture_layout.handle);

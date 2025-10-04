@@ -13,10 +13,6 @@
 
 // easy: requires little thinking just need to go through the errors
 // ----------------------------------------------------------------------------------------------
-// TODO: destroy functions should not be passing things by pointer
-// TODO: get rid of most of RVK_SUCCEEDED 
-// TODO: get rid of bools for things like buff init (unless I find it useful)
-// TODO: upload version for vtx and idx buff
 // ----------------------------------------------------------------------------------------------
 // medium: requires some thinking but there's common approaches to solve
 // TODO: consider using VK_WHOLE_SIZE as an option for buffer copy
@@ -187,7 +183,7 @@ void rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass
 VkFormat rvk_surface_fmt(void);
 void rvk_destroy_render_pass(VkRenderPass render_pass);
 void rvk_frame_buffs_init(void);
-bool rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb);
+void rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb);
 void rvk_destroy_frame_buff(VkFramebuffer frame_buff);
 void rvk_recreate_swapchain(void);
 void rvk_depth_init(void);
@@ -195,14 +191,13 @@ void rvk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
 VkCommandBuffer rvk_get_cmd_buff(void);
 VkCommandBuffer rvk_get_comp_buff(void);
 void rvk_reset_pool(VkDescriptorPool pool);
-bool rvk_update(void);
 double rvk_dt(void);
 
 /* platform specifics */
 #ifdef PLATFORM_DESKTOP_GLFW
-bool rvk_glfw_surface_init();
+void rvk_glfw_surface_init();
 void rvk_glfw_wait_resize_frame_buffer();
-bool rvk_glfw_init(int width, int height, const char *title);
+void rvk_glfw_init(int width, int height, const char *title);
 void rvk_glfw_destroy();
 bool rvk_window_should_close();
 void rvk_poll_glfw_events();
@@ -215,7 +210,7 @@ void rvk_set_android_asset_man(AAssetManager *aam);
 
 void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena);
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena);
-bool rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set);
+void rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set);
 const char *rvk_desc_type_to_str(Rvk_Descriptor_Type type);
 void rvk_log_descriptor_pool_usage(Rvk_Descriptor_Pool_Arena arena);
 void rvk_log_descriptor_layout_usage(Rvk_Descriptor_Set_Layout layout, const char *shader_name);
@@ -234,7 +229,7 @@ typedef struct {
     VkRenderPass render_pass;
 } Pipeline_Config;
 
-bool rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
+void rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
 void rvk_basic_pl_init(Pipeline_Config config, VkPipeline *pl);
 
 void rvk_wait_to_begin_gfx();
@@ -274,7 +269,7 @@ typedef struct {
     const VkClearValue* p_clear_values;
 } Rvk_Render_Pass_Begin_Info;
 #define rvk_cmd_begin_render_pass(cmd_buff, ...) rvk_cmd_begin_render_pass_(cmd_buff, (Rvk_Render_Pass_Begin_Info){__VA_ARGS__});
-bool rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_Info rvk_bi);
+void rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_Info rvk_bi);
 
 void rvk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff, void *float16_mvp);
 void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
@@ -283,24 +278,24 @@ void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff);
 void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void rvk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
-bool rvk_rec_compute();
-bool rvk_submit_compute();
-bool rvk_compute_fence_wait();
-bool rvk_end_rec_compute();
+void rvk_rec_compute();
+void rvk_submit_compute();
+void rvk_compute_fence_wait();
+void rvk_end_rec_compute();
 void rvk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void rvk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value);
 void rvk_compute_pl_barrier();
 
-bool rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, Rvk_Buffer_Type type, void *data, Rvk_Buffer *buffer);
-bool rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer);
-bool rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
-bool rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
-bool rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+void rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, Rvk_Buffer_Type type, void *data, Rvk_Buffer *buffer);
+void rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer);
+void rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+void rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_buff_destroy(Rvk_Buffer buffer);
-bool rvk_buff_map(Rvk_Buffer *buff);
-bool rvk_buff_unmap(Rvk_Buffer *buff);
+void rvk_buff_map(Rvk_Buffer *buff);
+void rvk_buff_unmap(Rvk_Buffer buff);
 void rvk_buff_staged_upload(Rvk_Buffer buff);
 const char *rvk_buff_type_as_str(Rvk_Buffer_Type type);
 
@@ -318,11 +313,8 @@ void rvk_swapchain_img_barrier(void);
 uint32_t rvk_advance_frame(void);
 uint32_t rvk_get_frame_idx(void);
 
+/* descriptor set functions */
 void rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, Rvk_Descriptor_Set_Layout *layout);
-// multiplier: the number of times you've used a descriptor set layout to allocate descriptor sets
-// its only for tracking purposes, but tracking descriptor sets is useful
-void rvk_destroy_rvk_descriptor_set_layout(Rvk_Descriptor_Pool_Arena arena, Rvk_Descriptor_Set_Layout layout, uint32_t multiplier);
-
 void rvk_create_ds_pool(VkDescriptorPoolCreateInfo pool_ci, VkDescriptorPool *pool);
 void rvk_destroy_ds_pool(VkDescriptorPool pool);
 void rvk_destroy_descriptor_set_layout(VkDescriptorSetLayout layout);
@@ -341,7 +333,7 @@ void rvk_log(Rvk_Log_Level level, const char *fmt, ...);
 void rvk_populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
 Rvk_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
 void rvk_setup_debug_msgr();
-bool rvk_setup_report_callback();
+void rvk_setup_report_callback();
 bool rvk_set_queue_fam_indices(VkPhysicalDevice phys_device);
 bool rvk_set_gfx_capable_queue_idx(VkPhysicalDevice phys_device);
 bool rvk_swapchain_adequate(VkPhysicalDevice phys_device);
@@ -358,8 +350,8 @@ void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags
 void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat fmt);
 void rvk_unload_texture(Rvk_Texture texture);
-bool rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
-bool rvk_sampler_init(VkSampler *sampler);
+void rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
+void rvk_sampler_init(VkSampler *sampler);
 int rvk_format_to_size(VkFormat fmt);
 
 #define rvk_return_defer(value) do { result = (value); goto defer; } while(0)
@@ -423,7 +415,7 @@ typedef struct {
     uint32_t command_buffer_count;
 } Rvk_Command_Buffer_Allocate_Info;
 #define rvk_allocate_command_buffer(buff, ...) rvk_allocate_command_buffer_(buff, (Rvk_Command_Buffer_Allocate_Info){__VA_ARGS__})
-bool rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allocate_Info ci);
+void rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allocate_Info ci);
 
 void rvk_cmd_syncs_init();
 void rvk_cmd_pool_init();
@@ -564,22 +556,6 @@ const char *vk_res_to_str(VkResult res)
     case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR:                    return "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR";
     case VK_ERROR_VALIDATION_FAILED_EXT:                       return "VK_ERROR_VALIDATION_FAILED_EXT";
     case VK_ERROR_INVALID_SHADER_NV:                           return "VK_ERROR_INVALID_SHADER_NV";
-    case VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:               return "VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR";
-    case VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR:      return "VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR";
-    case VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR:   return "VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR";
-    case VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR:      return "VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR";
-    case VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR:       return "VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR";
-    case VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR:         return "VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR";
-    case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:return "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT";
-    case VK_ERROR_NOT_PERMITTED_KHR:                           return "VK_ERROR_NOT_PERMITTED_KHR";
-    case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:         return "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT";
-    case VK_THREAD_IDLE_KHR:                                   return "VK_THREAD_IDLE_KHR";
-    case VK_THREAD_DONE_KHR:                                   return "VK_THREAD_DONE_KHR";
-    case VK_OPERATION_DEFERRED_KHR:                            return "VK_OPERATION_DEFERRED_KHR";
-    case VK_OPERATION_NOT_DEFERRED_KHR:                        return "VK_OPERATION_NOT_DEFERRED_KHR";
-    case VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR:            return "VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR";
-    case VK_ERROR_COMPRESSION_EXHAUSTED_EXT:                   return "VK_ERROR_COMPRESSION_EXHAUSTED_EXT";
-    case VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT:              return "VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT";
     default: return "unrecognized vkresult";
     }
 }
@@ -622,14 +598,9 @@ defer:
 
 GLFWwindow *rvk_glfw_window;
 
-bool rvk_glfw_surface_init()
+void rvk_glfw_surface_init()
 {
-    if (RVK_SUCCEEDED(glfwCreateWindowSurface(rvk_ctx.instance, rvk_glfw_window, NULL, &rvk_ctx.surface))) {
-        return true;
-    } else {
-        rvk_log(RVK_ERROR, "failed to initialize glfw window surface");
-        return false;
-    }
+    RAG_VK(glfwCreateWindowSurface(rvk_ctx.instance, rvk_glfw_window, NULL, &rvk_ctx.surface));
 }
 
 void rvk_glfw_wait_resize_frame_buffer()
@@ -642,18 +613,22 @@ void rvk_glfw_wait_resize_frame_buffer()
     }
 }
 
-bool rvk_glfw_init(int width, int height, const char *title)
+void rvk_glfw_init(int width, int height, const char *title)
 {
     if (rvk_glfw_window) {
         rvk_log(RVK_ERROR, "window handle was already initialized");
-        return false;
+        RVK_EXIT_APP;
     }
-    if (!glfwInit()) return false;
+    if (!glfwInit()) {
+        rvk_log(RVK_ERROR, "failed to initialize glfw");
+        RVK_EXIT_APP;
+    }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     rvk_glfw_window = glfwCreateWindow(width, height, title, NULL, NULL);
-    if (!rvk_glfw_window) return false;
-
-    return true;
+    if (!rvk_glfw_window) {
+        rvk_log(RVK_ERROR, "failed to create glfw window");
+        RVK_EXIT_APP;
+    }
 }
 
 void rvk_glfw_destroy()
@@ -698,10 +673,11 @@ void rvk_init_(Rvk_Config cfg)
 {
 
 #ifdef PLATFORM_DESKTOP_GLFW
-    (void) cfg;
     if (!rvk_glfw_window) {
-        rvk_log(RVK_ERROR, "must explicitly initialize glfw window manually or use rvk_glfw_init");
-        RVK_EXIT_APP;
+        int width = (cfg.width)  ? cfg.width : 500;
+        int height= (cfg.height) ? cfg.height : 500;
+        const char *name = (cfg.title) ? cfg.title: "default title";
+        rvk_glfw_init(width, height, name);
     }
 #else
     rvk_log(RVK_ERROR, "currently rvk_init only supports PLATFORM_DESKTOP_GLFW");
@@ -1102,14 +1078,9 @@ void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
     vkDestroyShaderModule(rvk_ctx.device, stages[1].module, NULL);
 }
 
-bool rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
+void rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
 {
-    if (!RVK_SUCCEEDED(vkCreatePipelineLayout(rvk_ctx.device, &ci, NULL, pl_layout))) {
-        rvk_log(RVK_ERROR, "failed to create pipeline layout");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreatePipelineLayout(rvk_ctx.device, &ci, NULL, pl_layout));
 }
 
 void rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
@@ -1268,7 +1239,7 @@ void rvk_frame_buffs_init()
     }
 }
 
-bool rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb)
+void rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb)
 {
     VkFramebufferCreateInfo frame_buff_ci = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
@@ -1279,12 +1250,7 @@ bool rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t a
         .height = h,
         .layers = 1,
     };
-    if (!RVK_SUCCEEDED(vkCreateFramebuffer(rvk_ctx.device, &frame_buff_ci, NULL, fb))) {
-        rvk_log(RVK_ERROR, "failed to create frame buffer");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreateFramebuffer(rvk_ctx.device, &frame_buff_ci, NULL, fb));
 }
 
 void rvk_destroy_frame_buff(VkFramebuffer frame_buff)
@@ -1315,7 +1281,7 @@ void rvk_begin_render_pass(float r, float g, float b, float a)
     vkCmdBeginRenderPass(rvk_ctx.cmd_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
-bool rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_Info rvk_bi)
+void rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_Info rvk_bi)
 {
     VkClearValue clear_color = {
         .color = {
@@ -1336,11 +1302,9 @@ bool rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_
     if (rvk_bi.render_area.extent.height) bi.renderArea.extent.height = rvk_bi.render_area.extent.height;
     if (bi.renderArea.extent.width == 0 || bi.renderArea.extent.height == 0) {
         rvk_log(RVK_ERROR, "extent was not specified for render pass");
-        return false;
+        return;
     }
     vkCmdBeginRenderPass(cmd_buff, &bi, VK_SUBPASS_CONTENTS_INLINE);
-
-    return true;
 }
 
 void rvk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRenderPass rp, VkFramebuffer fb, VkExtent2D extent)
@@ -1671,9 +1635,9 @@ void rvk_depth_init()
     rvk_img_view_init(rvk_ctx.depth_img, &rvk_ctx.depth_img_view);
 }
 
-bool rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer)
+void rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer)
 {
-    return rvk_buff_init(
+    rvk_buff_init(
         size,
         1, // 1 uniform buffer
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -1792,7 +1756,7 @@ void rvk_setup_debug_msgr()
     }
 }
 
-bool rvk_setup_report_callback()
+void rvk_setup_report_callback()
 {
     VkDebugReportCallbackCreateInfoEXT report_callback_ci = {
         .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
@@ -1805,10 +1769,10 @@ bool rvk_setup_report_callback()
     };
     RVK_LOAD_PFN(vkCreateDebugReportCallbackEXT);
     if (vkCreateDebugReportCallbackEXT) {
-        return RVK_SUCCEEDED(vkCreateDebugReportCallbackEXT(rvk_ctx.instance, &report_callback_ci, NULL, &rvk_ctx.report_callback));
+        RAG_VK(vkCreateDebugReportCallbackEXT(rvk_ctx.instance, &report_callback_ci, NULL, &rvk_ctx.report_callback));
     } else {
         rvk_log(RVK_ERROR, "failed to load function pointer for vkCreateDebugReportCallbackEXT");
-        return false;
+        RVK_EXIT_APP;
     }
 }
 
@@ -2077,11 +2041,11 @@ bool rvk_device_exts_supported(VkPhysicalDevice phys_device)
     return false;
 }
 
-bool rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, Rvk_Buffer_Type type, void *data, Rvk_Buffer *buffer)
+void rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, Rvk_Buffer_Type type, void *data, Rvk_Buffer *buffer)
 {
     if (!buffer) {
         rvk_log(RVK_ERROR, "buffer was NULL inside of rvk_buff_init");
-        return false;
+        RVK_EXIT_APP;
     }
 
     buffer->size = size;
@@ -2089,7 +2053,7 @@ bool rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemory
 
     if (!data) {
         rvk_log(RVK_ERROR, "rvk_buff_init failed data was NULL");
-        return false;
+        RVK_EXIT_APP;
     }
 
     buffer->data = data;
@@ -2100,10 +2064,7 @@ bool rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemory
         .usage = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    if (!RVK_SUCCEEDED(vkCreateBuffer(rvk_ctx.device, &buffer_ci, NULL, &buffer->handle))) {
-        rvk_log(RVK_ERROR, "failed to create buffer");
-        return false;
-    }
+    RAG_VK(vkCreateBuffer(rvk_ctx.device, &buffer_ci, NULL, &buffer->handle));
 
     VkMemoryRequirements mem_reqs = {0};
     vkGetBufferMemoryRequirements(rvk_ctx.device, buffer->handle, &mem_reqs);
@@ -2113,28 +2074,20 @@ bool rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemory
     };
     if (!rvk_find_mem_type_idx(mem_reqs.memoryTypeBits, mem_props, &alloc_ci.memoryTypeIndex)) {
         rvk_log(RVK_ERROR, "while initializing buffer, memory not suitable based on memory requirements");
-        return false;
+        RVK_EXIT_APP;
     }
-    if (!RVK_SUCCEEDED(vkAllocateMemory(rvk_ctx.device, &alloc_ci, NULL, &buffer->mem))) {
-        rvk_log(RVK_ERROR, "failed to allocate buffer memory!");
-        return false;
-    }
-    if (!RVK_SUCCEEDED(vkBindBufferMemory(rvk_ctx.device, buffer->handle, buffer->mem, 0))) {
-        rvk_log(RVK_ERROR, "failed to bind buffer memory");
-        return false;
-    }
+    RAG_VK(vkAllocateMemory(rvk_ctx.device, &alloc_ci, NULL, &buffer->mem));
+    RAG_VK(vkBindBufferMemory(rvk_ctx.device, buffer->handle, buffer->mem, 0));
 
     /* book keeping */
     buffer->info.buffer = buffer->handle;
     buffer->info.range  = buffer->size;
     buffer->type = type;
-
-    return true;
 }
 
-bool rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
+void rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
 {
-    return rvk_buff_init(
+    rvk_buff_init(
         size,
         count,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT  |  // in case we want to transfer data back to host
@@ -2148,9 +2101,9 @@ bool rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffe
     );
 }
 
-bool rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
+void rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
 {
-    return rvk_buff_init(
+    rvk_buff_init(
         size,
         count,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -2161,9 +2114,9 @@ bool rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer
     );
 }
 
-bool rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
+void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
 {
-    return rvk_buff_init(
+    rvk_buff_init(
         size,
         count,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -2187,45 +2140,32 @@ void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buff
     );
 }
 
-bool rvk_buff_map(Rvk_Buffer *buff)
+void rvk_buff_map(Rvk_Buffer *buff)
 {
     if (!buff || !buff->handle) {
         rvk_log(RVK_ERROR, "rvk_mem_map failed, buffer invalid");
-        return false;
+        RVK_EXIT_APP;
     }
 
     if (!buff->size) {
         rvk_log(RVK_ERROR, "rvk_mem_map failed, buffer size was zero, and that doesn't make sense");
-        return false;
+        RVK_EXIT_APP;
     }
 
-    if (!RVK_SUCCEEDED(vkMapMemory(rvk_ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped))) {
-        rvk_log(RVK_ERROR, "unable to map memory for staging buffer");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkMapMemory(rvk_ctx.device, buff->mem, 0, buff->size, 0, &buff->mapped));
 }
 
-bool rvk_buff_unmap(Rvk_Buffer *buff)
+void rvk_buff_unmap(Rvk_Buffer buff)
 {
-    if (!buff || !buff->handle) {
+    if (!buff.handle) {
         rvk_log(RVK_ERROR, "rvk_buff_map failed, buffer invalid");
-        return false;
+        RVK_EXIT_APP;
     }
-    vkUnmapMemory(rvk_ctx.device, buff->mem);
-    buff->mapped = NULL;
-    return true;
+    vkUnmapMemory(rvk_ctx.device, buff.mem);
 }
 
 void rvk_buff_destroy(Rvk_Buffer buffer)
 {
-    if (buffer.mapped) {
-        rvk_log(RVK_WARNING, "rvk_buff_destroy: buffer type `%s`", rvk_buff_type_as_str(buffer.type));
-        rvk_log(RVK_WARNING, "    did you call vkUnmapMemory on VkBuffer %p?", buffer.handle);
-        rvk_log(RVK_WARNING, "    either manually buffer->mapped = NULL, or call rvk_buff_unmap()", buffer.handle);
-    }
-
     vkDestroyBuffer(rvk_ctx.device, buffer.handle, NULL);
     vkFreeMemory(rvk_ctx.device, buffer.mem, NULL);
 }
@@ -2256,7 +2196,6 @@ void rvk_buff_staged_upload(Rvk_Buffer buff)
     RAG_VK(vkMapMemory(rvk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped));
     memcpy(stg_buff.mapped, buff.data, stg_buff.size);
     vkUnmapMemory(rvk_ctx.device, stg_buff.mem);
-    stg_buff.mapped = NULL;
 
     /* transfer data from staging buffer to vertex buffer */
     rvk_buff_copy(buff, stg_buff, 0);
@@ -2335,18 +2274,13 @@ void rvk_cmd_pool_init()
     RAG_VK(vkCreateCommandPool(rvk_ctx.device, &cmd_pool_ci, NULL, &rvk_ctx.pool));
 }
 
-bool rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allocate_Info rvk_ci)
+void rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allocate_Info rvk_ci)
 {
     VkCommandBufferAllocateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ci.commandPool        = (rvk_ci.command_pool)         ? rvk_ci.command_pool : rvk_ctx.pool;
     ci.level              = (rvk_ci.level)                ? rvk_ci.level: VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ci.commandBufferCount = (rvk_ci.command_buffer_count) ? rvk_ci.command_buffer_count : 1;
-    if (!RVK_SUCCEEDED(vkAllocateCommandBuffers(rvk_ctx.device, &ci, buff))) {
-        rvk_log(RVK_ERROR, "failed to create graphics command buffer");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkAllocateCommandBuffers(rvk_ctx.device, &ci, buff));
 }
 
 void rvk_cmd_syncs_init()
@@ -2600,7 +2534,7 @@ int format_to_size(VkFormat fmt)
     }
 }
 
-bool rvk_sampler_init(VkSampler *sampler)
+void rvk_sampler_init(VkSampler *sampler)
 {
     VkPhysicalDeviceProperties props = {0};
     vkGetPhysicalDeviceProperties(rvk_ctx.phys_device, &props);
@@ -2617,12 +2551,7 @@ bool rvk_sampler_init(VkSampler *sampler)
         .compareOp = VK_COMPARE_OP_ALWAYS,
         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
     };
-    if (!RVK_SUCCEEDED(vkCreateSampler(rvk_ctx.device, &sampler_ci, NULL, sampler))) {
-        rvk_log(RVK_ERROR, "failed to create sampler");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreateSampler(rvk_ctx.device, &sampler_ci, NULL, sampler));
 }
 
 Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat fmt)
@@ -2636,7 +2565,7 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
     rvk_stage_buff_init(size, count, data, &stg_buff);
     RAG_VK(vkMapMemory(rvk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped));
     memcpy(stg_buff.mapped, data, stg_buff.size);
-    rvk_buff_unmap(&stg_buff);
+    rvk_buff_unmap(stg_buff);
 
     /* create the image */
     Rvk_Image img = {
@@ -2811,7 +2740,7 @@ void rvk_ds_layout_init(VkDescriptorSetLayoutBinding *bindings, size_t b_count, 
     RAG_VK(vkCreateDescriptorSetLayout(rvk_ctx.device, &layout_ci, NULL, &layout->handle));
 }
 
-bool rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set)
+void rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set)
 {
     VkDescriptorSetAllocateInfo alloc_info = {
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -2823,9 +2752,8 @@ bool rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_D
         arena->pools_usage[i] += ds_layout->desc_count[i];
     if (!rvk_alloc_ds(alloc_info, set)) {
         rvk_log_descriptor_pool_usage(*arena);
-        return false;
+        RVK_EXIT_APP;
     }
-    return true;
 }
 
 const char *rvk_desc_type_to_str(Rvk_Descriptor_Type type)

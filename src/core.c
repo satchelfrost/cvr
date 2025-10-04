@@ -130,7 +130,7 @@ Shape shapes[SHAPE_COUNT];
 #endif
 const char *core_title;
 
-bool alloc_shape_res(Shape_Type shape_type);
+void alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 void destroy_shape_res();
 
@@ -671,27 +671,26 @@ void scale(float x, float y, float z)
         rvk_log(RVK_ERROR, "no matrix available to scale");
 }
 
-bool alloc_shape_res(Shape_Type shape_type)
+void alloc_shape_res(Shape_Type shape_type)
 {
     if (is_shape_res_alloc(shape_type)) {
         rvk_log(RVK_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
-        return false;
+        return;
     }
 
     Shape *shape = &shapes[shape_type];
     void *data = primitives[shape_type].vtx_buff.items;
     size_t count = primitives[shape_type].vtx_buff.count;
     size_t size = primitives[shape_type].vtx_buff.size;
-    if (!rvk_vtx_buff_init(size, count, data, &shape->vtx_buff)) return false;
+    rvk_vtx_buff_init(size, count, data, &shape->vtx_buff);
 
     data = primitives[shape_type].idx_buff.items;
     count = primitives[shape_type].idx_buff.count;
     size = primitives[shape_type].idx_buff.size;
-    if (!rvk_idx_buff_init(size, count, data, &shape->idx_buff)) return false;
+    rvk_idx_buff_init(size, count, data, &shape->idx_buff);
 
     rvk_buff_staged_upload(shape->vtx_buff);
     rvk_buff_staged_upload(shape->idx_buff);
-    return true;
 }
 
 bool is_shape_res_alloc(Shape_Type shape_type)
