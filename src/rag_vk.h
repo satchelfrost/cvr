@@ -11,9 +11,22 @@
 #define RVK_EXIT_APP
 #endif
 
-// TODO: feature requesting should be little more robust
+// easy: requires little thinking just need to go through the errors
+// ----------------------------------------------------------------------------------------------
+// TODO: destroy functions should not be passing things by pointer
+// TODO: get rid of most of RVK_SUCCEEDED 
+// TODO: get rid of bools for things like buff init (unless I find it useful)
+// TODO: upload version for vtx and idx buff
+// ----------------------------------------------------------------------------------------------
+// medium: requires some thinking but there's common approaches to solve
+// TODO: consider using VK_WHOLE_SIZE as an option for buffer copy
+// TODO: feature requesting should be little more robust, required to fix examples that require features
 // TODO: device specification should be more robust
-// TODO: I feel like the destroy functions should not be passing things by pointer
+// ----------------------------------------------------------------------------------------------
+// hard: not clear what the best solution is, meaning I will have to make thoughtful compromises
+// ----------------------------------------------------------------------------------------------
+// TODO: texture and image needs to be rethought for example memory should be in texture
+// TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -34,8 +47,6 @@
 #include <android_native_app_glue.h>
 #include <android/log.h>
 #endif // PLATFORM_ANDROID_QUEST
-
-// TODO: check for return_defer usage and double free corruption errors
 
 #ifndef APP_NAME
     #define APP_NAME "app"
@@ -115,8 +126,6 @@ typedef struct {
     Rvk_Buffer_Type type;
 } Rvk_Buffer;
 
-// TODO: texture and image needs to be rethought
-// for example memory should be in texture
 typedef struct {
     VkExtent2D extent;
     VkImage handle;
@@ -292,12 +301,10 @@ void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buff
 void rvk_buff_destroy(Rvk_Buffer buffer);
 bool rvk_buff_map(Rvk_Buffer *buff);
 bool rvk_buff_unmap(Rvk_Buffer *buff);
-bool rvk_vtx_buff_upload(Rvk_Buffer *vtx_buff, const void *data);
 void rvk_buff_staged_upload(Rvk_Buffer buff);
 const char *rvk_buff_type_as_str(Rvk_Buffer_Type type);
 
 /* Copies "size" bytes from src to dst buffer, a value of zero implies copying the whole src buffer */
-// TODO: consider using VK_WHOLE_SIZE instead of my weird convention
 void rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size);
 
 void rvk_storage_tex_init(Rvk_Texture *texture, VkExtent2D extent);
@@ -347,8 +354,6 @@ void rvk_destroy_swapchain();
 bool rvk_find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
 uint32_t rvk_get_unified_gfx_and_present_queue_idx(VkPhysicalDevice phys_device);
 bool rvk_has_unified_gfx_and_present_queue(VkPhysicalDevice phys_device);
-
-// TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat fmt);
@@ -1193,7 +1198,7 @@ void rvk_render_pass_init()
         .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
     VkAttachmentDescription depth = {
-        .format = VK_FORMAT_D32_SFLOAT, // TODO: check supported formats e.g. Meta quest does not support D32
+        .format = VK_FORMAT_D32_SFLOAT,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -1397,7 +1402,6 @@ void rvk_submit_gfx()
         .pWaitDstStageMask = &wait_stage,
     };
 
-    // TODO: may hve to change back to gfx_queue if unified queue doesn't work
     RAG_VK(vkQueueSubmit(rvk_ctx.unified_queue, 1, &submit, rvk_ctx.fence));
 
     VkPresentInfoKHR present = {
@@ -1408,7 +1412,6 @@ void rvk_submit_gfx()
         .pSwapchains = &rvk_ctx.swapchain.handle,
         .pImageIndices = &rvk_img_idx,
     };
-    // TODO: may hve to change back to present_queue if unified queue doesn't work
     VkResult res = vkQueuePresentKHR(rvk_ctx.unified_queue, &present);
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || rvk_ctx.swapchain.buff_resized) {
         rvk_ctx.swapchain.buff_resized = false;
@@ -1659,7 +1662,7 @@ void rvk_depth_init()
 {
     rvk_ctx.depth_img.extent = rvk_ctx.extent;
     rvk_ctx.depth_img.aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    rvk_ctx.depth_img.format = VK_FORMAT_D32_SFLOAT; // TODO: check supported formats e.g. Meta quest does not support D32
+    rvk_ctx.depth_img.format = VK_FORMAT_D32_SFLOAT;
     rvk_img_init(
         &rvk_ctx.depth_img,
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -2136,7 +2139,7 @@ bool rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffe
         count,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT  |  // in case we want to transfer data back to host
         VK_BUFFER_USAGE_TRANSFER_DST_BIT  |  // usually this buffer is the destination of a staging buffer
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |  // TODO: do I need this? I don't think so.
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |  // TODO: this seems very example-specific
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,  // compute buffer
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // gpu land
         RVK_BUFFER_TYPE_COMPUTE,             // book keeping

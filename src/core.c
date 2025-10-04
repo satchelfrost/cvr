@@ -9,12 +9,14 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#define GEOMETRY_IMPLEMENTATION
+#include "geometry.h"
+
 #if defined(_WIN32)
 #include <windows.h>
 #endif
 
-#include <time.h>     // used by nanosleep
-#include "geometry.h" // defines some default primitives
+#include <time.h> // used by nanosleep
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
@@ -1020,7 +1022,7 @@ Cvr_Image load_image(const char *file_name)
 Rvk_Texture load_texture(Cvr_Image img)
 {
     Rvk_Texture t = rvk_load_texture(img.data, img.width, img.height, VK_FORMAT_R8G8B8A8_SRGB);
-    // free(img.data);
+    free(img.data);
     return t;
 }
 

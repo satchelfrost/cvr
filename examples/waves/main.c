@@ -12,7 +12,7 @@ int main()
         .projection = PERSPECTIVE,
     };
 
-    if (!init_window(800, 800, "Waves")) return 1;
+    init_window(800, 800, "Waves");
 
     while (!window_should_close()) {
         if (is_key_pressed(KEY_SPACE)) shape = (shape + 1) % SHAPE_COUNT;

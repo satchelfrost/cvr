@@ -14,6 +14,10 @@ typedef struct {
     uint8_t r, g, b, a;
 } Small_Vertex;
 
+#endif // GEOMETRY_H_
+
+#ifdef GEOMETRY_IMPLEMENTATION
+
 #define Red 1, 0, 0
 #define DarkRed 0.25f, 0, 0
 #define Green 0, 1, 0
@@ -188,4 +192,4 @@ static Primitive primitives[PRIMITIVE_COUNT] = {
     },
 };
 
-#endif
+#endif // GEOMETRY_IMPLEMENTATION

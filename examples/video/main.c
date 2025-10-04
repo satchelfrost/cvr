@@ -12,7 +12,7 @@
 #include "geometry.h"
 
 #define PL_MPEG_IMPLEMENTATION
-#include "ext/pl_mpeg.h"     // https://github.com/phoboslab/pl_mpeg
+#include "pl_mpeg.h" // https://github.com/phoboslab/pl_mpeg
 
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"

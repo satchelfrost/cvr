@@ -1,9 +1,7 @@
 #include "cvr.h"
 #include "geometry.h"
 
-#define MAX_POINTS  100000000 // 100 million
-#define MIN_POINTS  100000    // 100 thousand
-#define MAX_FPS_REC 1000
+#define POINT_COUNT (1000*1000)
 
 typedef struct {
     float x, y, z;
@@ -11,31 +9,19 @@ typedef struct {
 } Point_Vert;
 
 typedef struct {
-    Point_Vert *items;
-    size_t count;
-    size_t capacity;
-    Vk_Buffer buff;
-    size_t id;
-    bool pending_change;
-    const size_t max;
-    const size_t min;
+    Point_Vert *data;
+    Rvk_Buffer buff;
 } Point_Cloud;
-
-typedef struct {
-    size_t *items;
-    size_t count;
-    size_t capacity;
-    const size_t max;
-    bool collecting;
-} FPS_Record;
 
 VkPipeline gfx_pl;
 VkPipelineLayout gfx_pl_layout;
 
-void gen_points(size_t num_points, Point_Cloud *pc)
+Point_Cloud generate_point_cloud(size_t num_points)
 {
-    /* reset the point count to zero, but leave capacity allocated */
-    pc->count = 0;
+    Point_Cloud pc = {0};
+    pc.buff.count = num_points;
+    pc.buff.size  = num_points * sizeof(Point_Cloud);
+    pc.data       = malloc(pc.buff.size);
 
     for (size_t i = 0; i < num_points; i++) {
         float theta = PI * rand() / RAND_MAX;
@@ -51,15 +37,13 @@ void gen_points(size_t num_points, Point_Cloud *pc)
             .b = color.b,
             .a = 255,
         };
-
-        vk_da_append(pc, vert);
+        pc.data[i] = vert;
     }
 
-    pc->buff.count = pc->count;
-    pc->buff.size  = pc->count * sizeof(*pc->items);
+    return pc;
 }
 
-bool create_pipeline()
+void create_pipeline()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
@@ -71,8 +55,7 @@ bool create_pipeline()
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout))
-        return false;
+    rvk_pl_layout_init(layout_ci, &gfx_pl_layout);
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -96,25 +79,15 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
         .polygon_mode = VK_POLYGON_MODE_POINT,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = RVK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init(config, &gfx_pl)) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &gfx_pl);
 }
 
 int main()
 {
-    /* generate a point cloud */
-    size_t num_points = MIN_POINTS;
-    Point_Cloud pc = {.min = MIN_POINTS, .max = MAX_POINTS};
-    gen_points(num_points, &pc);
-    FPS_Record record = {.max = MAX_FPS_REC};
-
-    /* initialize window and Vulkan */
-    init_window(1600, 900, "point cloud");
     Camera camera = {
         .position   = {10.0f, 10.0f, 10.0f},
         .up         = {0.0f, 1.0f, 0.0f},
@@ -123,56 +96,18 @@ int main()
         .projection = PERSPECTIVE,
     };
 
-    /* upload resources to GPU */
-    if (!vk_vtx_buff_staged_upload(&pc.buff, pc.items)) return 1;
+    Point_Cloud pc = generate_point_cloud(POINT_COUNT);
 
-    if (!create_pipeline()) return 1;
+    /* initialize window and Vulkan */
+    init_window(1600, 900, "point cloud");
+
+    /* upload resources to GPU */
+    rvk_vtx_buff_init(pc.buff.size, pc.buff.count, pc.data, &pc.buff);
+    rvk_buff_staged_upload(pc.buff);
+    create_pipeline();
 
     while (!window_should_close()) {
-        /* input */
         update_camera_free(&camera);
-        if (is_key_pressed(KEY_UP)) {
-            if (num_points * 10 <= pc.max) {
-                pc.pending_change = true;
-                num_points = num_points * 10;
-            } else {
-                vk_log(VK_INFO, "max point count reached");
-            }
-        }
-        if (is_key_pressed(KEY_DOWN)) {
-            if (num_points / 10 >= pc.min) {
-                pc.pending_change = true;
-                num_points = num_points / 10;
-            } else {
-                vk_log(VK_INFO, "min point count reached");
-            }
-        }
-        if (is_key_pressed(KEY_R)) record.collecting = true;
-
-        /* upload point cloud if we've changed points */
-        if (pc.pending_change) {
-            vk_wait_idle();
-            vk_buff_destroy(&pc.buff);
-            gen_points(num_points, &pc);
-            if (!vk_vtx_buff_staged_upload(&pc.buff, pc.items)) return 1;
-            pc.pending_change = false;
-        }
-
-        /* collect the frame rate */
-        if (record.collecting) {
-            vk_da_append(&record, get_fps());
-            if (record.count >= record.max) {
-                /* print results and reset */
-                size_t sum = 0;
-                for (size_t i = 0; i < record.count; i++) sum += record.items[i];
-                float ave = (float) sum / record.count;
-                vk_log(VK_INFO, "Average (N=%zu) FPS %.2f, %zu points", record.count, ave, pc.count);
-                record.count = 0;
-                record.collecting = false;
-            }
-        }
-
-        /* drawing */
         begin_drawing(BLACK);
         begin_mode_3d(camera);
             rotate_y(get_time() * 0.5);
@@ -181,10 +116,10 @@ int main()
         end_drawing();
     }
 
-    vk_wait_idle();
-    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
-    vk_buff_destroy(&pc.buff);
-    vk_da_free(pc);
+    rvk_wait_idle();
+    rvk_destroy_pl_res(gfx_pl, gfx_pl_layout);
+    rvk_buff_destroy(pc.buff);
+    free(pc.data);
     close_window();
     return 0;
 }
