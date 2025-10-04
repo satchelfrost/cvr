@@ -9,7 +9,7 @@ static void frame_buff_resized(GLFWwindow* window, int width, int height);
 
 bool init_platform()
 {
-    if (!glfwInit()) return false;
+    if (!glfwInit()) false;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     if (full_screen) {
@@ -58,7 +58,7 @@ bool window_should_close()
     return result;
 }
 
-static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     (void)scancode;
     if (key < 0) return;

@@ -1,7 +1,6 @@
 #ifndef RAG_VK_H_
 #define RAG_VK_H_
 
-// RVK_ASSERT should be changed for android
 #define RVK_ASSERT assert
 #define RVK_REALLOC realloc
 #define RVK_FREE free
@@ -12,8 +11,9 @@
 #define RVK_EXIT_APP
 #endif
 
+// TODO: feature requesting should be little more robust
+// TODO: device specification should be more robust
 // TODO: I feel like the destroy functions should not be passing things by pointer
-// with a few exceptions. But I'm not sure about this yet.
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -84,31 +84,13 @@ typedef struct {
     uint32_t pools_usage[RVK_DESCRIPTOR_TYPE_COUNT];
 } Rvk_Descriptor_Pool_Arena;
 
-
-// TODO: honestly this should probably be static
-typedef struct {
-    VkImage *items;
-    size_t count;
-    size_t capacity;
-} Imgs;
-
-typedef struct {
-    VkImageView *items;
-    size_t count;
-    size_t capacity;
-} Img_Views;
-
-typedef struct {
-    VkFramebuffer *items;
-    size_t count;
-    size_t capacity;
-} Frame_Buffs;
-
+#define RVK_MAX_SWAPCHAIN_IMAGES 5
 typedef struct {
     VkSwapchainKHR handle;
-    Imgs imgs;
-    Img_Views img_views;
-    Frame_Buffs frame_buffs;
+    VkImage imgs[RVK_MAX_SWAPCHAIN_IMAGES];
+    VkImageView img_views[RVK_MAX_SWAPCHAIN_IMAGES];
+    VkFramebuffer frame_buffs[RVK_MAX_SWAPCHAIN_IMAGES];
+    uint32_t img_count;
     bool buff_resized;
 } Rvk_Swapchain;
 
@@ -156,15 +138,13 @@ typedef struct {
     VkDebugReportCallbackEXT report_callback;
     VkPhysicalDevice phys_device;
     VkDevice device;
-    uint32_t gfx_idx;
-    VkQueue gfx_queue;
-    uint32_t present_idx;
-    VkQueue present_queue;
+    uint32_t queue_idx;
+    VkQueue unified_queue;
     VkCommandPool pool;
-    VkCommandBuffer gfx_buff;
+    VkCommandBuffer cmd_buff;
     VkSemaphore img_avail_sem;
     VkSemaphore render_fin_sem;
-    VkFence gfx_fence;
+    VkFence fence;
     VkSurfaceKHR surface;
     VkSurfaceFormatKHR surface_fmt;
     VkExtent2D extent;
@@ -172,7 +152,7 @@ typedef struct {
     Rvk_Swapchain swapchain;
     Rvk_Image depth_img;
     VkImageView depth_img_view;
-    bool using_validation_layers;
+    bool using_validation;
 } Rvk_Context;
 
 typedef struct {
@@ -181,33 +161,33 @@ typedef struct {
     const char *title;
 } Rvk_Config;
 #define rvk_init(...) rvk_init_((Rvk_Config){__VA_ARGS__})
-bool rvk_init_(Rvk_Config cfg);
+void rvk_init_(Rvk_Config cfg);
 
-bool rvk_destroy(void);
-bool rvk_instance_init(void);
-bool rvk_device_init(void);
-bool rvk_wait_idle(void);
-bool rvk_swapchain_init(void);
-bool rvk_img_views_init(void);
-bool rvk_img_view_init(Rvk_Image img, VkImageView *img_view);
-bool rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
-bool rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
-bool rvk_shader_mod_init(const char *file_name, VkShaderModule *module);
-bool rvk_render_pass_init();
-bool rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
-VkFormat rvk_surface_fmt();
+void rvk_destroy(void);
+void rvk_instance_init(void);
+void rvk_device_init(void);
+void rvk_wait_idle(void);
+void rvk_swapchain_init(void);
+void rvk_img_views_init(void);
+void rvk_img_view_init(Rvk_Image img, VkImageView *img_view);
+void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
+void rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
+void rvk_shader_mod_init(const char *file_name, VkShaderModule *module);
+void rvk_render_pass_init(void);
+void rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
+VkFormat rvk_surface_fmt(void);
 void rvk_destroy_render_pass(VkRenderPass render_pass);
-bool rvk_frame_buffs_init();
+void rvk_frame_buffs_init(void);
 bool rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb);
 void rvk_destroy_frame_buff(VkFramebuffer frame_buff);
-void rvk_recreate_swapchain();
-void rvk_depth_init();
+void rvk_recreate_swapchain(void);
+void rvk_depth_init(void);
 void rvk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout);
-VkCommandBuffer rvk_get_gfx_buff();
-VkCommandBuffer rvk_get_comp_buff();
+VkCommandBuffer rvk_get_cmd_buff(void);
+VkCommandBuffer rvk_get_comp_buff(void);
 void rvk_reset_pool(VkDescriptorPool pool);
-bool rvk_update();
-double rvk_dt();
+bool rvk_update(void);
+double rvk_dt(void);
 
 /* platform specifics */
 #ifdef PLATFORM_DESKTOP_GLFW
@@ -353,26 +333,20 @@ void rvk_log(Rvk_Log_Level level, const char *fmt, ...);
 
 void rvk_populated_debug_msgr_ci(VkDebugUtilsMessengerCreateInfoEXT *debug_msgr_ci);
 Rvk_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_severity);
-bool rvk_setup_debug_msgr();
+void rvk_setup_debug_msgr();
 bool rvk_setup_report_callback();
 bool rvk_set_queue_fam_indices(VkPhysicalDevice phys_device);
 bool rvk_set_gfx_capable_queue_idx(VkPhysicalDevice phys_device);
-
-typedef struct {
-    uint32_t *items;
-    size_t count;
-    size_t capacity;
-} U32_Set;
-
-void rvk_populate_set(int arr[], size_t arr_size, U32_Set *set);
 bool rvk_swapchain_adequate(VkPhysicalDevice phys_device);
-bool rvk_choose_swapchain_fmt();
+void rvk_choose_swapchain_fmt();
 VkPresentModeKHR rvk_choose_present_mode();
 VkExtent2D rvk_choose_swp_extent();
 bool rvk_is_device_suitable(VkPhysicalDevice phys_device);
-bool rvk_pick_phys_device();
-void rvk_cleanup_swapchain();
+void rvk_pick_phys_device();
+void rvk_destroy_swapchain();
 bool rvk_find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx);
+uint32_t rvk_get_unified_gfx_and_present_queue_idx(VkPhysicalDevice phys_device);
+bool rvk_has_unified_gfx_and_present_queue(VkPhysicalDevice phys_device);
 
 // TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
@@ -446,15 +420,15 @@ typedef struct {
 #define rvk_allocate_command_buffer(buff, ...) rvk_allocate_command_buffer_(buff, (Rvk_Command_Buffer_Allocate_Info){__VA_ARGS__})
 bool rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allocate_Info ci);
 
-bool rvk_cmd_syncs_init();
-bool rvk_cmd_pool_init();
-bool rvk_create_semaphore(VkSemaphore *semaphore);
-bool rvk_create_fence(VkFence *fence);
+void rvk_cmd_syncs_init();
+void rvk_cmd_pool_init();
+void rvk_create_semaphore(VkSemaphore *semaphore);
+void rvk_create_fence(VkFence *fence);
 void rvk_destroy_semaphore(VkSemaphore semaphore);
 void rvk_destroy_fence(VkFence fence);
 
 /* Allocates and begins a temporary command buffer. Easy-to-use, not super efficent. */
-void rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff);
+VkCommandBuffer rvk_cmd_quick_begin(void);
 
 /* Ends and frees a temporary command buffer. Easy-to-use, not super efficent. */
 void rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff);
@@ -465,7 +439,7 @@ typedef struct {
     size_t capacity;
 } Rvk_Instance_Exts;
 bool rvk_inst_exts_satisfied();
-bool rvk_chk_validation_support();
+bool rvk_validation_supported();
 bool rvk_device_exts_supported(VkPhysicalDevice phys_device);
 const char *vk_res_to_str(VkResult result);
 
@@ -715,7 +689,7 @@ void rvk_set_android_asset_man(AAssetManager *aam)
 
 #define RVK_DEFAULT_WINDOW_DIM 500
 
-bool rvk_init_(Rvk_Config cfg)
+void rvk_init_(Rvk_Config cfg)
 {
 
 #ifdef PLATFORM_DESKTOP_GLFW
@@ -729,18 +703,19 @@ bool rvk_init_(Rvk_Config cfg)
     RVK_EXIT_APP;
 #endif
 
-    if (!rvk_instance_init())      return false;
+    rvk_instance_init();
 #ifdef VK_VALIDATION
-    if (!rvk_setup_debug_msgr())      return false;
+    rvk_setup_debug_msgr();
 #endif
 #ifdef PLATFORM_DESKTOP_GLFW
-    if (!rvk_glfw_surface_init()) return false;
+    rvk_glfw_surface_init();
 #else
-    RVK_ASSERT(0 && "currently rvk_init only supports PLATFORM_DESKTOP_GLFW");
+    rvk_log(RVK_ERROR, "currently rvk_init only supports PLATFORM_DESKTOP_GLFW");
+    RVK_EXIT_APP;
 #endif
 
     /* picking physical device also sets queue family indices in ctx */
-    if (!rvk_pick_phys_device())      return false;
+    rvk_pick_phys_device();
 
     rvk_device_init();
     rvk_swapchain_init();
@@ -749,22 +724,20 @@ bool rvk_init_(Rvk_Config cfg)
     rvk_depth_init();
     rvk_frame_buffs_init();
     rvk_cmd_pool_init();
-    rvk_allocate_command_buffer(&rvk_ctx.gfx_buff);
+    rvk_allocate_command_buffer(&rvk_ctx.cmd_buff);
     rvk_cmd_syncs_init();
-
-    return true;
 }
 
-bool rvk_destroy()
+void rvk_destroy()
 {
     vkDeviceWaitIdle(rvk_ctx.device);
 
     vkDestroySemaphore(rvk_ctx.device, rvk_ctx.img_avail_sem, NULL);
     vkDestroySemaphore(rvk_ctx.device, rvk_ctx.render_fin_sem, NULL);
-    vkDestroyFence(rvk_ctx.device, rvk_ctx.gfx_fence, NULL);
+    vkDestroyFence(rvk_ctx.device, rvk_ctx.fence, NULL);
     vkDestroyCommandPool(rvk_ctx.device, rvk_ctx.pool, NULL);
 
-    rvk_cleanup_swapchain();
+    rvk_destroy_swapchain();
     vkDeviceWaitIdle(rvk_ctx.device);
     vkDestroyRenderPass(rvk_ctx.device, rvk_ctx.render_pass, NULL);
     vkDestroyDevice(rvk_ctx.device, NULL);
@@ -778,16 +751,12 @@ bool rvk_destroy()
 #ifdef PLATFORM_DESKTOP_GLFW
     rvk_glfw_destroy();
 #endif
-    return true;
 }
 
-bool rvk_instance_init()
+void rvk_instance_init()
 {
 #ifdef VK_VALIDATION
-    if (!rvk_chk_validation_support()) {
-        rvk_log(RVK_ERROR, "validation requested, but not supported");
-        return false;
-    }
+    rvk_ctx.using_validation = rvk_validation_supported();
 #endif
 
     VkApplicationInfo app_info = {
@@ -814,97 +783,76 @@ bool rvk_instance_init()
     for (size_t i = 0; i < platform_ext_count; i++)
         rvk_da_append(&rvk_inst_exts, platform_exts[i]);
 #else
-    RVK_ASSERT(0 && "rvk_instance_init() currently requires PLATFORM_DESKTOP_GLFW");
+    rvk_log(RVK_ERROR, "rvk_instance_init() currently requires PLATFORM_DESKTOP_GLFW");
+    RVK_EXIT_APP;
 #endif
     
 #ifdef VK_VALIDATION
-    instance_ci.enabledLayerCount = RVK_ARRAY_LEN(rvk_validation_layers);
-    instance_ci.ppEnabledLayerNames = rvk_validation_layers;
-    rvk_da_append(&rvk_inst_exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-    VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
-    rvk_populated_debug_msgr_ci(&debug_msgr_ci);
-    instance_ci.pNext = &debug_msgr_ci;
+    if (rvk_ctx.using_validation) {
+        instance_ci.enabledLayerCount = RVK_ARRAY_LEN(rvk_validation_layers);
+        instance_ci.ppEnabledLayerNames = rvk_validation_layers;
+        rvk_da_append(&rvk_inst_exts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
+        rvk_populated_debug_msgr_ci(&debug_msgr_ci);
+        instance_ci.pNext = &debug_msgr_ci;
+    }
 #endif
+
     instance_ci.enabledExtensionCount = rvk_inst_exts.count;
     instance_ci.ppEnabledExtensionNames = rvk_inst_exts.items;
 
-    if (!rvk_inst_exts_satisfied()) {
-        rvk_log(RVK_ERROR, "unsatisfied instance extensions");
-        return false;
-    }
-    if (!RVK_SUCCEEDED(vkCreateInstance(&instance_ci, NULL, &rvk_ctx.instance))) {
-        rvk_log(RVK_ERROR, "failed to create vulkan instance");
-        return false;
-    }
+    if (!rvk_inst_exts_satisfied()) RVK_EXIT_APP;
 
-    return true;
+    RAG_VK(vkCreateInstance(&instance_ci, NULL, &rvk_ctx.instance));
 }
 
-typedef struct {
-    VkDeviceQueueCreateInfo *items;
-    size_t count;
-    size_t capacity;
-} Queue_Create_Infos;
-
-bool rvk_device_init()
+void rvk_device_init()
 {
-    int queue_fam_idxs[] = {rvk_ctx.gfx_idx, rvk_ctx.present_idx};
-    U32_Set unique_fams = {0};
-    rvk_populate_set(queue_fam_idxs, RVK_ARRAY_LEN(queue_fam_idxs), &unique_fams);
-
-    Queue_Create_Infos queue_cis = {0};
     float queuePriority = 1.0f;
-    for (size_t i = 0; i < unique_fams.count; i++) {
-        VkDeviceQueueCreateInfo queue_ci = {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = unique_fams.items[i],
-            .queueCount = 1,
-            .pQueuePriorities = &queuePriority,
-        };
-        rvk_da_append(&queue_cis, queue_ci);
-    }
-
+    VkDeviceQueueCreateInfo queue_ci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = rvk_ctx.queue_idx,
+        .queueCount = 1,
+        .pQueuePriorities = &queuePriority,
+    };
     VkPhysicalDeviceFeatures features = {
         .samplerAnisotropy = VK_TRUE,
         .fillModeNonSolid = VK_TRUE,
     };
-
     VkDeviceCreateInfo device_ci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pEnabledFeatures = &features,
-        .pQueueCreateInfos = queue_cis.items,
-        .queueCreateInfoCount = queue_cis.count,
+        .pQueueCreateInfos = &queue_ci,
+        .queueCreateInfoCount = 1,
         .enabledExtensionCount = RVK_ARRAY_LEN(rvk_device_exts),
         .ppEnabledExtensionNames = rvk_device_exts,
-#ifdef VK_VALIDATION
-        .enabledLayerCount = RVK_ARRAY_LEN(rvk_validation_layers),
-        .ppEnabledLayerNames = rvk_validation_layers,
-#endif
     };
-
-    bool result = true;
-    if (RVK_SUCCEEDED(vkCreateDevice(rvk_ctx.phys_device, &device_ci, NULL, &rvk_ctx.device))) {
-        vkGetDeviceQueue(rvk_ctx.device, rvk_ctx.gfx_idx, 0, &rvk_ctx.gfx_queue);
-        vkGetDeviceQueue(rvk_ctx.device, rvk_ctx.present_idx, 0, &rvk_ctx.present_queue);
-    } else {
-        rvk_log(RVK_ERROR, "failed calling vkCreateDevice");
-        rvk_return_defer(false);
+#ifdef VK_VALIDATION
+    if (rvk_ctx.using_validation) {
+        device_ci.enabledLayerCount = RVK_ARRAY_LEN(rvk_validation_layers);
+        device_ci.ppEnabledLayerNames = rvk_validation_layers;
     }
+#endif
 
-defer:
-    rvk_da_free(queue_cis);
-    rvk_da_free(unique_fams);
-    return result;
+    RAG_VK(vkCreateDevice(rvk_ctx.phys_device, &device_ci, NULL, &rvk_ctx.device));
+    vkGetDeviceQueue(rvk_ctx.device, rvk_ctx.queue_idx, 0, &rvk_ctx.unified_queue);
 }
 
-bool rvk_swapchain_init()
+void rvk_swapchain_init()
 {
     VkSurfaceCapabilitiesKHR capabilities = {0};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rvk_ctx.phys_device, rvk_ctx.surface, &capabilities);
-    if (!rvk_choose_swapchain_fmt()) return false;
-    uint32_t img_count = capabilities.minImageCount + 1;
-    if (capabilities.maxImageCount > 0 && img_count > capabilities.maxImageCount)
-        img_count = capabilities.maxImageCount;
+    rvk_choose_swapchain_fmt();
+
+    uint32_t img_count = RVK_MAX_SWAPCHAIN_IMAGES;
+    if (capabilities.maxImageCount) {
+        if (RVK_MAX_SWAPCHAIN_IMAGES > capabilities.maxImageCount)
+            img_count = capabilities.maxImageCount;
+    }
+    if (img_count < capabilities.minImageCount) {
+        rvk_log(RVK_INFO, "need to increase RVK_MAX_SWAPCHAIN_IMAGES to at least %u", capabilities.minImageCount);
+        RVK_EXIT_APP;
+    }
 
     VkSwapchainCreateInfoKHR swapchain_ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -919,30 +867,19 @@ bool rvk_swapchain_init()
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = rvk_choose_present_mode(),
         .preTransform = capabilities.currentTransform,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    /* Note: I think this check is only necessary if the present queue & gfx queue are different */
-    uint32_t queue_fam_idxs[] = {rvk_ctx.gfx_idx, rvk_ctx.present_idx};
-    if (rvk_ctx.gfx_idx != rvk_ctx.present_idx) {
-        swapchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        swapchain_ci.queueFamilyIndexCount = RVK_ARRAY_LEN(queue_fam_idxs);
-        swapchain_ci.pQueueFamilyIndices = queue_fam_idxs;
-    } else {
-        swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    }
 
-    if (RVK_SUCCEEDED(vkCreateSwapchainKHR(rvk_ctx.device, &swapchain_ci, NULL, &rvk_ctx.swapchain.handle))) {
-        uint32_t img_count = 0;
-        vkGetSwapchainImagesKHR(rvk_ctx.device, rvk_ctx.swapchain.handle, &img_count, NULL);
-        rvk_da_resize(&rvk_ctx.swapchain.imgs, img_count);
-        vkGetSwapchainImagesKHR(rvk_ctx.device, rvk_ctx.swapchain.handle, &img_count, rvk_ctx.swapchain.imgs.items);
-        return true;
-    } else {
-        rvk_log(RVK_ERROR, "failed to create swapchain image");
-        return false;
+    RAG_VK(vkCreateSwapchainKHR(rvk_ctx.device, &swapchain_ci, NULL, &rvk_ctx.swapchain.handle));
+    RAG_VK(vkGetSwapchainImagesKHR(rvk_ctx.device, rvk_ctx.swapchain.handle, &rvk_ctx.swapchain.img_count, NULL));
+    RAG_VK(vkGetSwapchainImagesKHR(rvk_ctx.device, rvk_ctx.swapchain.handle, &rvk_ctx.swapchain.img_count, rvk_ctx.swapchain.imgs));
+    if (rvk_ctx.swapchain.img_count > RVK_MAX_SWAPCHAIN_IMAGES) {
+        rvk_log(RVK_INFO, "need to increase RVK_MAX_SWAPCHAIN_IMAGES to at least %u", rvk_ctx.swapchain.img_count);
+        RVK_EXIT_APP;
     }
 }
 
-bool rvk_img_view_init(Rvk_Image img, VkImageView *img_view)
+void rvk_img_view_init(Rvk_Image img, VkImageView *img_view)
 {
     VkImageViewCreateInfo img_view_ci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -955,31 +892,19 @@ bool rvk_img_view_init(Rvk_Image img, VkImageView *img_view)
             .layerCount = 1,
         },
     };
-
-    if (!RVK_SUCCEEDED(vkCreateImageView(rvk_ctx.device, &img_view_ci, NULL, img_view))) {
-        rvk_log(RVK_ERROR, "failed to create image view");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreateImageView(rvk_ctx.device, &img_view_ci, NULL, img_view));
 }
 
-bool rvk_img_views_init()
+void rvk_img_views_init()
 {
-    rvk_da_resize(&rvk_ctx.swapchain.img_views, rvk_ctx.swapchain.imgs.count);
-    for (size_t i = 0; i < rvk_ctx.swapchain.img_views.count; i++)  {
+    for (size_t i = 0; i < rvk_ctx.swapchain.img_count; i++)  {
         Rvk_Image img = {
-            .handle = rvk_ctx.swapchain.imgs.items[i],
+            .handle = rvk_ctx.swapchain.imgs[i],
             .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
             .format = rvk_ctx.surface_fmt.format,
         };
-        if (!rvk_img_view_init(img, &rvk_ctx.swapchain.img_views.items[i])) {
-            rvk_log(RVK_ERROR, "failed initializing swapchain view %zu", i);
-            return false;
-        }
+        rvk_img_view_init(img, &rvk_ctx.swapchain.img_views[i]);
     }
-
-    return true;
 }
 
 void rvk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
@@ -1086,10 +1011,8 @@ void rvk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
     vkDestroyShaderModule(rvk_ctx.device, stages[1].module, NULL);
 }
 
-bool rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
+void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
 {
-    bool result = true;
-
     /* setup shader stages */
     VkPipelineShaderStageCreateInfo stages[] = {
         {
@@ -1103,8 +1026,8 @@ bool rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
             .pName = "main",
         },
     };
-    if (!rvk_shader_mod_init("./shaders/sst.vert.glsl.spv", &stages[0].module)) rvk_return_defer(false);
-    if (!rvk_shader_mod_init("./shaders/sst.frag.glsl.spv", &stages[1].module)) rvk_return_defer(false);
+    rvk_shader_mod_init("./shaders/sst.vert.glsl.spv", &stages[0].module);
+    rvk_shader_mod_init("./shaders/sst.frag.glsl.spv", &stages[1].module);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1170,11 +1093,8 @@ bool rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
     };
 
     RAG_VK(vkCreateGraphicsPipelines(rvk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pl));
-
-defer:
     vkDestroyShaderModule(rvk_ctx.device, stages[0].module, NULL);
     vkDestroyShaderModule(rvk_ctx.device, stages[1].module, NULL);
-    return result;
 }
 
 bool rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
@@ -1187,30 +1107,21 @@ bool rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layo
     return true;
 }
 
-bool rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
+void rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
 {
-    bool result = true;
-
     VkPipelineShaderStageCreateInfo shader_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = VK_SHADER_STAGE_COMPUTE_BIT,
         .pName = "main",
     };
-    if (!rvk_shader_mod_init(shader_name, &shader_ci.module)) rvk_return_defer(false);
-
+    rvk_shader_mod_init(shader_name, &shader_ci.module);
     VkComputePipelineCreateInfo pipeline_ci = {
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         .layout = pl_layout,
         .stage = shader_ci,
     };
-    if (!RVK_SUCCEEDED(vkCreateComputePipelines(rvk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pipeline))) {
-        rvk_log(RVK_ERROR, "failed to create compute pipeline");
-        rvk_return_defer(false);
-    }
-
-defer:
+    RAG_VK(vkCreateComputePipelines(rvk_ctx.device, VK_NULL_HANDLE, 1, &pipeline_ci, NULL, pipeline));
     vkDestroyShaderModule(rvk_ctx.device, shader_ci.module, NULL);
-    return result;
 }
 
 void rvk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout)
@@ -1219,9 +1130,9 @@ void rvk_destroy_pl_res(VkPipeline pipeline, VkPipelineLayout pl_layout)
     vkDestroyPipelineLayout(rvk_ctx.device, pl_layout, NULL);
 }
 
-VkCommandBuffer rvk_get_gfx_buff()
+VkCommandBuffer rvk_get_cmd_buff()
 {
-    return rvk_ctx.gfx_buff;
+    return rvk_ctx.cmd_buff;
 }
 
 void rvk_reset_pool(VkDescriptorPool pool)
@@ -1229,31 +1140,24 @@ void rvk_reset_pool(VkDescriptorPool pool)
     RAG_VK(vkResetDescriptorPool(rvk_ctx.device, pool, 0));
 }
 
-bool rvk_shader_mod_init(const char *file_name, VkShaderModule *module)
+void rvk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
-    bool result = true;
-
 #ifdef PLATFORM_ANDROID_QUEST
     char *content = NULL;
     if (!rvk_aam) {
         rvk_log(RVK_ERROR, "set android asset manager with rvk_set_android_asset_man(AAssetManager *aam)");
-        rvk_return_defer(false);
+        RVK_EXIT_APP;
     }
     AAsset *file  = AAssetManager_open(rvk_aam, file_name, AASSET_MODE_BUFFER);
     off_t length  = AAsset_getLength(file);
     content = malloc(length);
     AAsset_read(file, content, length);
-
     VkShaderModuleCreateInfo module_ci = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = length,
         .pCode = (uint32_t *)content,
     };
-    if (!RVK_SUCCEEDED(vkCreateShaderModule(rvk_ctx.device, &module_ci, NULL, module))) {
-        rvk_log(RVK_ERROR, "failed to create shader module from %s", file_name);
-        rvk_return_defer(false);
-    }
-defer:
+    RAG_VK(vkCreateShaderModule(rvk_ctx.device, &module_ci, NULL, module));
     free(content);
 #endif // PLATFORM_ANDROID_QUEST
 
@@ -1261,26 +1165,19 @@ defer:
     Rvk_String_Builder sb = {0};
     if (!rvk_read_entire_file(file_name, &sb)) {
         rvk_log(RVK_ERROR, "failed to read entire file %s", file_name);
-        rvk_return_defer(false);
+        RVK_EXIT_APP;
     }
     VkShaderModuleCreateInfo module_ci = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = sb.count,
         .pCode = (const uint32_t *)sb.items,
     };
-    if (!RVK_SUCCEEDED(vkCreateShaderModule(rvk_ctx.device, &module_ci, NULL, module))) {
-        rvk_log(RVK_ERROR, "failed to create shader module from %s", file_name);
-        rvk_return_defer(false);
-    }
-
-defer:
+    RAG_VK(vkCreateShaderModule(rvk_ctx.device, &module_ci, NULL, module));
     rvk_sb_free(sb);
 #endif // PLATFORM_DESKTOP_GLFW
-
-    return result;
 }
 
-bool rvk_render_pass_init()
+void rvk_render_pass_init()
 {
     VkAttachmentDescription color = {
         .format = rvk_ctx.surface_fmt.format,
@@ -1331,12 +1228,7 @@ bool rvk_render_pass_init()
         .pDependencies = &dependency,
     };
 
-    if (RVK_SUCCEEDED(vkCreateRenderPass(rvk_ctx.device, &render_pass_ci, NULL, &rvk_ctx.render_pass))) {
-        return true;
-    } else {
-        rvk_log(RVK_ERROR, "failed when calling vkCreateRenderPass");
-        return false;
-    }
+    RAG_VK(vkCreateRenderPass(rvk_ctx.device, &render_pass_ci, NULL, &rvk_ctx.render_pass));
 }
 
 VkFormat rvk_surface_fmt()
@@ -1344,14 +1236,9 @@ VkFormat rvk_surface_fmt()
     return rvk_ctx.surface_fmt.format;
 }
 
-bool rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass)
+void rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass)
 {
-    if (RVK_SUCCEEDED(vkCreateRenderPass(rvk_ctx.device, rp_create_info, NULL, render_pass))) {
-        return true;
-    } else {
-        rvk_log(RVK_ERROR, "failed when calling vkCreateRenderPass");
-        return false;
-    }
+    RAG_VK(vkCreateRenderPass(rvk_ctx.device, rp_create_info, NULL, render_pass));
 }
 
 void rvk_destroy_render_pass(VkRenderPass render_pass)
@@ -1359,11 +1246,10 @@ void rvk_destroy_render_pass(VkRenderPass render_pass)
     vkDestroyRenderPass(rvk_ctx.device, render_pass, NULL);
 }
 
-bool rvk_frame_buffs_init()
+void rvk_frame_buffs_init()
 {
-    rvk_da_resize(&rvk_ctx.swapchain.frame_buffs, rvk_ctx.swapchain.img_views.count);
-    for (size_t i = 0; i < rvk_ctx.swapchain.img_views.count; i++) {
-        VkImageView attachments[] = {rvk_ctx.swapchain.img_views.items[i], rvk_ctx.depth_img_view};
+    for (size_t i = 0; i < rvk_ctx.swapchain.img_count; i++) {
+        VkImageView attachments[] = {rvk_ctx.swapchain.img_views[i], rvk_ctx.depth_img_view};
         VkFramebufferCreateInfo frame_buff_ci = {
             .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .renderPass = rvk_ctx.render_pass,
@@ -1373,13 +1259,8 @@ bool rvk_frame_buffs_init()
             .height = rvk_ctx.extent.height,
             .layers = 1,
         };
-        if (!RVK_SUCCEEDED(vkCreateFramebuffer(rvk_ctx.device, &frame_buff_ci, NULL, &rvk_ctx.swapchain.frame_buffs.items[i]))) {
-            rvk_log(RVK_ERROR, "failed when calling vkCreateFramebuffer on index %zu", i);
-            return false;
-        }
+        RAG_VK(vkCreateFramebuffer(rvk_ctx.device, &frame_buff_ci, NULL, &rvk_ctx.swapchain.frame_buffs[i]));
     }
-
-    return true;
 }
 
 bool rvk_create_frame_buff(uint32_t w, uint32_t h, VkImageView *atts, uint32_t att_count, VkRenderPass rp, VkFramebuffer *fb)
@@ -1421,12 +1302,12 @@ void rvk_begin_render_pass(float r, float g, float b, float a)
     VkRenderPassBeginInfo begin_rp = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = rvk_ctx.render_pass,
-        .framebuffer = rvk_ctx.swapchain.frame_buffs.items[rvk_img_idx],
+        .framebuffer = rvk_ctx.swapchain.frame_buffs[rvk_img_idx],
         .renderArea.extent = rvk_ctx.extent,
         .clearValueCount = RVK_ARRAY_LEN(clear_values),
         .pClearValues = clear_values,
     };
-    vkCmdBeginRenderPass(rvk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(rvk_ctx.cmd_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 bool rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_Info rvk_bi)
@@ -1442,7 +1323,7 @@ bool rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_
     VkClearValue clear_values[] = {clear_color, clear_depth};
     VkRenderPassBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     bi.renderPass        = (rvk_bi.render_pass       ) ? rvk_bi.render_pass        : rvk_ctx.render_pass,
-    bi.framebuffer       = (rvk_bi.framebuffer       ) ? rvk_bi.framebuffer        : rvk_ctx.swapchain.frame_buffs.items[rvk_img_idx],
+    bi.framebuffer       = (rvk_bi.framebuffer       ) ? rvk_bi.framebuffer        : rvk_ctx.swapchain.frame_buffs[rvk_img_idx],
     bi.clearValueCount   = (rvk_bi.clear_value_count ) ? rvk_bi.clear_value_count  : RVK_ARRAY_LEN(clear_values),
     bi.pClearValues      = (rvk_bi.p_clear_values    ) ? rvk_bi.p_clear_values     : clear_values,
     bi.renderArea.extent = rvk_ctx.extent;
@@ -1479,12 +1360,12 @@ void rvk_begin_offscreen_render_pass(float r, float g, float b, float a, VkRende
         .clearValueCount = RVK_ARRAY_LEN(clear_values),
         .pClearValues = clear_values,
     };
-    vkCmdBeginRenderPass(rvk_ctx.gfx_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(rvk_ctx.cmd_buff, &begin_rp, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 void rvk_end_render_pass()
 {
-    vkCmdEndRenderPass(rvk_ctx.gfx_buff);
+    vkCmdEndRenderPass(rvk_ctx.cmd_buff);
 }
 
 void rvk_cmd_end_render_pass(VkCommandBuffer cmd_buff)
@@ -1494,7 +1375,7 @@ void rvk_cmd_end_render_pass(VkCommandBuffer cmd_buff)
 
 void rvk_end_rec_gfx()
 {
-    RAG_VK(vkEndCommandBuffer(rvk_ctx.gfx_buff));
+    RAG_VK(vkEndCommandBuffer(rvk_ctx.cmd_buff));
 }
 
 void rvk_end_command_buffer(VkCommandBuffer cmd_buff)
@@ -1508,7 +1389,7 @@ void rvk_submit_gfx()
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
-        .pCommandBuffers = &rvk_ctx.gfx_buff,
+        .pCommandBuffers = &rvk_ctx.cmd_buff,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &rvk_ctx.render_fin_sem,
         .waitSemaphoreCount = 1,
@@ -1516,7 +1397,8 @@ void rvk_submit_gfx()
         .pWaitDstStageMask = &wait_stage,
     };
 
-    RAG_VK(vkQueueSubmit(rvk_ctx.gfx_queue, 1, &submit, rvk_ctx.gfx_fence));
+    // TODO: may hve to change back to gfx_queue if unified queue doesn't work
+    RAG_VK(vkQueueSubmit(rvk_ctx.unified_queue, 1, &submit, rvk_ctx.fence));
 
     VkPresentInfoKHR present = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -1526,7 +1408,8 @@ void rvk_submit_gfx()
         .pSwapchains = &rvk_ctx.swapchain.handle,
         .pImageIndices = &rvk_img_idx,
     };
-    VkResult res = vkQueuePresentKHR(rvk_ctx.present_queue, &present);
+    // TODO: may hve to change back to present_queue if unified queue doesn't work
+    VkResult res = vkQueuePresentKHR(rvk_ctx.unified_queue, &present);
     if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || rvk_ctx.swapchain.buff_resized) {
         rvk_ctx.swapchain.buff_resized = false;
         rvk_recreate_swapchain();
@@ -1557,7 +1440,7 @@ void rvk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Rvk_Buffer vtx_buff, Rv
 {
     RVK_ASSERT(0 && "rvk_draw deprecated");
 
-    VkCommandBuffer cmd_buffer = rvk_ctx.gfx_buff;
+    VkCommandBuffer cmd_buffer = rvk_ctx.cmd_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
         .width = (float)rvk_ctx.extent.width,
@@ -1577,7 +1460,7 @@ void rvk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Rvk_Buffer vtx_buff, Rv
 
 void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count)
 {
-    VkCommandBuffer cmd_buff = rvk_ctx.gfx_buff;
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
 
     vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
@@ -1597,7 +1480,7 @@ void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds
 
 void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count, VkExtent2D extent)
 {
-    VkCommandBuffer cmd_buff = rvk_ctx.gfx_buff;
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
 
     vkCmdBindPipeline(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
@@ -1617,7 +1500,7 @@ void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptor
 
 void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
 {
-    VkCommandBuffer cmd_buff = rvk_ctx.gfx_buff;
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buff, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
@@ -1626,31 +1509,31 @@ void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
 
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
 {
-    vkCmdBindPipeline(rvk_ctx.gfx_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
-    vkCmdBindDescriptorSets(rvk_ctx.gfx_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl_layout, 0, 1, &ds, 0, NULL);
-    vkCmdDispatch(rvk_ctx.gfx_buff, x, y, z);
+    vkCmdBindPipeline(rvk_ctx.cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
+    vkCmdBindDescriptorSets(rvk_ctx.cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl_layout, 0, 1, &ds, 0, NULL);
+    vkCmdDispatch(rvk_ctx.cmd_buff, x, y, z);
 }
 
 void rvk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value)
 {
-    VkCommandBuffer cmd_buff = rvk_ctx.gfx_buff;
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
     vkCmdPushConstants(cmd_buff, pl_layout, flags, 0, size, value);
 }
 
 void rvk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds)
 {
-    vkCmdBindPipeline(rvk_ctx.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    vkCmdBindDescriptorSets(rvk_ctx.gfx_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);
+    vkCmdBindPipeline(rvk_ctx.cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    vkCmdBindDescriptorSets(rvk_ctx.cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, 0, 1, &ds, 0, NULL);
 
     VkViewport viewport = {
         .width = (float)rvk_ctx.extent.width,
         .height =(float)rvk_ctx.extent.height,
         .maxDepth = 1.0f,
     };
-    vkCmdSetViewport(rvk_ctx.gfx_buff, 0, 1, &viewport);
+    vkCmdSetViewport(rvk_ctx.cmd_buff, 0, 1, &viewport);
     VkRect2D scissor = { .extent = rvk_ctx.extent, };
-    vkCmdSetScissor(rvk_ctx.gfx_buff, 0, 1, &scissor);
-    vkCmdDraw(rvk_ctx.gfx_buff, 3, 1, 0, 0);
+    vkCmdSetScissor(rvk_ctx.cmd_buff, 0, 1, &scissor);
+    vkCmdDraw(rvk_ctx.cmd_buff, 3, 1, 0, 0);
 }
 
 #ifdef PLATFORM_DESKTOP_GLFW
@@ -1669,13 +1552,13 @@ void rvk_compute_pl_barrier()
         .memoryBarrierCount = 1,
         .pMemoryBarriers = &barrier,
     };
-    vkCmdPipelineBarrier2(rvk_ctx.gfx_buff, &dependency);
+    vkCmdPipelineBarrier2(rvk_ctx.cmd_buff, &dependency);
 }
 #endif // PLATFORM_DESKTOP_GLFW
 
 void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
-    VkCommandBuffer cmd_buffer = rvk_ctx.gfx_buff;
+    VkCommandBuffer cmd_buffer = rvk_ctx.cmd_buff;
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     VkViewport viewport = {
         .width = (float)rvk_ctx.extent.width,
@@ -1702,14 +1585,14 @@ void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPi
 
 void rvk_wait_to_begin_gfx()
 {
-    RAG_VK(vkWaitForFences(rvk_ctx.device, 1, &rvk_ctx.gfx_fence, VK_TRUE, UINT64_MAX));
+    RAG_VK(vkWaitForFences(rvk_ctx.device, 1, &rvk_ctx.fence, VK_TRUE, UINT64_MAX));
 
     VkResult res = vkAcquireNextImageKHR(
         rvk_ctx.device, rvk_ctx.swapchain.handle, UINT64_MAX,
         rvk_ctx.img_avail_sem, VK_NULL_HANDLE, &rvk_img_idx
     );
     if (res == VK_ERROR_OUT_OF_DATE_KHR) {
-        if (!rvk_swapchain_init()) RVK_EXIT_APP;
+        rvk_swapchain_init();
     } else if (!RVK_SUCCEEDED(res) && res != VK_SUBOPTIMAL_KHR) {
         rvk_log(RVK_ERROR, "failed to acquire swapchain image");
         RVK_EXIT_APP;
@@ -1717,15 +1600,15 @@ void rvk_wait_to_begin_gfx()
         rvk_log(RVK_WARNING, "suboptimal swapchain image");
     }
 
-    RAG_VK(vkResetFences(rvk_ctx.device, 1, &rvk_ctx.gfx_fence));
-    RAG_VK(vkResetCommandBuffer(rvk_ctx.gfx_buff, 0));
+    RAG_VK(vkResetFences(rvk_ctx.device, 1, &rvk_ctx.fence));
+    RAG_VK(vkResetCommandBuffer(rvk_ctx.cmd_buff, 0));
 }
 
 void rvk_wait_reset()
 {
-    RAG_VK(vkWaitForFences(rvk_ctx.device, 1, &rvk_ctx.gfx_fence, VK_TRUE, UINT64_MAX));
-    RAG_VK(vkResetFences(rvk_ctx.device, 1, &rvk_ctx.gfx_fence));
-    RAG_VK(vkResetCommandBuffer(rvk_ctx.gfx_buff, 0));
+    RAG_VK(vkWaitForFences(rvk_ctx.device, 1, &rvk_ctx.fence, VK_TRUE, UINT64_MAX));
+    RAG_VK(vkResetFences(rvk_ctx.device, 1, &rvk_ctx.fence));
+    RAG_VK(vkResetCommandBuffer(rvk_ctx.cmd_buff, 0));
 }
 
 void rvk_wait_for_fences(VkFence *fences, uint32_t fence_count)
@@ -1752,7 +1635,7 @@ void rvk_begin_command_buffer(VkCommandBuffer cmd_buff)
 void rvk_begin_rec_gfx()
 {
     VkCommandBufferBeginInfo begin_info = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, };
-    RAG_VK(vkBeginCommandBuffer(rvk_ctx.gfx_buff, &begin_info));
+    RAG_VK(vkBeginCommandBuffer(rvk_ctx.cmd_buff, &begin_info));
 }
 
 void rvk_recreate_swapchain()
@@ -1765,8 +1648,7 @@ void rvk_recreate_swapchain()
 #endif
 
     vkDeviceWaitIdle(rvk_ctx.device);
-    rvk_cleanup_swapchain();
-
+    rvk_destroy_swapchain();
     rvk_swapchain_init();
     rvk_img_views_init();
     rvk_depth_init();
@@ -1801,7 +1683,7 @@ bool rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer)
 
 bool rvk_is_device_suitable(VkPhysicalDevice phys_device)
 {
-    if (!rvk_set_queue_fam_indices(phys_device)) return false;
+    if (!rvk_has_unified_gfx_and_present_queue(phys_device)) return false;
 
     VkPhysicalDeviceProperties props = {0};
     VkPhysicalDeviceFeatures features = {0};
@@ -1895,23 +1777,20 @@ Rvk_Log_Level translate_msg_severity(VkDebugUtilsMessageSeverityFlagBitsEXT msg_
     return RVK_ERROR; // unreachable
 }
 
-bool rvk_setup_debug_msgr()
+void rvk_setup_debug_msgr()
 {
     VkDebugUtilsMessengerCreateInfoEXT debug_msgr_ci = {0};
     rvk_populated_debug_msgr_ci(&debug_msgr_ci);
     RVK_LOAD_PFN(vkCreateDebugUtilsMessengerEXT);
     if (vkCreateDebugUtilsMessengerEXT) {
-        return RVK_SUCCEEDED(vkCreateDebugUtilsMessengerEXT(rvk_ctx.instance, &debug_msgr_ci, NULL, &rvk_ctx.debug_msgr));
+        RAG_VK(vkCreateDebugUtilsMessengerEXT(rvk_ctx.instance, &debug_msgr_ci, NULL, &rvk_ctx.debug_msgr));
     } else {
         rvk_log(RVK_ERROR, "failed to load function pointer for vkCreateDebugUtilesMessenger");
-        return false;
     }
 }
 
 bool rvk_setup_report_callback()
 {
-    if (!rvk_ctx.using_validation_layers) return true;
-
     VkDebugReportCallbackCreateInfoEXT report_callback_ci = {
         .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
         .flags = VK_DEBUG_REPORT_ERROR_BIT_EXT |
@@ -1930,29 +1809,48 @@ bool rvk_setup_report_callback()
     }
 }
 
-bool rvk_set_queue_fam_indices(VkPhysicalDevice phys_device)
+uint32_t rvk_get_unified_gfx_and_present_queue_idx(VkPhysicalDevice phys_device)
 {
     uint32_t queue_fam_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, NULL);
     VkQueueFamilyProperties queue_fam_props[queue_fam_count];
     vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, queue_fam_props);
-    bool has_gfx = false, has_present = false;
-    for (size_t i = 0; i < queue_fam_count; i++) {
-        if (queue_fam_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            rvk_ctx.gfx_idx = i;
+    bool has_gfx = false;
+    for (uint32_t i = 0; i < queue_fam_count; i++) {
+        /* graphics support? */
+        if (queue_fam_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
             has_gfx = true;
-        }
+
+        /* present support? */
         VkBool32 present_support = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(phys_device, i, rvk_ctx.surface, &present_support);
-        if (present_support) {
-            rvk_ctx.present_idx = i;
-            has_present = true;
-        }
-
-        if (has_gfx && has_present) return true;
+        if (present_support && has_gfx) return i;
+        else has_gfx = false;
     }
 
-    rvk_log(RVK_ERROR, "missing graphics or present (how can this be?)");
+    rvk_log(RVK_ERROR, "If you don't want to exit, next time call rvk_has_unified_gfx_and_present_queue() first");
+    RVK_EXIT_APP;
+}
+
+bool rvk_has_unified_gfx_and_present_queue(VkPhysicalDevice phys_device)
+{
+    uint32_t queue_fam_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, NULL);
+    VkQueueFamilyProperties queue_fam_props[queue_fam_count];
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device, &queue_fam_count, queue_fam_props);
+    bool has_gfx = false;
+    for (uint32_t i = 0; i < queue_fam_count; i++) {
+        /* graphics support? */
+        if (queue_fam_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            has_gfx = true;
+
+        /* present support? */
+        VkBool32 present_support = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(phys_device, i, rvk_ctx.surface, &present_support);
+        if (present_support && has_gfx) return true;
+        else has_gfx = false;
+    }
+
     return false;
 }
 
@@ -1965,44 +1863,33 @@ bool rvk_set_gfx_capable_queue_idx(VkPhysicalDevice phys_device)
     bool has_gfx = false;
     for (size_t i = 0; i < queue_fam_count; i++) {
         if (queue_fam_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            rvk_ctx.gfx_idx = i;
+            rvk_ctx.queue_idx = i;
             has_gfx = true;
         }
         if (has_gfx) return true;
     }
 
-    rvk_log(RVK_ERROR, "missing graphics or present (how can this be?)");
+    rvk_log(RVK_ERROR, "missing graphics queue");
     return false;
 }
 
-bool rvk_pick_phys_device()
+void rvk_pick_phys_device()
 {
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(rvk_ctx.instance, &device_count, NULL);
     VkPhysicalDevice phys_devices[device_count];
     vkEnumeratePhysicalDevices(rvk_ctx.instance, &device_count, phys_devices);
+    /* pick the first physical devie with graphics and present support */
     for (size_t i = 0; i < device_count; i++) {
         if (rvk_is_device_suitable(phys_devices[i])) {
             rvk_ctx.phys_device = phys_devices[i];
-            return true;
+            rvk_ctx.queue_idx = rvk_get_unified_gfx_and_present_queue_idx(rvk_ctx.phys_device);
+            return;
         }
     }
 
-    return false;
-}
-
-void rvk_populate_set(int arr[], size_t arr_size, U32_Set *set)
-{
-    for (size_t i = 0; i < arr_size; i++) {
-        if (arr[i] == -1)
-            continue;
-
-        rvk_da_append(set, arr[i]);
-
-        for (size_t j = i + 1; j < arr_size; j++)
-            if (arr[i] == arr[j])
-                arr[j] = -1;
-    }
+    rvk_log(RVK_ERROR, "missing unified queue with graphics and present");
+    RVK_EXIT_APP;
 }
 
 bool rvk_swapchain_adequate(VkPhysicalDevice phys_device)
@@ -2023,7 +1910,7 @@ bool rvk_swapchain_adequate(VkPhysicalDevice phys_device)
     return true;
 }
 
-bool rvk_choose_swapchain_fmt()
+void rvk_choose_swapchain_fmt()
 {
     uint32_t surface_fmt_count = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(rvk_ctx.phys_device, rvk_ctx.surface, &surface_fmt_count, NULL);
@@ -2032,18 +1919,18 @@ bool rvk_choose_swapchain_fmt()
     for (size_t i = 0; i < surface_fmt_count; i++) {
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_SRGB && fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             rvk_ctx.surface_fmt = fmts[i];
-            return true;
+            return;
         }
     }
 
     if (surface_fmt_count) {
         rvk_log(RVK_WARNING, "default surface format %d and colorspace %d", fmts[0].format, fmts[0].colorSpace);
         rvk_ctx.surface_fmt = fmts[0];
-        return true;
+        return;
     } else {
         rvk_log(RVK_ERROR, "failed to find any surface swapchain formats");
         rvk_log(RVK_ERROR, "this shouldn't have happened if swapchain_adequate returned true");
-        return false;
+        RVK_EXIT_APP;
     }
 }
 
@@ -2085,28 +1972,20 @@ VkExtent2D rvk_choose_swp_extent()
     }
 }
 
-void rvk_cleanup_swapchain()
+void rvk_destroy_swapchain()
 {
     vkDestroyImageView(rvk_ctx.device, rvk_ctx.depth_img_view, NULL);
     vkDestroyImage(rvk_ctx.device, rvk_ctx.depth_img.handle, NULL);
     vkFreeMemory(rvk_ctx.device, rvk_ctx.depth_img.mem, NULL);
 
-    for (size_t i = 0; i < rvk_ctx.swapchain.frame_buffs.count; i++)
-        vkDestroyFramebuffer(rvk_ctx.device, rvk_ctx.swapchain.frame_buffs.items[i], NULL);
-    for (size_t i = 0; i < rvk_ctx.swapchain.img_views.count; i++)
-        vkDestroyImageView(rvk_ctx.device, rvk_ctx.swapchain.img_views.items[i], NULL);
+    for (size_t i = 0; i < rvk_ctx.swapchain.img_count; i++) {
+        vkDestroyFramebuffer(rvk_ctx.device, rvk_ctx.swapchain.frame_buffs[i], NULL);
+        vkDestroyImageView(rvk_ctx.device, rvk_ctx.swapchain.img_views[i], NULL);
+    }
     vkDestroySwapchainKHR(rvk_ctx.device, rvk_ctx.swapchain.handle, NULL);
 
-    /* cleanup and reset everything in case we resuse it */
-    rvk_da_free(rvk_ctx.swapchain.frame_buffs);
-    rvk_da_free(rvk_ctx.swapchain.img_views);
-    rvk_da_free(rvk_ctx.swapchain.imgs);
-    rvk_ctx.swapchain.frame_buffs.count = 0;
-    rvk_ctx.swapchain.img_views.count = 0;
-    rvk_ctx.swapchain.imgs.count = 0;
-    rvk_ctx.swapchain.frame_buffs.items = NULL;
-    rvk_ctx.swapchain.img_views.items = NULL;
-    rvk_ctx.swapchain.imgs.items = NULL;
+    /* reset image count, otherwise call to vkGetSwapchainImagesKHR will fail as a query */
+    rvk_ctx.swapchain.img_count = 0;
 }
 
 bool rvk_find_mem_type_idx(uint32_t type, VkMemoryPropertyFlags properties, uint32_t *idx)
@@ -2147,7 +2026,7 @@ bool rvk_inst_exts_satisfied()
     return false;
 }
 
-bool rvk_chk_validation_support()
+bool rvk_validation_supported()
 {
     uint32_t layer_count = 0;
     vkEnumerateInstanceLayerProperties(&layer_count, NULL);
@@ -2383,8 +2262,7 @@ void rvk_buff_staged_upload(Rvk_Buffer buff)
 
 void rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size)
 {
-    VkCommandBuffer tmp_cmd_buff;
-    rvk_cmd_quick_begin(&tmp_cmd_buff);
+    VkCommandBuffer tmp_cmd_buff = rvk_cmd_quick_begin();
         VkBufferCopy copy_region = {0};
         if (size) {
             copy_region.size = size;
@@ -2444,19 +2322,14 @@ void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags
     RAG_VK(vkBindImageMemory(rvk_ctx.device, img->handle, img->mem, 0));
 }
 
-bool rvk_cmd_pool_init()
+void rvk_cmd_pool_init()
 {
     VkCommandPoolCreateInfo cmd_pool_ci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        .queueFamilyIndex = rvk_ctx.gfx_idx, // TODO: this sort of assumes all queues using pool have the same idx
+        .queueFamilyIndex = rvk_ctx.queue_idx,
     };
-    if (!RVK_SUCCEEDED(vkCreateCommandPool(rvk_ctx.device, &cmd_pool_ci, NULL, &rvk_ctx.pool))) {
-        rvk_log(RVK_ERROR, "failed to create command pool");
-        return false;
-    }
-
-    return true;
+    RAG_VK(vkCreateCommandPool(rvk_ctx.device, &cmd_pool_ci, NULL, &rvk_ctx.pool));
 }
 
 bool rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allocate_Info rvk_ci)
@@ -2473,10 +2346,8 @@ bool rvk_allocate_command_buffer_(VkCommandBuffer *buff, Rvk_Command_Buffer_Allo
     return true;
 }
 
-bool rvk_cmd_syncs_init()
+void rvk_cmd_syncs_init()
 {
-    bool result = true;
-
     VkSemaphoreCreateInfo sem_ci = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     };
@@ -2484,36 +2355,24 @@ bool rvk_cmd_syncs_init()
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT,
     };
-
-    result = RVK_SUCCEEDED(vkCreateSemaphore(rvk_ctx.device, &sem_ci, NULL, &rvk_ctx.img_avail_sem));
-    if (!result) goto defer;
-    result = RVK_SUCCEEDED(vkCreateSemaphore(rvk_ctx.device, &sem_ci, NULL, &rvk_ctx.render_fin_sem));
-    if (!result) goto defer;
-    result = RVK_SUCCEEDED(vkCreateFence(rvk_ctx.device, &fence_ci, NULL, &rvk_ctx.gfx_fence));
-    if (!result) goto defer;
-
-defer:
-    if (!result) rvk_log(RVK_ERROR, "failed to create sync objects");
-    return result;
+    RAG_VK(vkCreateSemaphore(rvk_ctx.device, &sem_ci, NULL, &rvk_ctx.img_avail_sem));
+    RAG_VK(vkCreateSemaphore(rvk_ctx.device, &sem_ci, NULL, &rvk_ctx.render_fin_sem));
+    RAG_VK(vkCreateFence(rvk_ctx.device, &fence_ci, NULL, &rvk_ctx.fence));
 }
 
-bool rvk_create_semaphore(VkSemaphore *semaphore)
+void rvk_create_semaphore(VkSemaphore *semaphore)
 {
     VkSemaphoreCreateInfo sem_ci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    bool result = RVK_SUCCEEDED(vkCreateSemaphore(rvk_ctx.device, &sem_ci, NULL, semaphore));
-    if (!result) rvk_log(RVK_ERROR, "failed to create semaphore");
-    return result;
+    RAG_VK(vkCreateSemaphore(rvk_ctx.device, &sem_ci, NULL, semaphore));
 }
 
-bool rvk_create_fence(VkFence *fence)
+void rvk_create_fence(VkFence *fence)
 {
     VkFenceCreateInfo fence_ci = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT,
     };
-    bool result = RVK_SUCCEEDED(vkCreateFence(rvk_ctx.device, &fence_ci, NULL, fence));
-    if (!result) rvk_log(RVK_ERROR, "failed to create fence");
-    return result;
+    RAG_VK(vkCreateFence(rvk_ctx.device, &fence_ci, NULL, fence));
 }
 
 void rvk_destroy_semaphore(VkSemaphore semaphore)
@@ -2526,20 +2385,22 @@ void rvk_destroy_fence(VkFence fence)
     vkDestroyFence(rvk_ctx.device, fence, NULL);
 }
 
-void rvk_cmd_quick_begin(VkCommandBuffer *tmp_cmd_buff)
+VkCommandBuffer rvk_cmd_quick_begin()
 {
+    VkCommandBuffer cmd_buff = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandPool = rvk_ctx.pool,
         .commandBufferCount = 1,
     };
-    RAG_VK(vkAllocateCommandBuffers(rvk_ctx.device, &ci, tmp_cmd_buff));
+    RAG_VK(vkAllocateCommandBuffers(rvk_ctx.device, &ci, &cmd_buff));
     VkCommandBufferBeginInfo cmd_begin = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    RAG_VK(vkBeginCommandBuffer(*tmp_cmd_buff, &cmd_begin));
+    RAG_VK(vkBeginCommandBuffer(cmd_buff, &cmd_begin));
+    return cmd_buff;
 }
 
 void rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
@@ -2550,15 +2411,14 @@ void rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
         .commandBufferCount = 1,
         .pCommandBuffers = tmp_cmd_buff,
     };
-    RAG_VK(vkQueueSubmit(rvk_ctx.gfx_queue, 1, &submit, VK_NULL_HANDLE));
-    RAG_VK(vkQueueWaitIdle(rvk_ctx.gfx_queue));
+    RAG_VK(vkQueueSubmit(rvk_ctx.unified_queue, 1, &submit, VK_NULL_HANDLE));
+    RAG_VK(vkQueueWaitIdle(rvk_ctx.unified_queue));
     vkFreeCommandBuffers(rvk_ctx.device, rvk_ctx.pool, 1, tmp_cmd_buff);
 }
 
 void transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
 {
-    VkCommandBuffer tmp_cmd_buff;
-    rvk_cmd_quick_begin(&tmp_cmd_buff);
+    VkCommandBuffer tmp_cmd_buff = rvk_cmd_quick_begin();
         VkPipelineStageFlags src_stg_mask;
         VkPipelineStageFlags dst_stg_mask;
         VkAccessFlags src_access_mask;
@@ -2610,7 +2470,7 @@ void transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayou
 void rvk_pl_barrier(VkImageMemoryBarrier barrier)
 {
     vkCmdPipelineBarrier(
-        rvk_ctx.gfx_buff,
+        rvk_ctx.cmd_buff,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_FLAGS_NONE,
@@ -2640,7 +2500,7 @@ void rvk_raster_sampler_barrier(VkImage img)
        },
     };
     vkCmdPipelineBarrier(
-        rvk_ctx.gfx_buff,
+        rvk_ctx.cmd_buff,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_FLAGS_NONE,
@@ -2670,7 +2530,7 @@ void rvk_depth_img_barrier(VkImage depth_img)
        },
     };
     vkCmdPipelineBarrier(
-        rvk_ctx.gfx_buff,
+        rvk_ctx.cmd_buff,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_FLAGS_NONE,
@@ -2700,7 +2560,7 @@ void rvk_color_img_barrier(VkImage color_img)
        },
     };
     vkCmdPipelineBarrier(
-        rvk_ctx.gfx_buff,
+        rvk_ctx.cmd_buff,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_FLAGS_NONE,
@@ -2712,8 +2572,7 @@ void rvk_color_img_barrier(VkImage color_img)
 
 void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
 {
-    VkCommandBuffer tmp_cmd_buff;
-    rvk_cmd_quick_begin(&tmp_cmd_buff);
+    VkCommandBuffer tmp_cmd_buff = rvk_cmd_quick_begin();
         VkBufferImageCopy region = {
             .imageSubresource = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -3040,12 +2899,9 @@ void rvk_update_ds(size_t count, VkWriteDescriptorSet *writes)
     vkUpdateDescriptorSets(rvk_ctx.device, (uint32_t)count, writes, 0, NULL);
 }
 
-bool rvk_wait_idle()
+void rvk_wait_idle()
 {
-    return RVK_SUCCEEDED(vkDeviceWaitIdle(rvk_ctx.device));
+    RAG_VK(vkDeviceWaitIdle(rvk_ctx.device));
 }
-
-// line count before RAG_VK macro: 3269
-// line count after RAG_VK macro:
 
 #endif // RAG_VK_IMPLEMENTATION

@@ -4,10 +4,10 @@
 #include "rag_vk.h"
 
 #define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
+#include "raylib-5.0/raymath.h"
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "ext/stb_image.h"
+#include "stb_image.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -140,17 +140,16 @@ void destroy_shape_res();
     /* alternative backend here */
 #endif
 
-bool init_window(int width, int height, const char *title)
+void init_window(int width, int height, const char *title)
 {
     win_size.width = width;
     win_size.height = height;
     core_title = title;
 
-    if (!init_platform()) return false;
+    if (!init_platform())
+        assert(0 && "failed to initialize platform");
 
-    /* initialize vulkan */
-    if (!rvk_init()) return false;
-    else return true;
+    rvk_init();
 }
 
 void close_window()
@@ -1021,7 +1020,7 @@ Cvr_Image load_image(const char *file_name)
 Rvk_Texture load_texture(Cvr_Image img)
 {
     Rvk_Texture t = rvk_load_texture(img.data, img.width, img.height, VK_FORMAT_R8G8B8A8_SRGB);
-    free(img.data);
+    // free(img.data);
     return t;
 }
 

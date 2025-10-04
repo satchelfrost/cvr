@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <vulkan/vulkan_core.h>
 #include "rag_vk.h"
-#include "ext/raylib-5.0/raymath.h"
+#include "raylib-5.0/raymath.h"
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -237,7 +237,7 @@ typedef struct {
 } Window_Size;
 
 /* window */
-bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
+void init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 void enable_full_screen();
 bool window_should_close();                                 /* Check if window should close and poll events */

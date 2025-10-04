@@ -396,11 +396,11 @@ bool build_glfw_linux(const char *platform_path)
     const char *build_path = nob_temp_sprintf("%s/glfw", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
     const char *output_path = nob_temp_sprintf("%s/glfw.o", build_path);
-    const char *input_path = nob_temp_sprintf("./src/ext/raylib-5.0/rglfw.c");
+    const char *input_path = nob_temp_sprintf("./external/raylib-5.0/rglfw.c");
     if (nob_needs_rebuild(output_path, &input_path, 1)) {
         nob_cmd_append(&cmd, "cc");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw");
         nob_cmd_append(&cmd, "-c", input_path);
         nob_cmd_append(&cmd, "-o", output_path);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
@@ -419,11 +419,11 @@ bool build_glfw_win(const char *platform_path)
     const char *build_path = nob_temp_sprintf("%s/glfw", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
     const char *output_path = nob_temp_sprintf("%s/glfw.o", build_path);
-    const char *input_path = nob_temp_sprintf("./src/ext/raylib-5.0/rglfw.c");
+    const char *input_path = nob_temp_sprintf("./external/raylib-5.0/rglfw.c");
     if (nob_needs_rebuild(output_path, &input_path, 1)) {
         nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw");
         nob_cmd_append(&cmd, "-c", input_path);
         nob_cmd_append(&cmd, "-o", output_path);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
@@ -471,8 +471,8 @@ bool build_cvr_linux(const char *platform_path)
             nob_cmd_append(&cmd, "cc");
             nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-I./src/ext");
-            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-I./external");
+            nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
             nob_cmd_append(&cmd, "-DVK_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
@@ -524,8 +524,8 @@ bool build_cvr_win(const char *platform_path)
             nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
             nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-I./src/ext");
-            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-I./external");
+            nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
             Nob_Proc proc = nob_cmd_run_async(cmd);
@@ -639,6 +639,7 @@ bool build_example_linux(Config config, const char *build_path)
         nob_cmd_append(&cmd, "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
+        nob_cmd_append(&cmd, "-I./external");
         nob_cmd_append(&cmd, "-o", exec_path);
         nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
@@ -689,7 +690,7 @@ bool build_example_win(Config config, const char *build_path)
         cmd.count = 0;
         nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
         nob_cmd_append(&cmd, "-I./src");
-        nob_cmd_append(&cmd, "-I./src/ext");
+        nob_cmd_append(&cmd, "-I./external");
         nob_cmd_append(&cmd, "-o", exec_path);
         nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
@@ -800,7 +801,8 @@ bool run_example_linux(Config config, const char *example_build_path)
     if (!cd(example_build_path)) nob_return_defer(false);
     const char *bin = nob_temp_sprintf("./%s", config.example->name);
     if (config.debug) {
-        nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
+        // nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
+        nob_cmd_append(&cmd, "gdb", "-ex", "start", bin);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     } else if (config.renderdoc) {
         /* open renderdoc to take a capture */
