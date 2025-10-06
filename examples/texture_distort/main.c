@@ -1,5 +1,9 @@
 #include "cvr.h"
 
+#define NOB_STRIP_PREFIX
+#define NOB_IMPLEMENTATION
+#include "../nob.h"
+
 typedef struct {
     Vector2 pos;
     Vector3 color;
@@ -19,19 +23,19 @@ typedef struct {
 #define UV_LOWER_LEFT  { 0.0,  1.0}
 #define UV_LOWER_RIGHT { 1.0,  1.0}
 
-#define QUAD_VTX_COUNT 4
-Quad_Vertex quad_verts[QUAD_VTX_COUNT] = {
-    {.pos = POS_UPPER_LEFT,  .color = VERT_COLOR_RED,  .uv = UV_UPPER_LEFT},
-    {.pos = POS_UPPER_RIGHT, .color = VERT_COLOR_GREEN,.uv = UV_UPPER_RIGHT},
-    {.pos = POS_LOWER_LEFT,  .color = VERT_COLOR_BLUE, .uv = UV_LOWER_LEFT},
-    {.pos = POS_LOWER_RIGHT, .color = VERT_COLOR_GRAY, .uv = UV_LOWER_RIGHT},
-};
-
-/* clockwise winding order */
-#define QUAD_IDX_COUNT 6
-uint16_t quad_indices[QUAD_IDX_COUNT] = {
-    0, 1, 2, 2, 1, 3
-};
+// #define QUAD_VTX_COUNT 4
+// Quad_Vertex quad_verts[QUAD_VTX_COUNT] = {
+//     {.pos = POS_UPPER_LEFT,  .color = VERT_COLOR_RED,  .uv = UV_UPPER_LEFT},
+//     {.pos = POS_UPPER_RIGHT, .color = VERT_COLOR_GREEN,.uv = UV_UPPER_RIGHT},
+//     {.pos = POS_LOWER_LEFT,  .color = VERT_COLOR_BLUE, .uv = UV_LOWER_LEFT},
+//     {.pos = POS_LOWER_RIGHT, .color = VERT_COLOR_GRAY, .uv = UV_LOWER_RIGHT},
+// };
+//
+// /* clockwise winding order */
+// #define QUAD_IDX_COUNT 6
+// uint16_t quad_indices[QUAD_IDX_COUNT] = {
+//     0, 1, 2, 2, 1, 3
+// };
 
 typedef struct {
     VkPipeline handle;
@@ -61,6 +65,93 @@ typedef struct {
     Vector2 xy_offsets[OFFSET_COUNT];
     Rvk_Buffer buff;
 } SSBO;
+
+typedef struct {
+    Quad_Vertex *items;
+    size_t count;
+    size_t capacity;
+} Quad_Vertices;
+
+typedef struct {
+    uint16_t *items;
+    size_t count;
+    size_t capacity;
+} Quad_Indices;
+
+typedef struct {
+    Quad_Vertices vertices;
+    Quad_Indices indices;
+} Procedural_Mesh;
+
+Procedural_Mesh gen_procedural_mesh(size_t tiles_per_side)
+{
+/*
+ *      start_idx = row*verts_per_row + col 
+ *
+ *      A = (start_idx    , start_idx + 1                , start_idx + verts_per_row)
+ *      B = (start_idx + 1, start_idx + verts_per_row + 1, start_idx + verts_per_row)
+ *
+ *         0        1        2        3
+ *     +--------+--------+--------+--------+
+ *     |       /|       /|       /|       /|
+ *     |  A   / |  A   / |  A   / |  A   / |
+ *     |     /  |     /  |     /  |     /  |
+ *  0  |    /   |    /   |    /   |    /   |
+ *     |   /    |   /    |   /    |   /    |
+ *     |  /     |  /     |  /     |  /     |
+ *     | /   B  | /   B  | /   B  | /   B  |
+ *     |/       |/       |/       |/       |
+ *     +--------+--------+--------+--------+
+ *     |       /|       /|       /|       /|
+ *     |  A   / |  A   / |  A   / |  A   / |
+ *     |     /  |     /  |     /  |     /  |
+ *  1  |    /   |    /   |    /   |    /   |
+ *     |   /    |   /    |   /    |   /    |
+ *     |  /     |  /     |  /     |  /     |
+ *     | /   B  | /   B  | /   B  | /   B  |
+ *     |/       |/       |/       |/       |
+ *     +--------+--------+--------+--------+
+ * */
+
+    Procedural_Mesh mesh = {0};
+
+    if (tiles_per_side == 0) tiles_per_side = 1;
+    if (tiles_per_side > 4) tiles_per_side = 4;
+    size_t verts_per_side = tiles_per_side + 1;
+
+    float dy = -0.5;
+    for (size_t y = 0; y < verts_per_side; y++) {
+        float dx = -0.5;
+        for (size_t x = 0; x < verts_per_side; x++) {
+            // append vertices
+            Quad_Vertex vert = {.pos = {dx, dy}, .color = VERT_COLOR_RED, .uv = {dx+0.5f, dy+0.5f}};
+            da_append(&mesh.vertices, vert);
+            dx += 1.0f/tiles_per_side;
+
+        }
+        dy += 1.0f/tiles_per_side;
+    }
+
+    for (size_t y = 0; y < tiles_per_side; y++) {
+        for (size_t x = 0; x < tiles_per_side; x++) {
+            // append indices
+            uint16_t start_idx = y*verts_per_side + x;
+            // A
+            da_append(&mesh.indices, start_idx);
+            da_append(&mesh.indices, start_idx+1);
+            da_append(&mesh.indices, start_idx+verts_per_side);
+            // B
+            da_append(&mesh.indices, start_idx+1);
+            da_append(&mesh.indices, start_idx+verts_per_side+1);
+            da_append(&mesh.indices, start_idx+verts_per_side);
+        }
+    }
+
+
+            
+
+    return mesh;
+}
 
 void create_pipeline(Pipeline *pl, VkDescriptorSetLayout *ds_layout)
 {
@@ -96,8 +187,17 @@ int main()
 
     Rvk_Buffer vtx_buff = {0};
     Rvk_Buffer idx_buff = {0};
-    rvk_upload_vtx_buff(QUAD_VTX_COUNT*sizeof(Quad_Vertex), QUAD_VTX_COUNT, quad_verts, &vtx_buff);
-    rvk_upload_idx_buff(QUAD_IDX_COUNT*sizeof(uint16_t), QUAD_IDX_COUNT, quad_indices, &idx_buff);
+    Procedural_Mesh mesh = gen_procedural_mesh(5);
+    printf("vertex count %zu\n", mesh.vertices.count);
+    printf("index count %zu\n", mesh.indices.count);
+    for (size_t i = 0; i < mesh.vertices.count; i++) {
+        Quad_Vertex v = mesh.vertices.items[i];
+        printf("v(%zu); pos = {%f, %f}, uv = {%f, %f}\n", i, v.pos.x, v.pos.y, v.uv.x, v.uv.y);
+    }
+    rvk_upload_vtx_buff(mesh.vertices.count*sizeof(Quad_Vertex), mesh.vertices.count, mesh.vertices.items, &vtx_buff);
+    rvk_upload_idx_buff(mesh.indices.count*sizeof(uint16_t), mesh.indices.count, mesh.indices.items, &idx_buff);
+    // rvk_upload_vtx_buff(QUAD_VTX_COUNT*sizeof(Quad_Vertex), QUAD_VTX_COUNT, quad_verts, &vtx_buff);
+    // rvk_upload_idx_buff(QUAD_IDX_COUNT*sizeof(uint16_t), QUAD_IDX_COUNT, quad_indices, &idx_buff);
 
     UBO ubo = {0};
     printf("sizeof UBO_Data %zu\n", sizeof(UBO_Data));
@@ -167,8 +267,10 @@ int main()
         if (is_key_down(KEY_UP))    ubo.data.keypress |=  (1<<3);
         else                        ubo.data.keypress &= ~(1<<3);
 
-        if (is_key_pressed(KEY_SPACE) && !is_key_down(KEY_LEFT_SHIFT)) ubo.data.index = (ubo.data.index + 1) % 4;
-        if (is_key_pressed(KEY_SPACE) && is_key_down(KEY_LEFT_SHIFT)) ubo.data.index = (ubo.data.index - 1 + 4) % 4;
+        if (is_key_pressed(KEY_SPACE) && !is_key_down(KEY_LEFT_SHIFT))
+            ubo.data.index = (ubo.data.index + 1) % mesh.vertices.count;
+        if (is_key_pressed(KEY_SPACE) && is_key_down(KEY_LEFT_SHIFT))
+            ubo.data.index = (ubo.data.index - 1 + mesh.vertices.count) % mesh.vertices.count;
 
         begin_drawing(BLACK);
             rvk_bind_gfx(pl.handle, pl.layout, &ds, 1);

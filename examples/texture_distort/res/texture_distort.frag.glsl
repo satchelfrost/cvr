@@ -30,14 +30,26 @@ void main()
     out_color = ((a+b)%2 == 0) ? SKYBLUE : DARKGRAY;
 
     // place a red circle over the current vertex we are moving
-    float x = 0.0f;
-    float y = 0.0f;
-    switch (ubo.index) {
-        case 0: x = 0.0; y = 0.0; break;
-        case 1: x = 1.0; y = 0.0; break;
-        case 2: x = 0.0; y = 1.0; break;
-        case 3: x = 1.0; y = 1.0; break;
-    }
+    // float x = 0.0f;
+    // float y = 0.0f;
+    // switch (ubo.index) {
+    //     case 0: x = 0.0; y = 0.0; break;
+    //     case 1: x = 0.5; y = 0.0; break;
+    //     case 2: x = 1.0; y = 0.0; break;
+    //     case 3: x = 0.0; y = 0.5; break;
+    //     case 4: x = 0.5; y = 0.5; break;
+    //     case 5: x = 1.0; y = 0.5; break;
+    //     case 6: x = 0.0; y = 1.0; break;
+    //     case 7: x = 0.5; y = 1.0; break;
+    //     case 8: x = 1.0; y = 1.0; break;
+    // }
+    
+    // 3x3
+    // float x = (ubo.index % 3)/2.0f;
+    // float y = (int(ubo.index/3.0f) % 3)/2.0f;
+    float x = (ubo.index % 5)/4.0f;
+    float y = (int(ubo.index/5.0f) % 5)/4.0f;
+
     float l = length(uv - vec2(x, y));
     if (l < 0.05) out_color = RED;
 }
