@@ -24,12 +24,6 @@ layout(std430, binding = 1) buffer depth_data {
 
 void main()
 {
-
-    // vec2 pos = position + vec2(ubo.f[0][gl_VertexIndex*2 + 0], ubo.f[0][gl_VertexIndex*2 + 1]);
-        // if (is_key_down(KEY_LEFT))  ubo.data.f[ubo.data.index*2 + 0] -= get_frame_time()*0.1*speedup;
-        // if (is_key_down(KEY_RIGHT)) ubo.data.f[ubo.data.index*2 + 0] += get_frame_time()*0.1*speedup;
-        // if (is_key_down(KEY_DOWN))  ubo.data.f[ubo.data.index*2 + 1] += get_frame_time()*0.1*speedup;
-        // if (is_key_down(KEY_UP))    ubo.data.f[ubo.data.index*2 + 1] -= get_frame_time()*0.1*speedup;
     if ((ubo.keypress & KEYPRESS_LEFT)  > 0) offsets[ubo.index].x -= ubo.speed;
     if ((ubo.keypress & KEYPRESS_RIGHT) > 0) offsets[ubo.index].x += ubo.speed;
     if ((ubo.keypress & KEYPRESS_DOWN)  > 0) offsets[ubo.index].y += ubo.speed;
