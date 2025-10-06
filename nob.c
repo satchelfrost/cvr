@@ -250,6 +250,20 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
     },
+    {
+        .name = "texture_distort",
+        .shaders = {
+            .names = (const char *[]) {
+                "texture_distort.vert.glsl",
+                "texture_distort.frag.glsl"
+            },
+            .count = 2
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+    },
 };
 
 typedef struct {

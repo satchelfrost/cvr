@@ -230,7 +230,51 @@ typedef struct {
 } Pipeline_Config;
 
 void rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout);
+
+typedef struct {
+    const void* p_next;
+    VkPipelineLayoutCreateFlags flags;
+    uint32_t set_layout_count;
+    const VkDescriptorSetLayout* p_set_layouts;
+    uint32_t push_constant_range_count;
+    const VkPushConstantRange* p_push_constant_ranges;
+} Rvk_Pipeline_Layout_Create_Info;
+
+#define rvk_create_pipeline_layout(pl_layout, ...) rvk_create_pipeline_layout_(pl_layout, (Rvk_Pipeline_Layout_Create_Info){__VA_ARGS__})
+void rvk_create_pipeline_layout_(VkPipelineLayout *pl_layout, Rvk_Pipeline_Layout_Create_Info ci);
+
 void rvk_basic_pl_init(Pipeline_Config config, VkPipeline *pl);
+
+typedef struct {
+    // vanilla
+    const void* p_next;
+    VkPipelineCreateFlags flags;
+    uint32_t stage_count;
+    const VkPipelineShaderStageCreateInfo* p_stages;
+    const VkPipelineVertexInputStateCreateInfo* p_vertex_input_state;
+    const VkPipelineInputAssemblyStateCreateInfo* p_input_assembly_state;
+    const VkPipelineTessellationStateCreateInfo* p_tessellation_state;
+    const VkPipelineViewportStateCreateInfo* p_viewport_state;
+    const VkPipelineRasterizationStateCreateInfo* p_rasterization_state;
+    const VkPipelineMultisampleStateCreateInfo* p_multisample_state;
+    const VkPipelineDepthStencilStateCreateInfo* p_depth_stencil_state;
+    const VkPipelineColorBlendStateCreateInfo* p_color_blend_state;
+    const VkPipelineDynamicStateCreateInfo* p_dynamic_state;
+    VkPipelineLayout layout;
+    VkRenderPass render_pass;
+    uint32_t subpass;
+    VkPipeline base_pipeline_handle;
+    int32_t base_pipeline_index;
+
+    // extended but lazily assumes this order
+    const char *vertex_shader_name;
+    const char *fragment_shader_name;
+} Rvk_Graphics_Pipeline_Create_Info;
+
+// notes that the name is create_graphics_pipelines with an "s" to be consistent with vkCreateGraphicsPipelines
+// however currently this only allows for creation of one pipeline at a time
+#define rvk_create_graphics_pipelines(pl, ...) rvk_create_graphics_pipelines_(pl, (Rvk_Graphics_Pipeline_Create_Info){__VA_ARGS__})
+void rvk_create_graphics_pipelines_(VkPipeline *pl, Rvk_Graphics_Pipeline_Create_Info ci);
 
 void rvk_wait_to_begin_gfx();
 void rvk_begin_rec_gfx();
@@ -293,6 +337,8 @@ void rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffe
 void rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+void rvk_upload_vtx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_buff_destroy(Rvk_Buffer buffer);
 void rvk_buff_map(Rvk_Buffer *buff);
 void rvk_buff_unmap(Rvk_Buffer buff);
@@ -890,6 +936,7 @@ void rvk_img_views_init()
 
 void rvk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
 {
+    rvk_log(RVK_ERROR, "rvk_basic_pl_init is deprecated in favor of rvk_create_graphics_pipelines");
     VkPipelineShaderStageCreateInfo stages[] = {
         {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -992,6 +1039,174 @@ void rvk_basic_pl_init(Pipeline_Config config, VkPipeline *pl)
     vkDestroyShaderModule(rvk_ctx.device, stages[1].module, NULL);
 }
 
+void rvk_create_graphics_pipelines_(VkPipeline *pl, Rvk_Graphics_Pipeline_Create_Info ci)
+{
+    VkGraphicsPipelineCreateInfo actual_ci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+
+    // shader modules
+    VkPipelineShaderStageCreateInfo stages_lazy_method[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pName = "main",
+        },
+    };
+    bool using_shader_lazy_method = false;
+    if (ci.stage_count && ci.p_stages) {
+        actual_ci.pStages = ci.p_stages;
+        actual_ci.stageCount= ci.stage_count;
+    } else if (ci.vertex_shader_name && ci.fragment_shader_name) {
+        using_shader_lazy_method = true;
+        rvk_shader_mod_init(ci.vertex_shader_name, &stages_lazy_method[0].module);
+        rvk_shader_mod_init(ci.fragment_shader_name, &stages_lazy_method[1].module);
+        actual_ci.pStages = stages_lazy_method;
+        actual_ci.stageCount= RVK_ARRAY_LEN(stages_lazy_method);
+    } else {
+        rvk_log(RVK_ERROR, "cannot create pipeline because of shaders, try option 1 or 2:");
+        rvk_log(RVK_ERROR, "    (1) lazy method: pass the shader names i.e. .vertex_shader_name and .fragment_shader_name (lazy method)");
+        rvk_log(RVK_ERROR, "    (2) explicit way: pass the shader stage create info i.e. .p_stages, and .stage_count i.e.");
+        rvk_log(RVK_ERROR, "        rvk_create_graphics_pipelines(&your_pl, ..., .stage_count=count, .p_stages=&stages)");
+        RVK_EXIT_APP;
+    }
+
+    // dynamic state
+    VkDynamicState default_dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo default_dynamic_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = RVK_ARRAY_LEN(default_dynamic_states),
+        .pDynamicStates = default_dynamic_states,
+    };
+    actual_ci.pDynamicState = (ci.p_dynamic_state) ? ci.p_dynamic_state : &default_dynamic_state_ci;
+
+    // this is wher you would specify things like the vertex attributes
+    actual_ci.pVertexInputState = ci.p_vertex_input_state;
+    if (!actual_ci.pVertexInputState) {
+        rvk_log(RVK_ERROR, "cannot create pipeline because vertex input state missing, try something like this:");
+        rvk_log(RVK_ERROR, "");
+        rvk_log(RVK_ERROR, "VkVertexInputAttributeDescription vert_attrs[] = {");
+        rvk_log(RVK_ERROR, "    { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, position), },");
+        rvk_log(RVK_ERROR, "    { .location = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, color),    },");
+        rvk_log(RVK_ERROR, "    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       };");
+        rvk_log(RVK_ERROR, "};");
+        rvk_log(RVK_ERROR, "VkVertexInputBindingDescription vert_bindings = {");
+        rvk_log(RVK_ERROR, "    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,");
+        rvk_log(RVK_ERROR, "    .stride    = sizeof(Your_Vertex),");
+        rvk_log(RVK_ERROR, "};");
+        rvk_log(RVK_ERROR, "VkPipelineVertexInputStateCreateInfo vertex_input_ci = {");
+        rvk_log(RVK_ERROR, "    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,");
+        rvk_log(RVK_ERROR, "    .vertexBindingDescriptionCount = 1,");
+        rvk_log(RVK_ERROR, "    .pVertexBindingDescriptions = &vert_bindings,");
+        rvk_log(RVK_ERROR, "    .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),");
+        rvk_log(RVK_ERROR, "    .pVertexAttributeDescriptions = vert_attrs,");
+        rvk_log(RVK_ERROR, "};");
+        rvk_log(RVK_ERROR, "");
+        rvk_log(RVK_ERROR, "Then pass that in i.e. rvk_create_graphics_pipelines(&your_pl, ..., .p_vertex_input_state=&vertex_input_ci)");
+        RVK_EXIT_APP;
+    }
+
+    // assembly / specifying the topology, defaults to triangles
+    VkPipelineInputAssemblyStateCreateInfo default_input_assembly_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, // hopefully a safe bet as a default
+    };
+    actual_ci.pInputAssemblyState = (ci.p_input_assembly_state) ? ci.p_input_assembly_state: &default_input_assembly_ci;
+
+    // viewport
+    VkViewport default_viewport = {
+        .width    = (float) rvk_ctx.extent.width,
+        .height   = (float) rvk_ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D default_scissor = {.extent = rvk_ctx.extent};
+    VkPipelineViewportStateCreateInfo default_viewport_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &default_viewport,
+        .scissorCount = 1,
+        .pScissors = &default_scissor,
+    };
+    actual_ci.pViewportState = (ci.p_viewport_state) ? ci.p_viewport_state : &default_viewport_state_ci;
+
+    // rasterizer
+    VkPipelineRasterizationStateCreateInfo default_rasterizer_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .lineWidth = 1.0f,
+        .cullMode = VK_CULL_MODE_NONE,
+    };
+    actual_ci.pRasterizationState = (ci.p_rasterization_state) ? ci.p_rasterization_state: &default_rasterizer_ci;
+
+    // multi sampling
+    VkPipelineMultisampleStateCreateInfo default_multisampling_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    actual_ci.pMultisampleState = (ci.p_multisample_state) ? ci.p_multisample_state : &default_multisampling_ci;
+
+    // color blend
+    VkPipelineColorBlendAttachmentState default_color_blend = {
+        .colorWriteMask = 0xf, // rgba
+        .blendEnable = VK_TRUE,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    };
+    VkPipelineColorBlendStateCreateInfo default_color_blend_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &default_color_blend,
+        .logicOp = VK_LOGIC_OP_COPY,
+    };
+    actual_ci.pColorBlendState = (ci.p_color_blend_state) ? ci.p_color_blend_state : &default_color_blend_ci;
+
+    if (!ci.layout) {
+        rvk_log(RVK_ERROR, "cannot create pipeline because pipeline layout was missing, try something like this:");
+        rvk_log(RVK_ERROR, "rvk_create_pipeline_layout(&your_pl_layout, ...)");
+        rvk_log(RVK_ERROR, "rvk_create_graphics_pipelines(&your_pl, ..., .layout=your_pl_layout)");
+        RVK_EXIT_APP;
+    }
+    actual_ci.layout = ci.layout;
+
+    // depth ci
+    VkPipelineDepthStencilStateCreateInfo default_depth_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .maxDepthBounds = 1.0f,
+    };
+    actual_ci.pDepthStencilState = (ci.p_depth_stencil_state) ? ci.p_depth_stencil_state: &default_depth_ci;
+
+    // render pass
+    if (ci.render_pass) {
+        actual_ci.renderPass = ci.render_pass;
+    } else if (rvk_ctx.render_pass) {
+        actual_ci.renderPass = rvk_ctx.render_pass;
+    } else {
+        rvk_log(RVK_ERROR, "cannot create pipeline because render pass was missing, options 1 or 2");
+        rvk_log(RVK_ERROR, "    (1) call rvk_render_pass_init() to use the default");
+        rvk_log(RVK_ERROR, "    (2) look at that function, create your own, and pass it in i.e. ");
+        rvk_log(RVK_ERROR, "        rvk_create_graphics_pipelines(&your_pl, ..., .render_pass=your_render_pass)");
+        RVK_EXIT_APP;
+    }
+
+
+    RAG_VK(vkCreateGraphicsPipelines(rvk_ctx.device, VK_NULL_HANDLE, 1, &actual_ci, NULL, pl));
+
+    if (using_shader_lazy_method) {
+        vkDestroyShaderModule(rvk_ctx.device, stages_lazy_method[0].module, NULL);
+        vkDestroyShaderModule(rvk_ctx.device, stages_lazy_method[1].module, NULL);
+    }
+}
+
 void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
 {
     /* setup shader stages */
@@ -1080,7 +1295,22 @@ void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
 
 void rvk_pl_layout_init(VkPipelineLayoutCreateInfo ci, VkPipelineLayout *pl_layout)
 {
+    rvk_log(RVK_WARNING, "rvk_pl_layout_init deprecated in favor of rvk_create_pipeline_layout");
     RAG_VK(vkCreatePipelineLayout(rvk_ctx.device, &ci, NULL, pl_layout));
+}
+
+void rvk_create_pipeline_layout_(VkPipelineLayout *pl_layout, Rvk_Pipeline_Layout_Create_Info ci)
+{
+    VkPipelineLayoutCreateInfo actual_ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    actual_ci.pNext = (ci.p_next) ? (ci.p_next) : NULL;
+    actual_ci.flags = (ci.flags) ? (ci.flags) : 0;
+    actual_ci.pSetLayouts = (ci.p_set_layouts) ? (ci.p_set_layouts) : NULL;
+    if (actual_ci.pSetLayouts) {
+        actual_ci.setLayoutCount = (ci.set_layout_count) ? (ci.set_layout_count) : 1;
+    }
+    actual_ci.pushConstantRangeCount = (ci.push_constant_range_count) ? (ci.push_constant_range_count) : 0;
+    actual_ci.pPushConstantRanges = (ci.p_push_constant_ranges) ? (ci.p_push_constant_ranges) : NULL;
+    RAG_VK(vkCreatePipelineLayout(rvk_ctx.device, &actual_ci, NULL, pl_layout));
 }
 
 void rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline)
@@ -1116,6 +1346,7 @@ void rvk_reset_pool(VkDescriptorPool pool)
     RAG_VK(vkResetDescriptorPool(rvk_ctx.device, pool, 0));
 }
 
+// TODO: make this obsolete with rvk_create_shader_module
 void rvk_shader_mod_init(const char *file_name, VkShaderModule *module)
 {
 #ifdef PLATFORM_ANDROID_QUEST
@@ -2138,6 +2369,34 @@ void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buff
         data,
         buffer
     );
+}
+
+void rvk_upload_vtx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
+{
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_VERTEX,
+        data,
+        buffer
+    );
+    rvk_buff_staged_upload(*buffer);
+}
+
+void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
+{
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_INDEX,
+        data,
+        buffer
+    );
+    rvk_buff_staged_upload(*buffer);
 }
 
 void rvk_buff_map(Rvk_Buffer *buff)
