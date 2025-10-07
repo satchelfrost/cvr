@@ -5,13 +5,15 @@
 #define SKYBLUE    vec4( 102/255.0f, 191/255.0f, 255/255.0f, 1.0f)
 
 layout(location = 0) in vec2 uv;
-layout(location = 1) in vec3 color;
 
 layout(location = 0) out vec4 out_color;
 
 layout(binding = 0) uniform ubo_data {
     int keypress;
     int index;
+    int tiles_per_side;
+    int mode;
+    int reset;
     float speed;
 } ubo;
 
@@ -19,37 +21,27 @@ layout(std430, binding = 1) buffer depth_data {
    vec2 offsets[ ];
 };
 
+layout(binding = 2) uniform sampler2D tex_sampler;
+
 void main()
 {
     // pretend the quad has 100 pixels
     ivec2 virtual_pixel_coord = ivec2(uv*vec2(100));
 
-    // every 25 virtual pixels swap which color for checkerboard
-    int a = (virtual_pixel_coord.x/25) % 2;
-    int b = (virtual_pixel_coord.y/25) % 2;
-    out_color = ((a+b)%2 == 0) ? SKYBLUE : DARKGRAY;
+    if (ubo.mode == 1) {
+        out_color = texture(tex_sampler, uv);
+    } else {
+        // checkerboard
+        int divisor = int(ceil(100.0f/float(ubo.tiles_per_side)));
+        int a = (virtual_pixel_coord.x/divisor) % 2;
+        int b = (virtual_pixel_coord.y/divisor) % 2;
+        out_color = ((a+b)%2 == 0) ? SKYBLUE : DARKGRAY;
+    }
 
     // place a red circle over the current vertex we are moving
-    // float x = 0.0f;
-    // float y = 0.0f;
-    // switch (ubo.index) {
-    //     case 0: x = 0.0; y = 0.0; break;
-    //     case 1: x = 0.5; y = 0.0; break;
-    //     case 2: x = 1.0; y = 0.0; break;
-    //     case 3: x = 0.0; y = 0.5; break;
-    //     case 4: x = 0.5; y = 0.5; break;
-    //     case 5: x = 1.0; y = 0.5; break;
-    //     case 6: x = 0.0; y = 1.0; break;
-    //     case 7: x = 0.5; y = 1.0; break;
-    //     case 8: x = 1.0; y = 1.0; break;
-    // }
-    
-    // 3x3
-    // float x = (ubo.index % 3)/2.0f;
-    // float y = (int(ubo.index/3.0f) % 3)/2.0f;
-    float x = (ubo.index % 5)/4.0f;
-    float y = (int(ubo.index/5.0f) % 5)/4.0f;
-
+    int verts_per_side = ubo.tiles_per_side + 1;
+    float x = (ubo.index % verts_per_side)/float(ubo.tiles_per_side);
+    float y = (int(ubo.index/verts_per_side) % verts_per_side)/float(ubo.tiles_per_side);
     float l = length(uv - vec2(x, y));
-    if (l < 0.05) out_color = RED;
+    if (l < 0.03) out_color = RED;
 }
