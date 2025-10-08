@@ -185,7 +185,8 @@ bool moved_in_direction(Movement m)
     return false;
 }
 
-bool write_config_file(Procedural_Mesh mesh, int tile_size)
+// TODO: pass sb by pointer, and boolean the header print
+bool write_config_file(Rvk_Buffer buff, int tile_size)
 {
     bool result = true;
     String_Builder sb = {0};
@@ -202,23 +203,124 @@ bool write_config_file(Procedural_Mesh mesh, int tile_size)
     sb_append_cstr(&sb, "+----------------+\n");
     sb_append_cstr(&sb, "end_header\n");
     sb_append_cstr(&sb, "front\n");
-    sb_append_cstr(&sb, temp_sprintf("%zu\n", mesh.vertices.count));
-    for (size_t i = 0; i < mesh.vertices.count; i++) {
-        Vector2 pos = mesh.vertices.items[i].pos;
-        sb_append_cstr(&sb, temp_sprintf("%f, %f\n", pos.x, pos.y));
-    }
+    size_t vertex_count = (tile_size+1)*(tile_size+1);
+    sb_append_cstr(&sb, temp_sprintf("%zu\n", vertex_count));
+    Vector2 *offsets = (Vector2 *)buff.mapped;
+    for (size_t i = 0; i < vertex_count; i++)
+        sb_append_cstr(&sb, temp_sprintf("%f,%f\n", offsets[i].x, offsets[i].y));
 
     const char *file_name = temp_sprintf("cave_config_%dx%d.txt", tile_size, tile_size);
     result = write_entire_file(file_name, sb.items, sb.count);
+    if (result) printf("successfully saved %s\n", file_name);
+    else printf("failed to write %s", file_name);
 
     sb_free(sb);
     return result;
 }
 
+Rvk_Buffer create_hos_vis_buff_from_existing(Rvk_Buffer existing)
+{
+    Rvk_Buffer host_vis = {0};
+    rvk_buff_init(
+        existing.size,
+        existing.count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT,    // so we can transer to this buffer
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, // so we can map
+        RVK_BUFFER_TYPE_COMPUTE,
+        existing.data,
+        &host_vis
+    );
+    rvk_buff_copy(host_vis, existing, 0);
+    rvk_buff_map(&host_vis);
+    // should we do a memcopy from the mapped to data?
+    return host_vis;
+}
+
 #define MESH_COUNT 4
 
-int main()
+typedef struct {
+    String_View *items;
+    size_t count;
+    size_t capacity;
+} String_Views;
+
+String_Views sv_splitlines(String_View sv)
 {
+    String_Views svs = {0};
+
+    while (sv.count) {
+        String_View lhs = sv_chop_by_delim(&sv, '\n');
+
+        // if carriage return, eliminate
+        if (lhs.count && lhs.data[lhs.count - 1] == '\r')
+            lhs.count--;
+
+        da_append(&svs, lhs);
+    }
+
+    return svs;
+}
+
+typedef enum {
+    PARSE_STATE_HEADER,
+    PARSE_STATE_WALL_NAME,
+    PARSE_STATE_VTX_COUNT,
+    PARSE_STATE_READ_VTX,
+} Parse_State;
+
+bool parse_config(const char *file_name, SSBO *ssbo)
+{
+    String_Builder sb = {0};
+    if (!nob_read_entire_file(file_name, &sb))
+        return false;
+
+    String_View sv = sb_to_sv(sb);
+    String_Views svs = sv_splitlines(sv);
+
+    Parse_State parse_state = PARSE_STATE_HEADER;
+    int vertex_count = 0;
+    int vertex_id = 0;
+    for (size_t i = 0; i < svs.count; i++) {
+        String_View sv = svs.items[i];
+        const char *line = temp_sv_to_cstr(sv);
+        switch (parse_state) {
+        case PARSE_STATE_HEADER:
+            if (strcmp(line, "end_header") == 0)
+                parse_state = PARSE_STATE_WALL_NAME;
+            break;
+        case PARSE_STATE_WALL_NAME:
+            parse_state = PARSE_STATE_VTX_COUNT;
+            printf("wall name: %s\n", line);
+            break;
+        case PARSE_STATE_VTX_COUNT:
+            vertex_count = atoi(line);
+            printf("vertex count %d\n", vertex_count);
+            parse_state = PARSE_STATE_READ_VTX;
+            break;
+        case PARSE_STATE_READ_VTX:
+            if (vertex_id < vertex_count) {
+                assert(vertex_count <= OFFSET_COUNT);
+                String_View lhs = sv_chop_by_delim(&sv, ',');
+                float x = strtof(temp_sv_to_cstr(lhs), NULL);
+                float y = strtof(temp_sv_to_cstr(sv), NULL);
+                ssbo->xy_offsets[vertex_id] = (Vector2){x, y};
+                if (++vertex_id == vertex_count)
+                    parse_state = PARSE_STATE_WALL_NAME;
+            }
+            break;
+        }
+    }
+
+    sb_free(sb);
+    return true;
+}
+
+int main(int argc, char **argv)
+{
+    shift(argv, argc); // program
+    char *cfg_file = NULL;
+    if (argc) cfg_file = shift(argv, argc);
+
     init_window(1000, 1000, "distortion mapping");
 
     // Rvk_Texture tex = load_texture_from_image("res/shrek_face.png");
@@ -250,8 +352,13 @@ int main()
     memcpy(ubo.buff.mapped, &ubo.data, sizeof(UBO_Data));
 
     SSBO ssbo = {0};
+    if (cfg_file) {
+        if (!parse_config(cfg_file, &ssbo)) return 1;
+        else printf("successfully loaded config file %s\n", cfg_file);
+    }
     rvk_comp_buff_init(OFFSET_COUNT*sizeof(Vector2), OFFSET_COUNT, ssbo.xy_offsets, &ssbo.buff);
     rvk_buff_staged_upload(ssbo.buff);
+    Rvk_Buffer copied_buff = {0};
 
     VkDescriptorSet ds;
     Rvk_Descriptor_Set_Layout ds_layout = {0};
@@ -314,11 +421,11 @@ int main()
     while (!window_should_close()) {
         float dt = get_frame_time();
 
-
         // handle input
         if (is_key_pressed(KEY_T) && !is_key_down(KEY_LEFT_SHIFT)) {
             mesh_idx = (mesh_idx + 1) % MESH_COUNT;
             ubo.data.tiles_per_side = mesh_idx + 1;
+            ubo.data.index = 0;
         }
         if (is_key_pressed(KEY_T) && is_key_down(KEY_LEFT_SHIFT)) {
             mesh_idx = (mesh_idx - 1 + MESH_COUNT) % MESH_COUNT;
@@ -350,6 +457,22 @@ int main()
             is_gamepad_button_pressed(GAMEPAD_BUTTON_LEFT_TRIGGER_1))
             ubo.data.index = (ubo.data.index - 1 + meshes[mesh_idx].vertices.count) % meshes[mesh_idx].vertices.count;
 
+        if (is_key_pressed(KEY_L)) {
+            rvk_wait_idle();
+            if (!copied_buff.handle)
+                copied_buff = create_hos_vis_buff_from_existing(ssbo.buff);
+            Vector2 *offsets = (Vector2 *)copied_buff.mapped;
+            for (size_t i = 0; i < meshes[mesh_idx].vertices.count; i++) {
+                printf("x = %f, y = %f\n", offsets[i].x, offsets[i].y);
+            }
+        }
+
+        if (is_key_pressed(KEY_W)) {
+            if (copied_buff.mapped) {
+                if (!write_config_file(copied_buff, mesh_idx + 1)) return 1;
+            }
+        }
+
         // handle drawing
         begin_drawing(BLACK);
             rvk_bind_gfx(pl.handle, pl.layout, &ds, 1);
@@ -365,6 +488,7 @@ int main()
     }
     rvk_buff_destroy(ubo.buff);
     rvk_buff_destroy(ssbo.buff);
+    rvk_buff_destroy(copied_buff);
     rvk_unload_texture(tex);
     rvk_destroy_descriptor_set_layout(ds_layout.handle);
     rvk_descriptor_pool_arena_destroy(arena);

@@ -2581,6 +2581,7 @@ void rvk_destroy_fence(VkFence fence)
     vkDestroyFence(rvk_ctx.device, fence, NULL);
 }
 
+// TODO: rvk_temp_cmd_buff
 VkCommandBuffer rvk_cmd_quick_begin()
 {
     VkCommandBuffer cmd_buff = VK_NULL_HANDLE;
