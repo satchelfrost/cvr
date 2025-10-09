@@ -138,6 +138,15 @@ typedef struct {
 } Rvk_Texture;
 
 typedef struct {
+    VkFramebuffer fb;
+    VkRenderPass rp;
+    Rvk_Texture depth;
+    Rvk_Texture color;
+    VkImageView img_views[2];
+    VkExtent2D extent;
+} Rvk_Render_Texture;
+
+typedef struct {
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_msgr;
     VkDebugReportCallbackEXT report_callback;
@@ -179,6 +188,7 @@ void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl);
 void rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, VkPipeline *pipeline);
 void rvk_shader_mod_init(const char *file_name, VkShaderModule *module);
 void rvk_render_pass_init(void);
+VkRenderPass rvk_create_basic_render_pass(void);
 void rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
 VkFormat rvk_surface_fmt(void);
 void rvk_destroy_render_pass(VkRenderPass render_pass);
@@ -338,6 +348,7 @@ void rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer
 void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_upload_vtx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+Rvk_Buffer rvk_upload_vtx_buff2(size_t size, size_t count, void *data);
 void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_buff_destroy(Rvk_Buffer buffer);
 void rvk_buff_map(Rvk_Buffer *buff);
@@ -395,6 +406,7 @@ bool rvk_has_unified_gfx_and_present_queue(VkPhysicalDevice phys_device);
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat fmt);
+Rvk_Render_Texture rvk_create_render_tex(VkExtent2D extent);
 void rvk_unload_texture(Rvk_Texture texture);
 void rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 void rvk_sampler_init(VkSampler *sampler);
@@ -1091,7 +1103,7 @@ void rvk_create_graphics_pipelines_(VkPipeline *pl, Rvk_Graphics_Pipeline_Create
         rvk_log(RVK_ERROR, "VkVertexInputAttributeDescription vert_attrs[] = {");
         rvk_log(RVK_ERROR, "    { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, position), },");
         rvk_log(RVK_ERROR, "    { .location = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, color),    },");
-        rvk_log(RVK_ERROR, "    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       };");
+        rvk_log(RVK_ERROR, "    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       },");
         rvk_log(RVK_ERROR, "};");
         rvk_log(RVK_ERROR, "VkVertexInputBindingDescription vert_bindings = {");
         rvk_log(RVK_ERROR, "    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,");
@@ -1151,13 +1163,7 @@ void rvk_create_graphics_pipelines_(VkPipeline *pl, Rvk_Graphics_Pipeline_Create
     // color blend
     VkPipelineColorBlendAttachmentState default_color_blend = {
         .colorWriteMask = 0xf, // rgba
-        .blendEnable = VK_TRUE,
-        .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .blendEnable = VK_FALSE,
     };
     VkPipelineColorBlendStateCreateInfo default_color_blend_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -1310,6 +1316,10 @@ void rvk_create_pipeline_layout_(VkPipelineLayout *pl_layout, Rvk_Pipeline_Layou
     }
     actual_ci.pushConstantRangeCount = (ci.push_constant_range_count) ? (ci.push_constant_range_count) : 0;
     actual_ci.pPushConstantRanges = (ci.p_push_constant_ranges) ? (ci.p_push_constant_ranges) : NULL;
+    if (actual_ci.pPushConstantRanges && !actual_ci.pushConstantRangeCount) {
+        rvk_log(RVK_ERROR, "rvk_create_pipeline_layout: push constant ranges set without a count");
+        RVK_EXIT_APP;
+    }
     RAG_VK(vkCreatePipelineLayout(rvk_ctx.device, &actual_ci, NULL, pl_layout));
 }
 
@@ -1436,6 +1446,67 @@ void rvk_render_pass_init()
     };
 
     RAG_VK(vkCreateRenderPass(rvk_ctx.device, &render_pass_ci, NULL, &rvk_ctx.render_pass));
+}
+
+VkRenderPass rvk_create_basic_render_pass()
+{
+    VkRenderPass rp;
+    VkAttachmentDescription color = {
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+    VkAttachmentReference color_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+    VkAttachmentDescription depth = {
+        .format = VK_FORMAT_D32_SFLOAT,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    };
+    VkAttachmentReference depth_ref = {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+    VkSubpassDependency dependency = {
+        .srcSubpass      = VK_SUBPASS_EXTERNAL,
+        .dstSubpass      = 0,
+        .srcStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask   = 0,
+        .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+    };
+
+    VkSubpassDescription subpass = {
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_ref,
+        .pDepthStencilAttachment = &depth_ref,
+    };
+    VkAttachmentDescription attachments[] = {color, depth};
+    VkRenderPassCreateInfo render_pass_ci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .attachmentCount = RVK_ARRAY_LEN(attachments),
+        .pAttachments = attachments,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+        .dependencyCount = 1,
+        .pDependencies = &dependency,
+    };
+
+    rvk_create_render_pass(&render_pass_ci, &rp);
+    return rp;
 }
 
 VkFormat rvk_surface_fmt()
@@ -2385,6 +2456,22 @@ void rvk_upload_vtx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buff
     rvk_buff_staged_upload(*buffer);
 }
 
+Rvk_Buffer rvk_upload_vtx_buff2(size_t size, size_t count, void *data)
+{
+    Rvk_Buffer buff = {0};
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_VERTEX,
+        data,
+        &buff
+    );
+    rvk_buff_staged_upload(buff);
+    return buff;
+}
+
 void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
 {
     rvk_buff_init(
@@ -2879,6 +2966,65 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
     texture.info.sampler     = sampler;
 
     return texture;
+}
+
+Rvk_Render_Texture rvk_create_render_tex(VkExtent2D extent)
+{
+    Rvk_Render_Texture rt = {0};
+    rt.extent = extent;
+    /* create the depth image */
+    rt.depth.img = (Rvk_Image) {
+        .extent = {extent.width, extent.height},
+        .aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT,
+        .format = VK_FORMAT_D32_SFLOAT,
+    };
+    rvk_img_init(
+        &rt.depth.img,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    rvk_img_view_init(rt.depth.img, &rt.depth.view);
+    rvk_sampler_init(&rt.depth.sampler);
+
+    /* book keeping */
+    rt.depth.info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    rt.depth.info.imageView   = rt.depth.view;
+    rt.depth.info.sampler     = rt.depth.sampler;
+
+    /* create the color image */
+    rt.color.img = (Rvk_Image) {
+        .extent = {extent.width, extent.height},
+        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+    };
+    rvk_img_init(
+        &rt.color.img,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+    rvk_img_view_init(rt.color.img, &rt.color.view);
+    rvk_sampler_init(&rt.color.sampler);
+
+    /* book keeping */
+    rt.color.info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    rt.color.info.imageView   = rt.color.view;
+    rt.color.info.sampler     = rt.color.sampler;
+
+    /* create the frame buffer which combines both depth and color */
+    rt.img_views[0] = rt.color.view;
+    rt.img_views[1] = rt.depth.view;
+
+    rt.rp = rvk_create_basic_render_pass();
+
+    rvk_create_frame_buff(
+        extent.width,
+        extent.height,
+        rt.img_views,
+        RVK_ARRAY_LEN(rt.img_views),
+        rt.rp,
+        &rt.fb
+    );
+    return rt;
 }
 
 void rvk_unload_texture(Rvk_Texture texture)

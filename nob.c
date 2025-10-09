@@ -264,6 +264,24 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
     },
+    {
+        .name = "render_texture",
+        .shaders = {
+            .names = (const char *[]) {
+                "render_texture.vert.glsl",
+                "render_texture.frag.glsl",
+                "texture.vert.glsl",
+                "texture.frag.glsl",
+                "default.vert.glsl",
+                "default.frag.glsl",
+            },
+            .count = 6
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+    },
 };
 
 typedef struct {
@@ -815,8 +833,8 @@ bool run_example_linux(Config config, const char *example_build_path)
     if (!cd(example_build_path)) nob_return_defer(false);
     const char *bin = nob_temp_sprintf("./%s", config.example->name);
     if (config.debug) {
-        // nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
-        nob_cmd_append(&cmd, "gdb", "-ex", "start", bin);
+        nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
+        // nob_cmd_append(&cmd, "gdb", "-ex", "start", bin);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     } else if (config.renderdoc) {
         /* open renderdoc to take a capture */
