@@ -256,7 +256,11 @@ bool load_gltf(Model *model)
     cgltf_options options = {0};
 
     /* parse the gltf file */
-    if (!nob_read_entire_file(model->file_name, &sb)) nob_return_defer(false);
+    if (!nob_read_entire_file(model->file_name, &sb)) {
+        rvk_log(RVK_ERROR, "failed read file for gltf");
+        rvk_log(RVK_ERROR, "do you have asset from https://github.com/raysan5/raylib/blob/master/examples/models/resources/models/gltf/robot.glb");
+        nob_return_defer(false);
+    }
     printf("file %s has %zu bytes\n", model->file_name, sb.count);
     cgltf_result res = cgltf_parse(&options, sb.items, sb.count, &data);
     if (res > cgltf_result_success) {

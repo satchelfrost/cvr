@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+// TODO: this feels too general
 typedef struct {
     Vector3 pos;
     Vector3 color;

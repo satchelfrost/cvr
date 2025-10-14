@@ -1342,8 +1342,10 @@ void rvk_create_pipeline_layout_(VkPipelineLayout *pl_layout, Rvk_Pipeline_Layou
     if (actual_ci.pSetLayouts) {
         actual_ci.setLayoutCount = (ci.set_layout_count) ? (ci.set_layout_count) : 1;
     }
-    actual_ci.pushConstantRangeCount = (ci.push_constant_range_count) ? (ci.push_constant_range_count) : 0;
     actual_ci.pPushConstantRanges = (ci.p_push_constant_ranges) ? (ci.p_push_constant_ranges) : NULL;
+    if (actual_ci.pPushConstantRanges) {
+        actual_ci.pushConstantRangeCount = (ci.push_constant_range_count) ? (ci.push_constant_range_count) : 1;
+    }
     if (actual_ci.pPushConstantRanges && !actual_ci.pushConstantRangeCount) {
         rvk_log(RVK_ERROR, "rvk_create_pipeline_layout: push constant ranges set without a count");
         RVK_EXIT_APP;
@@ -2781,7 +2783,7 @@ void rvk_cmd_quick_end(VkCommandBuffer *tmp_cmd_buff)
     vkFreeCommandBuffers(rvk_ctx.device, rvk_ctx.pool, 1, tmp_cmd_buff);
 }
 
-void transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
+void rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout)
 {
     VkCommandBuffer tmp_cmd_buff = rvk_cmd_quick_begin();
         VkPipelineStageFlags src_stg_mask;
@@ -2950,7 +2952,7 @@ void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent)
     rvk_cmd_quick_end(&tmp_cmd_buff);
 }
 
-int format_to_size(VkFormat fmt)
+int rvk_format_to_size(VkFormat fmt)
 {
     if (VK_FORMAT_R8G8B8A8_UNORM <= fmt && fmt <= VK_FORMAT_B8G8R8A8_SRGB) {
         return 4;
@@ -2988,7 +2990,7 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
 
     /* create staging buffer for image */
     Rvk_Buffer stg_buff = {0};
-    size_t size  = width * height * format_to_size(fmt);
+    size_t size  = width * height * rvk_format_to_size(fmt);
     size_t count = width * height;
     rvk_stage_buff_init(size, count, data, &stg_buff);
     RAG_VK(vkMapMemory(rvk_ctx.device, stg_buff.mem, 0, stg_buff.size, 0, &stg_buff.mapped));
@@ -3006,9 +3008,9 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    transition_img_layout(img.handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    rvk_transition_img_layout(img.handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     rvk_img_copy(img.handle, stg_buff.handle, img.extent);
-    transition_img_layout(
+    rvk_transition_img_layout(
         img.handle,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -3136,7 +3138,7 @@ void rvk_storage_tex_init(Rvk_Texture *texture, VkExtent2D extent)
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
 
-    transition_img_layout(
+    rvk_transition_img_layout(
         img.handle,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_GENERAL
