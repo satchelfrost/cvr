@@ -1,17 +1,22 @@
 #include "cvr.h"
 
-#define VK_CTX_IMPLEMENTATION
-#include "vk_ctx.h"
+#define RAG_VK_IMPLEMENTATION
+#include "rag_vk.h"
 
 #define RAYMATH_IMPLEMENTATION
-#include "ext/raylib-5.0/raymath.h"
+#include "raylib-5.0/raymath.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define GEOMETRY_IMPLEMENTATION
+#include "geometry.h"
 
 #if defined(_WIN32)
 #include <windows.h>
 #endif
 
-#include <time.h>     // used by nanosleep
-#include "geometry.h" // defines some default primitives
+#include <time.h> // used by nanosleep
 
 #define MAX_KEYBOARD_KEYS 512
 #define MAX_KEY_PRESSED_QUEUE 16
@@ -66,14 +71,14 @@ typedef struct {
 } Time;
 
 typedef struct {
-    Vk_Buffer vtx_buff;
-    Vk_Buffer idx_buff;
+    Rvk_Buffer vtx_buff;
+    Rvk_Buffer idx_buff;
     const Vertex *verts;
     const uint16_t *idxs;
 } Shape;
 
 typedef struct {
-    Vk_Buffer *items;
+    Rvk_Buffer *items;
     size_t count;
     size_t capacity;
 } Point_Clouds;
@@ -125,7 +130,7 @@ Shape shapes[SHAPE_COUNT];
 #endif
 const char *core_title;
 
-bool alloc_shape_res(Shape_Type shape_type);
+void alloc_shape_res(Shape_Type shape_type);
 bool is_shape_res_alloc(Shape_Type shape_type);
 void destroy_shape_res();
 
@@ -137,38 +142,37 @@ void destroy_shape_res();
     /* alternative backend here */
 #endif
 
-bool init_window(int width, int height, const char *title)
+void init_window(int width, int height, const char *title)
 {
     win_size.width = width;
     win_size.height = height;
     core_title = title;
 
-    if (!init_platform()) return false;
+    if (!init_platform())
+        assert(0 && "failed to initialize platform");
 
-    /* initialize vulkan */
-    if (!vk_init()) return false;
-    else return true;
+    rvk_init();
 }
 
 void close_window()
 {
-    vkDeviceWaitIdle(vk_ctx.device);
+    vkDeviceWaitIdle(rvk_ctx.device);
 
     for (size_t i = 0; i < DEFAULT_PL_COUNT; i++)
-        vk_destroy_pl_res(pipelines.handles[i], pipelines.layouts[i]);
+        rvk_destroy_pl_res(pipelines.handles[i], pipelines.layouts[i]);
 
     destroy_shape_res();
-    vk_destroy();
+    rvk_destroy();
     close_platform();
 }
 
 void enable_full_screen()
 {
     full_screen = true;
-    vk_log(VK_INFO, "fullscreen mode enabled");
+    rvk_log(RVK_INFO, "fullscreen mode enabled");
 }
 
-bool default_pl_fill_init()
+void default_pl_fill_init()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
@@ -180,7 +184,7 @@ bool default_pl_fill_init()
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_FILL])) return false;
+    rvk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_FILL]);
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -210,44 +214,40 @@ bool default_pl_fill_init()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = RVK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_FILL])) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_FILL]);
 }
 
 bool draw_shape(Shape_Type shape_type)
 {
     /* create basic shape pipeline if it hasn't been created */
-    if (!pipelines.handles[DEFAULT_PL_FILL])
-        if (!default_pl_fill_init()) return false;
-
+    if (!pipelines.handles[DEFAULT_PL_FILL]) default_pl_fill_init();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
     Matrix model = {0};
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
+        rvk_log(RVK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
 
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    Rvk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Rvk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
 
-    vk_bind_gfx(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], NULL, 0);
-    vk_push_const(pipelines.layouts[DEFAULT_PL_FILL], VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
-    vk_draw_buffers(vtx_buff, idx_buff);
+    rvk_bind_gfx(pipelines.handles[DEFAULT_PL_FILL], pipelines.layouts[DEFAULT_PL_FILL], NULL, 0);
+    rvk_push_const(pipelines.layouts[DEFAULT_PL_FILL], VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
+    rvk_draw_buffers(vtx_buff, idx_buff);
 
     return true;
 }
 
-bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
+void draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
 {
     if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
 
@@ -255,24 +255,22 @@ bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
-        return false;
+        rvk_log(RVK_ERROR, "No matrix stack, cannot draw.");
+        return;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
-    Vk_Buffer vtx_buff = shapes[shape].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape].idx_buff;
+    Rvk_Buffer vtx_buff = shapes[shape].vtx_buff;
+    Rvk_Buffer idx_buff = shapes[shape].idx_buff;
 
-    if (ds) vk_bind_gfx(pl, pl_layout, &ds, 1);
-    else vk_bind_gfx(pl, pl_layout, NULL, 0);
-    vk_push_const(pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
-    vk_draw_buffers(vtx_buff, idx_buff);
-
-    return true;
+    if (ds) rvk_bind_gfx(pl, pl_layout, &ds, 1);
+    else rvk_bind_gfx(pl, pl_layout, NULL, 0);
+    rvk_push_const(pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
+    rvk_draw_buffers(vtx_buff, idx_buff);
 }
 
-bool default_pl_wireframe_init()
+void default_pl_wireframe_init()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
@@ -284,8 +282,7 @@ bool default_pl_wireframe_init()
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pk_range,
     };
-    if (!vk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_WIREFRAME]))
-        return false;
+    rvk_pl_layout_init(layout_ci, &pipelines.layouts[DEFAULT_PL_WIREFRAME]);
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -315,39 +312,35 @@ bool default_pl_wireframe_init()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_LINE,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = RVK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_WIREFRAME])) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &pipelines.handles[DEFAULT_PL_WIREFRAME]);
 }
 
 bool draw_shape_wireframe(Shape_Type shape_type)
 {
     /* create basic wireframe pipeline if it hasn't been created */
-    if (!pipelines.handles[DEFAULT_PL_WIREFRAME])
-        if (!default_pl_wireframe_init()) return false;
-
+    if (!pipelines.handles[DEFAULT_PL_WIREFRAME]) default_pl_wireframe_init();
     if (!is_shape_res_alloc(shape_type)) alloc_shape_res(shape_type);
 
-    Vk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
-    Vk_Buffer idx_buff = shapes[shape_type].idx_buff;
+    Rvk_Buffer vtx_buff = shapes[shape_type].vtx_buff;
+    Rvk_Buffer idx_buff = shapes[shape_type].idx_buff;
     Matrix model = {0};
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
+        rvk_log(RVK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
 
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
 
-    vk_bind_gfx(pipelines.handles[DEFAULT_PL_WIREFRAME], pipelines.layouts[DEFAULT_PL_WIREFRAME], NULL, 0);
-    vk_push_const(pipelines.layouts[DEFAULT_PL_WIREFRAME], VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
-    vk_draw_buffers(vtx_buff, idx_buff);
+    rvk_bind_gfx(pipelines.handles[DEFAULT_PL_WIREFRAME], pipelines.layouts[DEFAULT_PL_WIREFRAME], NULL, 0);
+    rvk_push_const(pipelines.layouts[DEFAULT_PL_WIREFRAME], VK_SHADER_STAGE_VERTEX_BIT, sizeof(float16), &f16_mvp);
+    rvk_draw_buffers(vtx_buff, idx_buff);
 
     return true;
 }
@@ -355,7 +348,7 @@ bool draw_shape_wireframe(Shape_Type shape_type)
 Matrix get_proj(Camera camera)
 {
     Matrix proj = {0};
-    double aspect = vk_ctx.extent.width / (double) vk_ctx.extent.height;
+    double aspect = rvk_ctx.extent.width / (double) rvk_ctx.extent.height;
     double top = camera.fovy / 2.0;
     double right = top * aspect;
     switch (camera.projection) {
@@ -418,7 +411,7 @@ bool get_mvp(Matrix *mvp)
     bool result = true;
 
     Matrix model = {0};
-    if (!get_matrix_tos(&model)) vk_return_defer(false);
+    if (!get_matrix_tos(&model)) rvk_return_defer(false);
     *mvp = MatrixMultiply(model, matrices.view_proj);
 
 defer:
@@ -430,7 +423,7 @@ bool get_mvp_float16(float16 *mvp)
     bool result = true;
 
     Matrix m = {0};
-    if (!get_mvp(&m)) vk_return_defer(false);
+    if (!get_mvp(&m)) rvk_return_defer(false);
     *mvp = MatrixToFloatV(m);
 
 defer:
@@ -490,19 +483,24 @@ void end_timer()
     cvr_time.frame_count++;
 }
 
-void begin_drawing(Color color)
+void begin_frame()
 {
     begin_timer();
-    vk_wait_to_begin_gfx();
-    vk_begin_rec_gfx();
-    vk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
+    rvk_wait_to_begin_gfx();
+    rvk_begin_rec_gfx();
+}
+
+void begin_drawing(Color color)
+{
+    begin_frame();
+    rvk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
 }
 
 void end_drawing()
 {
-    vk_end_render_pass();
-    vk_end_rec_gfx();
-    vk_submit_gfx();
+    rvk_end_render_pass();
+    rvk_end_rec_gfx();
+    rvk_submit_gfx();
 
     end_timer();
     poll_input_events();
@@ -518,7 +516,7 @@ void push_matrix()
             mat_stack[mat_stack_p++] = MatrixIdentity();
         }
     } else {
-        vk_log(VK_ERROR, "matrix stack overflow");
+        rvk_log(RVK_ERROR, "matrix stack overflow");
     }
 }
 
@@ -527,7 +525,7 @@ void pop_matrix()
     if (mat_stack_p > 0)
         mat_stack_p--;
     else
-        vk_log(VK_ERROR, "matrix stack underflow");
+        rvk_log(RVK_ERROR, "matrix stack underflow");
 }
 
 void end_mode_3d()
@@ -541,7 +539,7 @@ void end_mode_3d()
     }
 
     if (leftover)
-        vk_log(VK_WARNING, "%d matrix stack(s) leftover", leftover);
+        rvk_log(RVK_WARNING, "%d matrix stack(s) leftover", leftover);
 }
 
 bool is_key_pressed(int key)
@@ -611,7 +609,7 @@ void add_matrix(Matrix matrix)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(matrix, mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available on current stack");
+        rvk_log(RVK_ERROR, "no matrix available on current stack");
 }
 
 void translate(float x, float y, float z)
@@ -619,7 +617,7 @@ void translate(float x, float y, float z)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixTranslate(x, y, z), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to translate");
+        rvk_log(RVK_ERROR, "no matrix available to translate");
 }
 
 void rotate(Vector3 axis, float angle)
@@ -627,7 +625,7 @@ void rotate(Vector3 axis, float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotate(axis, angle), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to rotate");
+        rvk_log(RVK_ERROR, "no matrix available to rotate");
 }
 
 void rotate_x(float angle)
@@ -635,7 +633,7 @@ void rotate_x(float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateX(angle), mat_stack[mat_stack_p - 1]);
     else
-    vk_log(VK_ERROR, "no matrix available to rotate x");
+    rvk_log(RVK_ERROR, "no matrix available to rotate x");
 }
 
 void rotate_y(float angle)
@@ -643,7 +641,7 @@ void rotate_y(float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateY(angle), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to rotate y");
+        rvk_log(RVK_ERROR, "no matrix available to rotate y");
 }
 
 void rotate_z(float angle)
@@ -651,7 +649,7 @@ void rotate_z(float angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZ(angle), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to rotate z");
+        rvk_log(RVK_ERROR, "no matrix available to rotate z");
 }
 
 void rotate_xyz(Vector3 angle)
@@ -659,7 +657,7 @@ void rotate_xyz(Vector3 angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateXYZ(angle), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to rotate xyz");
+        rvk_log(RVK_ERROR, "no matrix available to rotate xyz");
 }
 
 void rotate_zyx(Vector3 angle)
@@ -667,7 +665,7 @@ void rotate_zyx(Vector3 angle)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixRotateZYX(angle), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to rotate zyx");
+        rvk_log(RVK_ERROR, "no matrix available to rotate zyx");
 }
 
 void scale(float x, float y, float z)
@@ -675,43 +673,29 @@ void scale(float x, float y, float z)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(MatrixScale(x, y, z), mat_stack[mat_stack_p - 1]);
     else
-        vk_log(VK_ERROR, "no matrix available to scale");
+        rvk_log(RVK_ERROR, "no matrix available to scale");
 }
 
-bool alloc_shape_res(Shape_Type shape_type)
+void alloc_shape_res(Shape_Type shape_type)
 {
-    bool result = true;
-
     if (is_shape_res_alloc(shape_type)) {
-        vk_log(VK_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
-        vk_return_defer(false);
+        rvk_log(RVK_WARNING, "Shape resources for shape %d have already been allocated", shape_type);
+        return;
     }
 
     Shape *shape = &shapes[shape_type];
-    switch (shape_type) {
-#define X(CONST_NAME, array_name)                                                     \
-    case SHAPE_ ## CONST_NAME:                                                        \
-    shape->vtx_buff.count = CONST_NAME ## _VERTS;                                     \
-    shape->vtx_buff.size = sizeof(array_name ## _verts[0]) * shape->vtx_buff.count;   \
-    shape->verts = array_name ## _verts;                                              \
-    shape->idx_buff.count = CONST_NAME ## _IDXS;                                      \
-    shape->idx_buff.size = sizeof(array_name ## _indices[0]) * shape->idx_buff.count; \
-    shape->idxs = array_name ## _indices;                                             \
-    break;
-    SHAPE_LIST
-#undef X
-    default:
-        vk_log(VK_ERROR, "unrecognized shape %d", shape_type);
-        vk_return_defer(false);
-    }
+    void *data = primitives[shape_type].vtx_buff.items;
+    size_t count = primitives[shape_type].vtx_buff.count;
+    size_t size = primitives[shape_type].vtx_buff.size;
+    rvk_vtx_buff_init(size, count, data, &shape->vtx_buff);
 
-    if ((!vk_vtx_buff_upload(&shape->vtx_buff, shape->verts)) || (!vk_idx_buff_upload(&shape->idx_buff, shape->idxs))) {
-        vk_log(VK_ERROR, "failed to allocate resources for shape %d", shape_type);
-        vk_return_defer(false);
-    }
+    data = primitives[shape_type].idx_buff.items;
+    count = primitives[shape_type].idx_buff.count;
+    size = primitives[shape_type].idx_buff.size;
+    rvk_idx_buff_init(size, count, data, &shape->idx_buff);
 
-defer:
-    return result;
+    rvk_buff_staged_upload(shape->vtx_buff);
+    rvk_buff_staged_upload(shape->idx_buff);
 }
 
 bool is_shape_res_alloc(Shape_Type shape_type)
@@ -723,10 +707,8 @@ bool is_shape_res_alloc(Shape_Type shape_type)
 void destroy_shape_res()
 {
     for (size_t i = 0; i < SHAPE_COUNT; i++) {
-        if (shapes[i].vtx_buff.handle)
-            vk_buff_destroy(&shapes[i].vtx_buff);
-        if (shapes[i].idx_buff.handle)
-            vk_buff_destroy(&shapes[i].idx_buff);
+        if (shapes[i].vtx_buff.handle) rvk_buff_destroy(shapes[i].vtx_buff);
+        if (shapes[i].idx_buff.handle) rvk_buff_destroy(shapes[i].idx_buff);
     }
 }
 
@@ -872,10 +854,10 @@ bool is_mouse_button_down(int button)
     return mouse.curr_button_state[button] == 1;
 }
 
-bool draw_points(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
+bool draw_points(Rvk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count)
 {
     if (!vtx_buff.handle) {
-        vk_log(VK_ERROR, "vertex buffer was not uploaded for point cloud");
+        rvk_log(RVK_ERROR, "vertex buffer was not uploaded for point cloud");
         return false;
     }
 
@@ -883,12 +865,12 @@ bool draw_points(Vk_Buffer vtx_buff, VkPipeline pl, VkPipelineLayout pl_layout, 
     if (mat_stack_p) {
         model = mat_stack[mat_stack_p - 1];
     } else {
-        vk_log(VK_ERROR, "No matrix stack, cannot draw.");
+        rvk_log(RVK_ERROR, "No matrix stack, cannot draw.");
         return false;
     }
     Matrix mvp = MatrixMultiply(model, matrices.view_proj);
     float16 f16_mvp = MatrixToFloatV(mvp);
-    vk_draw_points(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
+    rvk_draw_points(vtx_buff, &f16_mvp, pl, pl_layout, ds_sets, ds_set_count);
 
     return true;
 }
@@ -942,7 +924,7 @@ void set_target_fps(int fps)
 {
     if (fps < 1) cvr_time.target = 0.0;
     else cvr_time.target = 1.0 / (double) fps;
-    vk_log(VK_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
+    rvk_log(RVK_INFO, "target fps: %02.03f ms", (float) cvr_time.target * 1000.0f);
 }
 
 void look_at(Camera camera)
@@ -954,7 +936,7 @@ void look_at(Camera camera)
     if (mat_stack_p > 0)
         mat_stack[mat_stack_p - 1] = MatrixMultiply(mat_stack[mat_stack_p - 1], inv);
     else
-        vk_log(VK_ERROR, "no matrix available to translate");
+        rvk_log(RVK_ERROR, "no matrix available to translate");
 }
 
 bool get_matrix_tos(Matrix *model)
@@ -962,7 +944,7 @@ bool get_matrix_tos(Matrix *model)
     if (mat_stack_p) {
         *model = mat_stack[mat_stack_p - 1];
     } else {
-        vk_log(VK_ERROR, "No matrix on stack");
+        rvk_log(RVK_ERROR, "No matrix on stack");
         return false;
     }
 
@@ -1005,17 +987,12 @@ Window_Size get_window_size()
     return win_size;
 }
 
-void wait_idle() // TODO: this should be in vk_ctx.h
-{
-    vkDeviceWaitIdle(vk_ctx.device);
-}
-
 void log_fps()
 {
     static int fps = -1;
     int curr_fps = get_fps();
     if (curr_fps != fps) {
-        vk_log(VK_INFO, "FPS %d (%.3f)", curr_fps, get_frame_time());
+        rvk_log(RVK_INFO, "FPS %d (%.3f)", curr_fps, get_frame_time());
         fps = curr_fps;
     }
 }
@@ -1029,3 +1006,33 @@ float get_mouse_wheel_move()
 
     return result;
 }
+
+Cvr_Image load_image(const char *file_name)
+{
+    Cvr_Image img = {0};
+    int channels;
+    img.data = stbi_load(file_name, &img.width, &img.height, &channels, STBI_rgb_alpha);
+
+    if (!img.data) {
+        rvk_log(RVK_ERROR, "image %s could not be loaded", file_name);
+    } else {
+        rvk_log(RVK_INFO, "image %s was successfully loaded", file_name);
+        rvk_log(RVK_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
+    }
+
+    return img;
+}
+
+Rvk_Texture load_texture(Cvr_Image img)
+{
+    Rvk_Texture t = rvk_load_texture(img.data, img.width, img.height, VK_FORMAT_R8G8B8A8_SRGB);
+    free(img.data);
+    return t;
+}
+
+Rvk_Texture load_texture_from_image(const char *file_name)
+{
+    return load_texture(load_image(file_name));
+}
+
+

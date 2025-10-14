@@ -12,7 +12,7 @@
 #include "geometry.h"
 
 #define PL_MPEG_IMPLEMENTATION
-#include "ext/pl_mpeg.h"     // https://github.com/phoboslab/pl_mpeg
+#include "pl_mpeg.h" // https://github.com/phoboslab/pl_mpeg
 
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
@@ -20,9 +20,20 @@
 #define FACTOR 50
 #define WIDTH  (16 * FACTOR)
 #define HEIGHT (9 * FACTOR)
-#define DUAL_THREADED        // disabling reverts to a single thread
+
+/* This is how many videos the example will try to decode.
+ * for one video, multi threading probably isn't necessary */
+#define VIDEO_IDX_COUNT 1
+
+/* Here we have a dual-threaded approach. One thread is constantly decoding and populating
+ * a queue, the other thread is dequeuing and drawing that texture to a quad.
+ * */
+// #define DUAL_THREADED        // disabling reverts to a single thread
+
+/* In the dual-threaded approach we have the classic producer-consumer problem.
+ * The queue print is a simple ascii visualization of who is winning:
+ * the decoding thread (producer), or drawing thread (consumer)*/
 // #define DEBUG_QUEUE_PRINT // disabling doesn't print the video queue
-// #define HIGH_RES          // high-res vs. low res videos
 
 typedef enum {
     VIDEO_PLANE_Y,
@@ -31,16 +42,15 @@ typedef enum {
     VIDEO_PLANE_COUNT,
 } Video_Plane_Type;
 
-#define VIDEO_IDX_COUNT 4
 
 typedef struct {
-    Vk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
-    Vk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    Rvk_Texture planes[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
+    Rvk_Buffer stg_buffs[VIDEO_IDX_COUNT * VIDEO_PLANE_COUNT];
     plm_t *plms[VIDEO_IDX_COUNT];
     float aspects[VIDEO_IDX_COUNT];
     plm_frame_t initial_frames[VIDEO_IDX_COUNT];
     VkDescriptorSet ds_sets[VIDEO_IDX_COUNT];
-    VkDescriptorSetLayout ds_layout;
+    Rvk_Descriptor_Set_Layout ds_layout;
     VkDescriptorPool ds_pool;
     VkPipelineLayout pl_layout;
     VkPipeline gfx_pl;
@@ -60,8 +70,9 @@ typedef struct {
 } Video_Queue;
 
 Video_Queue video_queue = {0};
+Rvk_Descriptor_Pool_Arena arena = {0};
 
-bool update_video_texture(void *data, size_t vid_idx, Video_Plane_Type vid_plane_type);
+void update_video_texture(void *data, size_t vid_idx, Video_Plane_Type vid_plane_type);
 
 void video_queue_init()
 {
@@ -106,7 +117,7 @@ bool video_enqueue()
     queue_str[MAX_QUEUED_FRAMES + 2] = 0;
     for (int i = 0; i < MAX_QUEUED_FRAMES; i++)
         queue_str[i + 1] = (i < video_queue.size) ? '*' : ' ';
-    vk_log(VK_INFO, "%s", queue_str);
+    rvk_log(RVK_INFO, "%s", queue_str);
 #endif
 
     /* first decode the frames */
@@ -157,9 +168,9 @@ bool video_dequeue()
         /* dequeue the next four video frames */
         for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
             plm_frame_t *saved = &video_queue.frames[i + video_queue.tail * VIDEO_IDX_COUNT];
-            if (!update_video_texture(saved->y.data, i, VIDEO_PLANE_Y))   return false;
-            if (!update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB)) return false;
-            if (!update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR)) return false;
+            update_video_texture(saved->y.data, i, VIDEO_PLANE_Y);
+            update_video_texture(saved->cb.data, i, VIDEO_PLANE_CB);
+            update_video_texture(saved->cr.data, i, VIDEO_PLANE_CR);
         }
         video_queue.tail = (video_queue.tail + 1) % MAX_QUEUED_FRAMES;
         video_queue.size--;
@@ -179,168 +190,155 @@ void *producer(void *arg)
                 plm_rewind(video_textures.plms[i]);
         }
     };
-    vk_log(VK_INFO, "producer finished");
+    rvk_log(RVK_INFO, "producer finished");
     return NULL;
 }
  
-bool setup_ds_layout()
+void setup_ds_layout()
 {
     VkDescriptorSetLayoutBinding tex_frag_bindings[] = {
-        {DS_BINDING(0, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
-        {DS_BINDING(1, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
-        {DS_BINDING(2, COMBINED_IMAGE_SAMPLER, FRAGMENT_BIT)},
+        {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+        {
+            .binding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+        {
+            .binding = 2,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        }
     };
-    VkDescriptorSetLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = VK_ARRAY_LEN(tex_frag_bindings),
-        .pBindings = tex_frag_bindings,
-    };
-    if (!vk_create_ds_layout(layout_ci, &video_textures.ds_layout)) return false;
-
-    return true;
+    rvk_ds_layout_init(tex_frag_bindings, RVK_ARRAY_LEN(tex_frag_bindings), &video_textures.ds_layout);
 }
 
-bool setup_ds_pool()
-{
-    VkDescriptorPoolSize pool_sizes = {
-        DS_POOL(COMBINED_IMAGE_SAMPLER, VIDEO_PLANE_COUNT * VIDEO_IDX_COUNT)
-    };
-    VkDescriptorPoolCreateInfo pool_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_sizes,
-        .maxSets = VIDEO_IDX_COUNT,
-    };
-
-    if (!vk_create_ds_pool(pool_ci, &video_textures.ds_pool)) return false;
-
-    return true;
-}
-
-bool setup_ds_sets()
+void setup_ds_sets()
 {
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
-        VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&video_textures.ds_layout, 1, video_textures.ds_pool)};
-        if (!vk_alloc_ds(alloc, &video_textures.ds_sets[i])) return false;
+        rvk_descriptor_pool_arena_alloc_set(&arena, &video_textures.ds_layout, &video_textures.ds_sets[i]);
 
-        VkDescriptorImageInfo y_img_info = {
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView  = video_textures.planes[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].view,
-            .sampler    = video_textures.planes[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].sampler,
-        };
-        VkDescriptorImageInfo cb_img_info = {
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView = video_textures.planes[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].view,
-            .sampler   = video_textures.planes[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].sampler,
-        };
-        VkDescriptorImageInfo cr_img_info = {
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .imageView = video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].view,
-            .sampler   = video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].sampler,
-        };
+        VkDescriptorImageInfo *y_img_info  = &video_textures.planes[VIDEO_PLANE_Y + i * VIDEO_PLANE_COUNT].info;
+        VkDescriptorImageInfo *cb_img_info = &video_textures.planes[VIDEO_PLANE_CB + i * VIDEO_PLANE_COUNT].info;
+        VkDescriptorImageInfo *cr_img_info = &video_textures.planes[VIDEO_PLANE_CR + i * VIDEO_PLANE_COUNT].info;
         VkWriteDescriptorSet writes[] = {
-            {DS_WRITE_IMG(0, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &y_img_info)},
-            {DS_WRITE_IMG(1, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cb_img_info)},
-            {DS_WRITE_IMG(2, COMBINED_IMAGE_SAMPLER, video_textures.ds_sets[i], &cr_img_info)},
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstBinding = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .dstSet = video_textures.ds_sets[i],
+                .pImageInfo = y_img_info,
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstBinding = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .dstSet = video_textures.ds_sets[i],
+                .pImageInfo = cb_img_info,
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstBinding = 2,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .dstSet = video_textures.ds_sets[i],
+                .pImageInfo = cr_img_info,
+            },
         };
-        vk_update_ds(VK_ARRAY_LEN(writes), writes);
+        rvk_update_ds(RVK_ARRAY_LEN(writes), writes);
     }
-
-    return true;
 }
 
-bool init_video_texture(void *data, int width, int height, size_t vid_idx, Video_Plane_Type vid_plane_type)
+void init_video_texture(void *data, int width, int height, size_t vid_idx, Video_Plane_Type vid_plane_type)
 {
-    bool result = true;
-
     /* create staging buffer for image */
-    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
-    stg_buff->size  = width * height * format_to_size(VK_FORMAT_R8_UNORM);
-    stg_buff->count = width * height;
-    if (!vk_stg_buff_init(stg_buff, data, true)) return false;
+    Rvk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
+    size_t size  = width * height * rvk_format_to_size(VK_FORMAT_R8_UNORM);
+    size_t count = width * height;
+    rvk_stage_buff_init(size, count, data, stg_buff);
+    rvk_buff_map(stg_buff);
 
     /* create the image */
-    Vk_Image vk_img = {
+    Rvk_Image rvk_img = {
         .extent  = {width, height},
         .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
         .format = VK_FORMAT_R8_UNORM,
     };
-    result = vk_img_init(
-        &vk_img,
+    rvk_img_init(
+        &rvk_img,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
     );
-    if (!result) return false;
 
-    transition_img_layout(
-        vk_img.handle,
+    rvk_transition_img_layout(
+        rvk_img.handle,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
-    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
-    transition_img_layout(
-        vk_img.handle,
+    rvk_img_copy(rvk_img.handle, stg_buff->handle, rvk_img.extent);
+    rvk_transition_img_layout(
+        rvk_img.handle,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
 
     /* create image view */
     VkImageView img_view;
-    if (!vk_img_view_init(vk_img, &img_view)) {
-        vk_log(VK_ERROR, "failed to create image view");
-        return false;
-    };
+    rvk_img_view_init(rvk_img, &img_view);
 
     VkSampler sampler;
-    if (!vk_sampler_init(&sampler)) return false;
+    rvk_sampler_init(&sampler);
 
-    Vk_Texture plane = {
+    Rvk_Texture plane = {
         .view = img_view,
         .sampler = sampler,
-        .img = vk_img,
+        .img = rvk_img,
+        .info = {
+            .sampler = sampler,
+            .imageView = img_view,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        },
     };
     video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT] = plane;
-
-    return true;
 }
 
-bool update_video_texture(void *data, size_t vid_idx, Video_Plane_Type vid_plane_type)
+void update_video_texture(void *data, size_t vid_idx, Video_Plane_Type vid_plane_type)
 {
-    bool result = true;
-
     /* create staging buffer for image */
-    Vk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
+    Rvk_Buffer *stg_buff = &video_textures.stg_buffs[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT];
     memcpy(stg_buff->mapped, data, stg_buff->size);
 
-    Vk_Image vk_img = video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT].img;
-    transition_img_layout(
-        vk_img.handle,
+    Rvk_Image rvk_img = video_textures.planes[vid_plane_type + vid_idx * VIDEO_PLANE_COUNT].img;
+    rvk_transition_img_layout(
+        rvk_img.handle,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
     );
-    vk_img_copy(vk_img.handle, stg_buff->handle, vk_img.extent);
-    transition_img_layout(
-        vk_img.handle,
+    rvk_img_copy(rvk_img.handle, stg_buff->handle, rvk_img.extent);
+    rvk_transition_img_layout(
+        rvk_img.handle,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
-
-    return result;
 }
 
-bool create_pipeline()
+void create_pipeline()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
-    VkPipelineLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pPushConstantRanges = &pk_range,
-        .pushConstantRangeCount = 1,
-        .pSetLayouts = &video_textures.ds_layout,
-        .setLayoutCount = 1,
-    };
-
-    if (!vk_pl_layout_init(layout_ci, &video_textures.pl_layout)) return false;
+    rvk_create_pipeline_layout(
+        &video_textures.pl_layout,
+        .p_push_constant_ranges = &pk_range,
+        .p_set_layouts = &video_textures.ds_layout.handle,
+    );
 
     /* create pipeline */
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -370,13 +368,11 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = RVK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init(config, &video_textures.gfx_pl)) return false;
-
-    return true;
+    rvk_basic_pl_init(config, &video_textures.gfx_pl);
 }
 
 int main()
@@ -397,7 +393,8 @@ int main()
         const char *file_name = "res/bjork-all-is-full-of-love.mpg";
         plm_t *plm = plm_create_with_filename(file_name);
         if (!plm) {
-            vk_log(VK_ERROR, "could not open file %s", file_name);
+            rvk_log(RVK_ERROR, "could not open file %s", file_name);
+            rvk_log(RVK_ERROR, "trying downloading https://phoboslab.org/files/bjork-all-is-full-of-love.mpg");
             return 1;
         } else {
             video_textures.plms[i] = plm;
@@ -419,18 +416,18 @@ int main()
         video_textures.initial_frames[i].y.data  = malloc(y_size);
         video_textures.initial_frames[i].cb.data = malloc(cb_size);
         video_textures.initial_frames[i].cr.data = malloc(cr_size);
-        vk_log(VK_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
-        vk_log(VK_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
-        vk_log(VK_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
-        if (!init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y))     return 1;
-        if (!init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB)) return 1;
-        if (!init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR)) return 1;
+        rvk_log(RVK_INFO, "y height %zu width %zu", frame->y.width, frame->y.height);
+        rvk_log(RVK_INFO, "cb height %zu width %zu", frame->cb.width, frame->cb.height);
+        rvk_log(RVK_INFO, "cr height %zu width %zu", frame->cr.width, frame->cr.height);
+        init_video_texture(frame->y.data, frame->y.width, frame->y.height, i, VIDEO_PLANE_Y);
+        init_video_texture(frame->cb.data, frame->cb.width, frame->cb.height, i, VIDEO_PLANE_CB);
+        init_video_texture(frame->cr.data, frame->cr.width, frame->cr.height, i, VIDEO_PLANE_CR);
     }
 
     /* setup descriptors */
-    if (!setup_ds_layout()) return 1;
-    if (!setup_ds_pool())   return 1;
-    if (!setup_ds_sets())   return 1;
+    rvk_descriptor_pool_arena_init(&arena);
+    setup_ds_layout();
+    setup_ds_sets();
 
 #ifdef DUAL_THREADED
     video_queue_init();
@@ -438,8 +435,7 @@ int main()
     pthread_create(&prod_thread, NULL, producer, NULL);
 #endif
 
-    /* setup the graphics pipeline */
-    if (!create_pipeline()) return 1;
+    create_pipeline();
 
     float vid_update_time = 0.0f;
     bool playback_finished = false;
@@ -461,21 +457,21 @@ int main()
                 vid_update_time = 0.0f;
             } else {
                 playback_finished = true;
-                vk_log(VK_INFO, "video could not dequeue, this shouldn't happen");
+                rvk_log(RVK_INFO, "video could not dequeue, this shouldn't happen");
                 return 1;
             }
-#else // On the fly decode, i.e. the slowest method
+#else // On the fly decode, i.e. decode now on this thread
             for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
                 plm_frame_t *frame = plm_decode_video(video_textures.plms[i]);
                 if (!frame) {
                     playback_finished = true;
-                    vk_log(VK_INFO, "playback finished!");
+                    rvk_log(RVK_INFO, "playback finished!");
                     return 1;
                 }
 
-                if (!update_video_texture(frame->y.data, i, VIDEO_PLANE_Y)) return 1;
-                if (!update_video_texture(frame->cb.data, i, VIDEO_PLANE_CB)) return 1;
-                if (!update_video_texture(frame->cr.data, i, VIDEO_PLANE_CR)) return 1;
+                update_video_texture(frame->y.data, i, VIDEO_PLANE_Y);
+                update_video_texture(frame->cb.data, i, VIDEO_PLANE_CB);
+                update_video_texture(frame->cr.data, i, VIDEO_PLANE_CR);
             }
             vid_update_time = 0.0f;
 #endif
@@ -487,9 +483,8 @@ int main()
                 for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
                     push_matrix();
                     scale(video_textures.aspects[i], 1.0f, 1.0f);
-                    translate(0.0f, i - 1.0f, 0.0f);
-                    if (!draw_shape_ex(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[i], SHAPE_QUAD))
-                        return 1;
+                    // translate(0.0f, i - 1.0f, 0.0f);
+                    draw_shape_ex(video_textures.gfx_pl, video_textures.pl_layout, video_textures.ds_sets[i], SHAPE_QUAD);
                     pop_matrix();
                 }
             end_mode_3d();
@@ -503,20 +498,21 @@ int main()
 #endif
 
     /* cleanup device */
-    wait_idle();
+    rvk_wait_idle();
     for (size_t i = 0; i < VIDEO_IDX_COUNT; i++) {
         plm_destroy(video_textures.plms[i]);
         free(video_textures.initial_frames[i].y.data);
         free(video_textures.initial_frames[i].cb.data);
         free(video_textures.initial_frames[i].cr.data);
         for (size_t j = 0; j < VIDEO_PLANE_COUNT; j++) {
-            vk_buff_destroy(&video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
-            vk_unload_texture(&video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
+            rvk_buff_destroy(video_textures.stg_buffs[j + i * VIDEO_PLANE_COUNT]);
+            rvk_unload_texture(video_textures.planes[j + i * VIDEO_PLANE_COUNT]);
         }
     }
-    vk_destroy_ds_layout(video_textures.ds_layout);
-    vk_destroy_ds_pool(video_textures.ds_pool);
-    vk_destroy_pl_res(video_textures.gfx_pl, video_textures.pl_layout);
+    rvk_destroy_descriptor_set_layout(video_textures.ds_layout.handle);
+    rvk_destroy_ds_pool(video_textures.ds_pool);
+    rvk_destroy_pl_res(video_textures.gfx_pl, video_textures.pl_layout);
+    rvk_descriptor_pool_arena_destroy(arena);
 
     close_window();
     return 0;

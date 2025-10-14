@@ -69,29 +69,7 @@ static const char *default_c_file_names[] = {"main"};
 
 static Example examples[] = {
     {
-        .name = "3d-primitives",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "orthographic",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "psychedelic",
+        .name = "cube",
         .shaders = {
             .names = default_shader_names,
             .count = NOB_ARRAY_LEN(default_shader_names)
@@ -113,7 +91,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "texture",
+        .name = "texture3D",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert.glsl",
@@ -129,29 +107,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "depth",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "movement",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "point-cloud",
+        .name = "point_cloud",
         .shaders = {
             .names = (const char *[]) {
                 "point-cloud.vert.glsl",
@@ -168,13 +124,11 @@ static Example examples[] = {
         .name = "compute",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert.glsl",
-                "default.frag.glsl",
-                "default.comp.glsl",
+                "velocity.comp.glsl",
                 "particle.vert.glsl",
                 "particle.frag.glsl",
             },
-            .count = 5,
+            .count = 3,
         },
         .c_files = {
             .names = default_c_file_names,
@@ -182,7 +136,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "point-raster",
+        .name = "point_raster",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert.glsl",
@@ -232,7 +186,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "mixed-raster",
+        .name = "mixed_raster",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert.glsl",
@@ -244,6 +198,38 @@ static Example examples[] = {
                 "resolve.comp.glsl",
             },
             .count = 7,
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+    },
+    {
+        .name = "texture_distort",
+        .shaders = {
+            .names = (const char *[]) {
+                "texture_distort.vert.glsl",
+                "texture_distort.frag.glsl"
+            },
+            .count = 2
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+    },
+    {
+        .name = "render_texture",
+        .shaders = {
+            .names = (const char *[]) {
+                "render_texture.vert.glsl",
+                "render_texture.frag.glsl",
+                "texture.vert.glsl",
+                "texture.frag.glsl",
+                "default.vert.glsl",
+                "default.frag.glsl",
+            },
+            .count = 6
         },
         .c_files = {
             .names = default_c_file_names,
@@ -396,11 +382,11 @@ bool build_glfw_linux(const char *platform_path)
     const char *build_path = nob_temp_sprintf("%s/glfw", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
     const char *output_path = nob_temp_sprintf("%s/glfw.o", build_path);
-    const char *input_path = nob_temp_sprintf("./src/ext/raylib-5.0/rglfw.c");
+    const char *input_path = nob_temp_sprintf("./external/raylib-5.0/rglfw.c");
     if (nob_needs_rebuild(output_path, &input_path, 1)) {
         nob_cmd_append(&cmd, "cc");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw");
         nob_cmd_append(&cmd, "-c", input_path);
         nob_cmd_append(&cmd, "-o", output_path);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
@@ -419,11 +405,11 @@ bool build_glfw_win(const char *platform_path)
     const char *build_path = nob_temp_sprintf("%s/glfw", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
     const char *output_path = nob_temp_sprintf("%s/glfw.o", build_path);
-    const char *input_path = nob_temp_sprintf("./src/ext/raylib-5.0/rglfw.c");
+    const char *input_path = nob_temp_sprintf("./external/raylib-5.0/rglfw.c");
     if (nob_needs_rebuild(output_path, &input_path, 1)) {
         nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-        nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
+        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw");
         nob_cmd_append(&cmd, "-c", input_path);
         nob_cmd_append(&cmd, "-o", output_path);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
@@ -463,7 +449,7 @@ bool build_cvr_linux(const char *platform_path)
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
-        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
+        const char *header_path = nob_temp_sprintf("./src/rag_vk.h", cvr[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
@@ -471,9 +457,9 @@ bool build_cvr_linux(const char *platform_path)
             nob_cmd_append(&cmd, "cc");
             nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-I./src/ext");
-            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
-            nob_cmd_append(&cmd, "-DENABLE_VALIDATION");
+            nob_cmd_append(&cmd, "-I./external");
+            nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-DVK_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
             Nob_Proc proc = nob_cmd_run_async(cmd);
@@ -516,7 +502,7 @@ bool build_cvr_win(const char *platform_path)
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
-        const char *header_path = nob_temp_sprintf("./src/vk_ctx.h", cvr[i]);
+        const char *header_path = nob_temp_sprintf("./src/rag_vk.h", cvr[i]);
         nob_da_append(&obj_files, output_path);
         if (nob_needs_rebuild(output_path, &input_path, 1) ||
             nob_needs_rebuild(output_path, &header_path, 1)) {
@@ -524,8 +510,8 @@ bool build_cvr_win(const char *platform_path)
             nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
             nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-I./src/ext");
-            nob_cmd_append(&cmd, "-I./src/ext/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-I./external");
+            nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
             Nob_Proc proc = nob_cmd_run_async(cmd);
@@ -639,6 +625,7 @@ bool build_example_linux(Config config, const char *build_path)
         nob_cmd_append(&cmd, "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
+        nob_cmd_append(&cmd, "-I./external");
         nob_cmd_append(&cmd, "-o", exec_path);
         nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
@@ -689,7 +676,7 @@ bool build_example_win(Config config, const char *build_path)
         cmd.count = 0;
         nob_cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
         nob_cmd_append(&cmd, "-I./src");
-        nob_cmd_append(&cmd, "-I./src/ext");
+        nob_cmd_append(&cmd, "-I./external");
         nob_cmd_append(&cmd, "-o", exec_path);
         nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
@@ -801,6 +788,7 @@ bool run_example_linux(Config config, const char *example_build_path)
     const char *bin = nob_temp_sprintf("./%s", config.example->name);
     if (config.debug) {
         nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
+        // nob_cmd_append(&cmd, "gdb", "-ex", "start", bin);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     } else if (config.renderdoc) {
         /* open renderdoc to take a capture */

@@ -1,7 +1,7 @@
 #include "cvr.h"
 #include "geometry.h"
 
-#define PARTICLE_COUNT 800
+#define PARTICLE_COUNT 512
 
 typedef struct {
     Vector2 pos;
@@ -12,11 +12,12 @@ typedef struct {
 static Particle particles[PARTICLE_COUNT];
 
 /* Vulkan state */
+Rvk_Descriptor_Pool_Arena arena = {0};
+Rvk_Descriptor_Set_Layout compute_ds_layout = {0};
 VkDescriptorSet compute_ds;
-VkDescriptorSetLayout compute_ds_layout;
+
 VkPipelineLayout compute_pl_layout;
 VkPipeline compute_pl;
-VkDescriptorPool pool;
 VkPipeline gfx_pl;
 VkPipelineLayout gfx_pl_layout;
 
@@ -45,122 +46,128 @@ void init_particles(Particle *particles, float width, float height)
         particle->velocity = Vector2Normalize(particle->pos);
         particle->velocity.x *= 0.0025f;
         particle->velocity.y *= 0.0025f;
-        particle->color = color_to_vec4(colors[i % VK_ARRAY_LEN(colors)]);
+        particle->color = color_to_vec4(colors[i % RVK_ARRAY_LEN(colors)]);
     }
 }
 
-bool setup_ds_layout()
+void setup_ds_layout()
 {
     VkDescriptorSetLayoutBinding bindings[] = {
-        {DS_BINDING(0, UNIFORM_BUFFER, COMPUTE_BIT)},
-        {DS_BINDING(1, STORAGE_BUFFER, COMPUTE_BIT)},
+        {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        },
+        {
+            .binding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        }
     };
-    VkDescriptorSetLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = VK_ARRAY_LEN(bindings),
-        .pBindings = bindings,
-    };
-    return vk_create_ds_layout(layout_ci, &compute_ds_layout);
+    rvk_ds_layout_init(bindings, RVK_ARRAY_LEN(bindings), &compute_ds_layout);
 }
 
-bool setup_ds_pool()
-{
-    VkDescriptorPoolSize pool_sizes[] = {
-        {DS_POOL(UNIFORM_BUFFER, 1)},
-        {DS_POOL(STORAGE_BUFFER, 1)},
-    };
-    VkDescriptorPoolCreateInfo pool_ci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = VK_ARRAY_LEN(pool_sizes),
-        .pPoolSizes = pool_sizes,
-        .maxSets = 1,
-    };
-    return vk_create_ds_pool(pool_ci, &pool);
-}
-
-bool setup_ds(Vk_Buffer ubo, Vk_Buffer comp_buff)
+void setup_ds(Rvk_Buffer ubo, Rvk_Buffer comp_buff)
 {
     /* allocate descriptor sets based on layouts */
-    VkDescriptorSetAllocateInfo alloc = {DS_ALLOC(&compute_ds_layout, 1, pool)};
-    if (!vk_alloc_ds(alloc, &compute_ds)) return false;
+    rvk_descriptor_pool_arena_alloc_set(&arena, &compute_ds_layout, &compute_ds);
 
     /* update descriptor sets */
-    VkDescriptorBufferInfo ubo_info = {
-        .buffer = ubo.handle,
-        .range = ubo.size,
-    };
-    VkDescriptorBufferInfo comp_info = {
-        .buffer = comp_buff.handle,
-        .range = comp_buff.size,
-    };
     VkWriteDescriptorSet writes[] = {
-        {DS_WRITE_BUFF(0, UNIFORM_BUFFER, compute_ds,  &ubo_info)},
-        {DS_WRITE_BUFF(1, STORAGE_BUFFER, compute_ds,  &comp_info)},
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstBinding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .dstSet = compute_ds,
+            .pBufferInfo = &ubo.info,
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstBinding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .dstSet = compute_ds,
+            .pBufferInfo = &comp_buff.info,
+        },
     };
-    vk_update_ds(VK_ARRAY_LEN(writes), writes);
-
-    return true;
+    rvk_update_ds(RVK_ARRAY_LEN(writes), writes);
 }
 
-bool create_pipeline()
+void create_pipelines()
 {
+    /* compute pipeline to handle velocities of particles */
     VkPipelineLayoutCreateInfo layout_ci = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
-        .pSetLayouts = &compute_ds_layout,
+        .pSetLayouts = &compute_ds_layout.handle,
     };
-    if (!vk_pl_layout_init(layout_ci, &compute_pl_layout))                             return false;
-    if (!vk_compute_pl_init("./res/default.comp.glsl.spv", compute_pl_layout, &compute_pl)) return false;
+    rvk_pl_layout_init(layout_ci, &compute_pl_layout);
+    rvk_compute_pl_init("./res/velocity.comp.glsl.spv", compute_pl_layout, &compute_pl);
 
-    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .size = sizeof(float16)};
-    layout_ci.pushConstantRangeCount = 1;
-    layout_ci.pPushConstantRanges = &pk_range;
-    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
+    /* pipeline to render points */
+    rvk_create_pipeline_layout(&gfx_pl_layout);
     VkVertexInputAttributeDescription vert_attrs[] = {
-        {
-            .format = VK_FORMAT_R32G32_SFLOAT, // position
-        },
-        {
-            .location = 1,
-            .format = VK_FORMAT_R32G32B32A32_SFLOAT, // color
-            .offset = 16,
-        },
+        { .location = 0, .format = VK_FORMAT_R32G32_SFLOAT,       .offset = offsetof(Particle, pos),  },
+        { .location = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(Particle, color),},
     };
     VkVertexInputBindingDescription vert_bindings = {
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-        .stride    = sizeof(Vertex),
+        .stride    = sizeof(Particle),
     };
-    Pipeline_Config config = {
-        .pl_layout = gfx_pl_layout,
-        .vert = "./res/particle.vert.glsl.spv",
-        .frag = "./res/particle.frag.glsl.spv",
+    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &vert_bindings,
+        .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),
+        .pVertexAttributeDescriptions = vert_attrs,
+    };
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
-        .polygon_mode = VK_POLYGON_MODE_POINT,
-        .vert_attrs = vert_attrs,
-        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
-        .vert_bindings = &vert_bindings,
-        .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init(config, &gfx_pl)) return false;
-
-    return true;
+    VkPipelineRasterizationStateCreateInfo rasterizer_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_POINT,
+        .lineWidth = 1.0f,
+        .cullMode = VK_CULL_MODE_NONE,
+    };
+    VkPipelineColorBlendAttachmentState color_blend = {
+        .colorWriteMask = 0xf, // rgba
+        .blendEnable = VK_TRUE,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    };
+    VkPipelineColorBlendStateCreateInfo color_blend_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend,
+        .logicOp = VK_LOGIC_OP_COPY,
+    };
+    rvk_create_graphics_pipelines(
+        &gfx_pl,
+        .vertex_shader_name = "./res/particle.vert.glsl.spv",
+        .fragment_shader_name = "./res/particle.frag.glsl.spv",
+        .p_vertex_input_state = &vertex_input_ci,
+        .layout = gfx_pl_layout,
+        .p_input_assembly_state = &input_assembly_ci,
+        .p_rasterization_state = &rasterizer_ci,
+        .p_color_blend_state = &color_blend_ci,
+    );
 }
 
 int main()
 {
-    /* initialize buffers */
-    Vk_Buffer comp_buff = {
-        .size  = PARTICLE_COUNT * sizeof(Particle),
-        .count = PARTICLE_COUNT,
-    };
     float width  = 800.0f;
     float height = 600.0f;
     init_particles(particles, width, height);
-    Vk_Buffer ubo = {.size = sizeof(float), .count = 1};
 
-    /* init window and Vulkan */
-    init_window(width, height, "Compute Shader");
-    set_target_fps(60);
     Camera camera = {
         .position   = {0.0f, 2.0f, 5.0f},
         .target     = {0.0f, 0.0f, 0.0f},
@@ -169,48 +176,44 @@ int main()
         .projection = PERSPECTIVE,
     };
 
-    if (!vk_comp_buff_staged_upload(&comp_buff, particles)) return 1;
-    if (!vk_ubo_init(&ubo)) return 1;
+    /* init window and Vulkan */
+    init_window(width, height, "Compute Shader");
 
-    /* setup descriptors */
-    if (!setup_ds_layout())        return 1;
-    if (!setup_ds_pool())          return 1;
-    if (!setup_ds(ubo, comp_buff)) return 1;
-
-    /* setup pipelines */
-    if (!create_pipeline()) return 1;
-
-    /* record compute commands */
-    if (!vk_rec_compute()) return 1;
-        /* +1 in case PARTICLE_COUNT is not a multiple of 256 */
-        size_t group_x = PARTICLE_COUNT / 256 + 1;
-        vk_compute(compute_pl, compute_pl_layout, compute_ds, group_x, 1, 1);
-    if (!vk_end_rec_compute()) return 1;
-
+    /* initialize some vulkan resources */
+    Rvk_Buffer comp_buff = rvk_upload_compute_buff(PARTICLE_COUNT * sizeof(Particle), PARTICLE_COUNT, particles);
     float time = 0.0f;
-    while (!window_should_close()) {
-        vk_compute_fence_wait();
-        if (!vk_submit_compute()) return 1;
+    Rvk_Buffer ubo = rvk_create_mapped_uniform_buff(sizeof(float), &time);
+    rvk_descriptor_pool_arena_init(&arena);
+    setup_ds_layout();
+    setup_ds(ubo, comp_buff);
+    create_pipelines();
 
-        begin_drawing(BLACK);
-        begin_mode_3d(camera);
-            Matrix mvp = {0};
-            if (!get_mvp(&mvp)) return 1;
-            float16 f16_mvp = MatrixToFloatV(mvp);
-            vk_draw_points(comp_buff, &f16_mvp, gfx_pl, gfx_pl_layout, NULL, 0);
-            time = get_time();
-            memcpy(ubo.mapped, &time, sizeof(float));
-        end_mode_3d();
-        end_drawing();
+    set_target_fps(60);
+    while (!window_should_close()) {
+        begin_frame();
+        /* record compute commands */
+        size_t group_x = ceilf(PARTICLE_COUNT / 256.0f);
+        rvk_dispatch(compute_pl, compute_pl_layout, compute_ds, group_x, 1, 1);
+
+        rvk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
+            /* record drawing commands */
+            begin_mode_3d(camera);
+                rvk_bind_gfx(gfx_pl, gfx_pl_layout, NULL, 0);
+                rvk_bind_vertex_buffers(comp_buff);
+                rvk_cmd_draw(comp_buff);
+                time = get_time();
+                memcpy(ubo.mapped, &time, sizeof(float));
+            end_mode_3d();
+        end_drawing(); // ends rendering pass
     }
 
-    wait_idle();
-    vk_buff_destroy(&ubo);
-    vk_buff_destroy(&comp_buff);
-    vk_destroy_ds_pool(pool);
-    vk_destroy_ds_layout(compute_ds_layout);
-    vk_destroy_pl_res(compute_pl, compute_pl_layout);
-    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
+    rvk_wait_idle();
+    rvk_buff_destroy(ubo);
+    rvk_buff_destroy(comp_buff);
+    rvk_descriptor_pool_arena_destroy(arena);
+    rvk_destroy_descriptor_set_layout(compute_ds_layout.handle);
+    rvk_destroy_pl_res(compute_pl, compute_pl_layout);
+    rvk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     close_window();
     return 0;
 }

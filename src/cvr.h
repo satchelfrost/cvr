@@ -5,8 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vulkan/vulkan_core.h>
-#include "vk_ctx.h"
-#include "ext/raylib-5.0/raymath.h"
+#include "rag_vk.h"
+#include "raylib-5.0/raymath.h"
 
 /* 
  * The following header contains modifications from the original source "raylib.h",
@@ -224,8 +224,8 @@ typedef struct {
 } Camera;
 
 typedef enum {
-    SHAPE_CUBE = 0,
     SHAPE_QUAD,
+    SHAPE_CUBE,
     SHAPE_TETRAHEDRON,
     SHAPE_CAM,
     SHAPE_COUNT,
@@ -237,7 +237,7 @@ typedef struct {
 } Window_Size;
 
 /* window */
-bool init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
+void init_window(int width, int height, const char *title); /* Initialize window and vulkan context */
 void close_window();                                        /* Close window and vulkan context */
 void enable_full_screen();
 bool window_should_close();                                 /* Check if window should close and poll events */
@@ -256,11 +256,16 @@ void end_mode_3d();                                         /* Pops matrix, chec
 
 /* drawing */
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
+
+/* called by begin drawing, but doesn't start the rendering pass, useful for compute where you
+ * don't want to immeidately begin the rendering pass, but still want to start recording commands (such as compute). */
+void begin_frame();
+
 void end_drawing();                                         /* Submits commands, presents, and polls for input */
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
-bool draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
+void draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
 bool draw_shape_wireframe(Shape_Type shape_type);           /* Draw one of the existing shapes (wireframe) */
-bool draw_points(Vk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
+bool draw_points(Rvk_Buffer buff, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 
 /* gpu compute */
 void begin_compute();
@@ -278,6 +283,15 @@ bool is_mouse_button_down(int button);
 float get_mouse_wheel_move();
 int get_last_btn_pressed();
 void poll_input_events();
+
+typedef struct {
+    int width, height;
+    void *data;
+} Cvr_Image;
+
+Cvr_Image load_image(const char *file_name);
+Rvk_Texture load_texture(Cvr_Image img);
+Rvk_Texture load_texture_from_image(const char *file_name);
 
 /* time */
 double get_frame_time();
@@ -308,8 +322,5 @@ Matrix get_view_proj();
 
 /* color */
 Color color_from_HSV(float hue, float saturation, float value);
-
-/* GPU */
-void wait_idle();
 
 #endif // CVR_H_
