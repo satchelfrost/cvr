@@ -483,11 +483,16 @@ void end_timer()
     cvr_time.frame_count++;
 }
 
-void begin_drawing(Color color)
+void begin_frame()
 {
     begin_timer();
     rvk_wait_to_begin_gfx();
     rvk_begin_rec_gfx();
+}
+
+void begin_drawing(Color color)
+{
+    begin_frame();
     rvk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
 }
 

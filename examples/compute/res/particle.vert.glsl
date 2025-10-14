@@ -1,10 +1,5 @@
 #version 450
 
-layout(push_constant) uniform constants
-{
-    mat4 mvp;
-} push_const;
-
 layout(location = 0) in vec2 inPosition;
 layout(location = 1) in vec4 inColor;
 

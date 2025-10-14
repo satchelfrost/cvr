@@ -69,29 +69,7 @@ static const char *default_c_file_names[] = {"main"};
 
 static Example examples[] = {
     {
-        .name = "3d-primitives",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "orthographic",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "psychedelic",
+        .name = "cube",
         .shaders = {
             .names = default_shader_names,
             .count = NOB_ARRAY_LEN(default_shader_names)
@@ -129,29 +107,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "depth",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "movement",
-        .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
-        },
-        .c_files = {
-            .names = default_c_file_names,
-            .count = NOB_ARRAY_LEN(default_c_file_names)
-        },
-    },
-    {
-        .name = "point-cloud",
+        .name = "point_cloud",
         .shaders = {
             .names = (const char *[]) {
                 "point-cloud.vert.glsl",
@@ -168,13 +124,11 @@ static Example examples[] = {
         .name = "compute",
         .shaders = {
             .names = (const char *[]) {
-                "default.vert.glsl",
-                "default.frag.glsl",
-                "default.comp.glsl",
+                "velocity.comp.glsl",
                 "particle.vert.glsl",
                 "particle.frag.glsl",
             },
-            .count = 5,
+            .count = 3,
         },
         .c_files = {
             .names = default_c_file_names,
@@ -182,7 +136,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "point-raster",
+        .name = "point_raster",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert.glsl",
@@ -232,7 +186,7 @@ static Example examples[] = {
         },
     },
     {
-        .name = "mixed-raster",
+        .name = "mixed_raster",
         .shaders = {
             .names = (const char *[]) {
                 "default.vert.glsl",

@@ -256,6 +256,11 @@ void end_mode_3d();                                         /* Pops matrix, chec
 
 /* drawing */
 void begin_drawing(Color color);                            /* Vulkan for commands, set clear color */
+
+/* called by begin drawing, but doesn't start the rendering pass, useful for compute where you
+ * don't want to immeidately begin the rendering pass, but still want to start recording commands (such as compute). */
+void begin_frame();
+
 void end_drawing();                                         /* Submits commands, presents, and polls for input */
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 void draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);

@@ -12,7 +12,7 @@
 #include "cvr.h"
 
 #define CGLTF_IMPLEMENTATION
-#include "ext/cgltf.h" // https://github.com/jkuhlmann/cgltf
+#include "cgltf.h" // https://github.com/jkuhlmann/cgltf
 
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
@@ -32,8 +32,8 @@ typedef struct {
 typedef struct {
     Gltf_Vertex *vertices;
     unsigned short *indices;
-    Vk_Buffer vtx_buff;
-    Vk_Buffer idx_buff;
+    Rvk_Buffer vtx_buff;
+    Rvk_Buffer idx_buff;
     unsigned char *bone_ids;
     float *bone_weights;
 } Mesh;
@@ -379,19 +379,14 @@ void unload_model(Model *model)
     free(model->meshes);
 }
 
-bool create_pipeline()
+void create_pipeline()
 {
     /* create pipeline layout */
     VkPushConstantRange pk_range = {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
         .size = sizeof(Push_Const),
     };
-    VkPipelineLayoutCreateInfo layout_ci = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pk_range,
-    };
-    if (!vk_pl_layout_init(layout_ci, &gfx_pl_layout)) return false;
+    rvk_create_pipeline_layout(&gfx_pl_layout, .p_push_constant_ranges = &pk_range, .push_constant_range_count = 1);
 
     /* create pipeline */ 
     VkVertexInputAttributeDescription vert_attrs[] = {
@@ -416,13 +411,12 @@ bool create_pipeline()
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .polygon_mode = VK_POLYGON_MODE_FILL,
         .vert_attrs = vert_attrs,
-        .vert_attr_count = VK_ARRAY_LEN(vert_attrs),
+        .vert_attr_count = RVK_ARRAY_LEN(vert_attrs),
         .vert_bindings = &vert_bindings,
         .vert_binding_count = 1,
     };
-    if (!vk_basic_pl_init(config, &gfx_pl)) return false;
+    rvk_basic_pl_init(config, &gfx_pl);
 
-    return true;
 }
 
 int main()
@@ -438,12 +432,14 @@ int main()
     Model robot = {.file_name = "res/robot.glb"};
     if (!load_gltf(&robot)) return 1;
 
-    if (!init_window(800, 600, "gltf")) return 1;
-    if (!create_pipeline()) return 1;
+    init_window(800, 600, "gltf");
+    create_pipeline();
 
     for (size_t i = 0; i < robot.mesh_count; i++) {
-        if (!vk_vtx_buff_staged_upload(&robot.meshes[i].vtx_buff, robot.meshes[i].vertices)) return 1;
-        if (!vk_idx_buff_staged_upload(&robot.meshes[i].idx_buff, robot.meshes[i].indices))  return 1;
+        Rvk_Buffer vtx_buff = robot.meshes[i].vtx_buff; // pre-populated struct
+        Rvk_Buffer idx_buff = robot.meshes[i].idx_buff; // pre-populated struct
+        rvk_upload_vtx_buff(vtx_buff.size, vtx_buff.count, robot.meshes[i].vertices, &robot.meshes[i].vtx_buff);
+        rvk_upload_idx_buff(idx_buff.size, idx_buff.count, robot.meshes[i].indices, &robot.meshes[i].idx_buff);
     }
     set_target_fps(120);
 
@@ -464,7 +460,7 @@ int main()
                 scale(1.0, (sin(2.0f * dt) * 0.5 + 0.5) * 0.2 + 1.0, 1.0);
 
                 /* draw model */
-                vk_bind_gfx(gfx_pl, gfx_pl_layout, NULL, 0);
+                rvk_bind_gfx(gfx_pl, gfx_pl_layout, NULL, 0);
                 Matrix mvp = {0};
                 for (size_t i = 0; i < robot.mesh_count; i++) {
                     push_matrix();
@@ -475,10 +471,10 @@ int main()
                             .mvp = f16_mvp,
                             .color = robot.albedos[robot.mesh_albedo_idx[i]],
                         };
-                        Vk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
-                        Vk_Buffer idx_buff = robot.meshes[i].idx_buff;
-                        vk_push_const(gfx_pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(Push_Const), &pk);
-                        vk_draw_buffers(vtx_buff, idx_buff);
+                        Rvk_Buffer vtx_buff = robot.meshes[i].vtx_buff;
+                        Rvk_Buffer idx_buff = robot.meshes[i].idx_buff;
+                        rvk_push_const(gfx_pl_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(Push_Const), &pk);
+                        rvk_draw_buffers(vtx_buff, idx_buff);
                     pop_matrix();
                 }
 
@@ -486,12 +482,12 @@ int main()
         end_drawing();
     }
 
-    wait_idle();
+    rvk_wait_idle();
     for (size_t i = 0; i < robot.mesh_count; i++) {
-        vk_buff_destroy(&robot.meshes[i].vtx_buff);
-        vk_buff_destroy(&robot.meshes[i].idx_buff);
+        rvk_buff_destroy(robot.meshes[i].vtx_buff);
+        rvk_buff_destroy(robot.meshes[i].idx_buff);
     }
-    vk_destroy_pl_res(gfx_pl, gfx_pl_layout);
+    rvk_destroy_pl_res(gfx_pl, gfx_pl_layout);
     unload_model(&robot);
     close_window();
     return 0;

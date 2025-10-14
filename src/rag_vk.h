@@ -167,6 +167,7 @@ typedef struct {
     Rvk_Image depth_img;
     VkImageView depth_img_view;
     bool using_validation;
+    bool enable_atomic_features;
 } Rvk_Context;
 
 typedef struct {
@@ -202,6 +203,7 @@ VkCommandBuffer rvk_get_cmd_buff(void);
 VkCommandBuffer rvk_get_comp_buff(void);
 void rvk_reset_pool(VkDescriptorPool pool);
 double rvk_dt(void);
+void rvk_enable_atomic_features();
 
 /* platform specifics */
 #ifdef PLATFORM_DESKTOP_GLFW
@@ -329,21 +331,20 @@ void rvk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Rvk_Buffer vtx_buff, Rv
 void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
 void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count, VkExtent2D extent);
 void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff);
+void rvk_bind_vertex_buffers(Rvk_Buffer vtx_buff);
+void rvk_cmd_draw(Rvk_Buffer vtx_buff);
 void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void rvk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 
-void rvk_rec_compute();
-void rvk_submit_compute();
-void rvk_compute_fence_wait();
-void rvk_end_rec_compute();
-void rvk_compute(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void rvk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value);
 void rvk_compute_pl_barrier();
 
 void rvk_buff_init(size_t size, size_t count, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, Rvk_Buffer_Type type, void *data, Rvk_Buffer *buffer);
 void rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer);
+Rvk_Buffer rvk_create_mapped_uniform_buff(size_t size, void *data);
 void rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
+Rvk_Buffer rvk_upload_compute_buff(size_t size, size_t count, void *data);
 void rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
@@ -858,6 +859,27 @@ void rvk_device_init()
         .samplerAnisotropy = VK_TRUE,
         .fillModeNonSolid = VK_TRUE,
     };
+
+    if (rvk_ctx.enable_atomic_features) {
+        features.shaderInt64 = VK_TRUE;
+    }
+
+    // this section will only get used if we enable atomic features
+    VkPhysicalDeviceVulkan13Features features13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .synchronization2 = VK_TRUE,
+    };
+    VkPhysicalDeviceVulkan12Features features12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &features13,
+        .shaderBufferInt64Atomics = VK_TRUE,
+    };
+    VkPhysicalDeviceFeatures2 all_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &features12,
+        .features = features,
+    };
+
     VkDeviceCreateInfo device_ci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pEnabledFeatures = &features,
@@ -866,6 +888,12 @@ void rvk_device_init()
         .enabledExtensionCount = RVK_ARRAY_LEN(rvk_device_exts),
         .ppEnabledExtensionNames = rvk_device_exts,
     };
+
+    if (rvk_ctx.enable_atomic_features) {
+        device_ci.pNext = &all_features;
+        device_ci.pEnabledFeatures = NULL;
+    }
+
 #ifdef VK_VALIDATION
     if (rvk_ctx.using_validation) {
         device_ci.enabledLayerCount = RVK_ARRAY_LEN(rvk_validation_layers);
@@ -1228,8 +1256,8 @@ void rvk_sst_pl_init(VkPipelineLayout pl_layout, VkPipeline *pl)
             .pName = "main",
         },
     };
-    rvk_shader_mod_init("./shaders/sst.vert.glsl.spv", &stages[0].module);
-    rvk_shader_mod_init("./shaders/sst.frag.glsl.spv", &stages[1].module);
+    rvk_shader_mod_init("./res/sst.vert.glsl.spv", &stages[0].module);
+    rvk_shader_mod_init("./res/sst.frag.glsl.spv", &stages[1].module);
 
     /* populate fields for graphics pipeline create info */
     VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1354,6 +1382,11 @@ VkCommandBuffer rvk_get_cmd_buff()
 void rvk_reset_pool(VkDescriptorPool pool)
 {
     RAG_VK(vkResetDescriptorPool(rvk_ctx.device, pool, 0));
+}
+
+void rvk_enable_atomic_features()
+{
+    rvk_ctx.enable_atomic_features = true;
 }
 
 // TODO: make this obsolete with rvk_create_shader_module
@@ -1776,6 +1809,19 @@ void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
     vkCmdDrawIndexed(cmd_buff, idx_buff.count, 1, 0, 0, 0);
 }
 
+void rvk_bind_vertex_buffers(Rvk_Buffer vtx_buff)
+{
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
+}
+
+void rvk_cmd_draw(Rvk_Buffer vtx_buff)
+{
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
+    vkCmdDraw(cmd_buff, vtx_buff.count, 1, 0, 0);
+}
+
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
 {
     vkCmdBindPipeline(rvk_ctx.cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
@@ -1948,6 +1994,22 @@ void rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer)
         data,
         buffer
     );
+}
+
+Rvk_Buffer rvk_create_mapped_uniform_buff(size_t size, void *data)
+{
+    Rvk_Buffer uniform_buff = {0};
+    rvk_buff_init(
+        size,
+        1, // 1 uniform buffer
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        RVK_BUFFER_TYPE_UNIFORM,
+        data,
+        &uniform_buff 
+    );
+    rvk_buff_map(&uniform_buff);
+    return uniform_buff;
 }
 
 bool rvk_is_device_suitable(VkPhysicalDevice phys_device)
@@ -2401,6 +2463,25 @@ void rvk_comp_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffe
         data,
         buffer
     );
+}
+
+Rvk_Buffer rvk_upload_compute_buff(size_t size, size_t count, void *data)
+{
+    Rvk_Buffer comp_buff = {0};
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT  |  // in case we want to transfer data back to host
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT  |  // usually this buffer is the destination of a staging buffer
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |  // TODO: this seems very example-specific
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,  // compute buffer
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, // gpu land
+        RVK_BUFFER_TYPE_COMPUTE,             // book keeping
+        data,
+        &comp_buff
+    );
+    rvk_buff_staged_upload(comp_buff);
+    return comp_buff;
 }
 
 void rvk_vtx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer)

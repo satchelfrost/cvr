@@ -13,6 +13,7 @@ int main()
     init_window(500, 500, "cube");
 
     while(!window_should_close()) {
+        update_camera_free(&camera);
         begin_drawing(BEIGE);
         begin_mode_3d(camera);
             rotate_y(get_time());
