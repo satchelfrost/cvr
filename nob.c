@@ -236,6 +236,24 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
     },
+    {
+        .name = "stereo_render",
+        .shaders = {
+            .names = (const char *[]) {
+                "multiview.vert.glsl",
+                "multiview.frag.glsl",
+                "viewdisplay.vert.glsl",
+                "viewdisplay.frag.glsl",
+                "default.vert.glsl",
+                "default.frag.glsl",
+            },
+            .count = 6
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+    },
 };
 
 typedef struct {

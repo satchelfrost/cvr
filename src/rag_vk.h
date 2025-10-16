@@ -413,6 +413,26 @@ void rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageL
 void rvk_sampler_init(VkSampler *sampler);
 int rvk_format_to_size(VkFormat fmt);
 
+typedef struct {
+    const void*           p_next;
+    VkImageCreateFlags    flags;
+    VkImageType           image_type;
+    VkFormat              format;
+    VkExtent3D            extent;
+    uint32_t              mip_levels;
+    uint32_t              array_layers;
+    VkSampleCountFlagBits samples;
+    VkImageTiling         tiling;
+    VkImageUsageFlags     usage;
+    VkSharingMode         sharing_mode;
+    uint32_t              queue_family_index_count;
+    const uint32_t*       p_queue_family_indices;
+    VkImageLayout         initial_layout;
+} Rvk_Image_Create_Info;
+
+#define rvk_create_image(width, height, depth, ...) rvk_create_image_((width), (height), (depth), (Rvk_Image_CreateInfo){__VA_ARGS__})
+Rvk_Image rvk_create_image_(uint32_t width, uint32_t height, uint32_t depth, Rvk_Image_CreateInfo img_ci);
+
 #define rvk_return_defer(value) do { result = (value); goto defer; } while(0)
 
 // Initial capacity of a dynamic array
@@ -2691,6 +2711,65 @@ void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags
     }
     RAG_VK(vkAllocateMemory(rvk_ctx.device, &alloc_ci, NULL, &img->mem));
     RAG_VK(vkBindImageMemory(rvk_ctx.device, img->handle, img->mem, 0));
+}
+
+Rvk_Image rvk_create_image_(uint32_t width, uint32_t height, uint32_t depth, Rvk_Image_CreateInfo img_ci)
+{
+    // const void*           p_next;
+    // VkImageCreateFlags    flags;
+    // VkImageType           image_type;
+    // VkFormat              format;
+    // VkExtent3D            extent;
+    // uint32_t              mip_levels;
+    // uint32_t              array_layers;
+    // VkSampleCountFlagBits samples;
+    // VkImageTiling         tiling;
+    // VkImageUsageFlags     usage;
+    // VkSharingMode         sharing_mode;
+    // uint32_t              queue_family_index_count;
+    // const uint32_t*       p_queue_family_indices;
+    // VkImageLayout         initial_layout;
+
+    VkImageCreateInfo actual_ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    actual_ci.pNext = () ? : ;
+    actual_ci.flags = () ? : ;
+    actual_ci.imageType = () ? : ;
+    actual_ci.format = () ? : ;
+    actual_ci.extent = () ? : ;
+    actual_ci.mipLevels = () ? : ;
+    actual_ci.arrayLayers = () ? : ;
+    actual_ci.samples = () ? : ;
+    actual_ci.tiling = () ? : ;
+    actual_ci.usage = () ? : ;
+    actual_ci.sharingMode = () ? : ;
+    actual_ci.queueFamilyIndexCount = () ? : ;
+    actual_ci.pQueueFamilyIndices = () ? : ;
+    actual_ci.initialLayout = () ? : ;
+
+    // const void*           p_next;
+    // VkImageCreateFlags    flags;
+    // VkImageType           image_type;
+    // VkFormat              format;
+    // VkExtent3D            extent;
+    // uint32_t              mip_levels;
+    // uint32_t              array_layers;
+    // VkSampleCountFlagBits samples;
+    // VkImageTiling         tiling;
+    // VkImageUsageFlags     usage;
+    // VkSharingMode         sharing_mode;
+    // uint32_t              queue_family_index_count;
+    // const uint32_t*       p_queue_family_indices;
+    // VkImageLayout         initial_layout;
+
+        // .imageType   = VK_IMAGE_TYPE_2D,
+        // .format      = img->format,
+        // .extent      = {img->extent.width, img->extent.height, 1},
+        // .mipLevels   = 1,
+        // .arrayLayers = 1,
+        // .samples     = VK_SAMPLE_COUNT_1_BIT,
+        // .tiling      = VK_IMAGE_TILING_OPTIMAL,
+        // .usage       = usage,
+        // .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 }
 
 void rvk_cmd_pool_init()
