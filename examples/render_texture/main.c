@@ -119,7 +119,7 @@ int main()
 
     // pipeline for the offscreen render pass (i.e. render texture)
     VkExtent2D extent = {.width = 500, .height = 500};
-    Rvk_Render_Texture render_tex = rvk_create_render_tex(extent);
+    Rvk_Render_Texture render_tex = rvk_create_render_texture(extent);
     Pipeline render_tex_pl = {0};
     create_render_tex_pipeline(&render_tex_pl, render_tex.rp);
     VkDescriptorSet tex_sample_ds;
@@ -165,10 +165,7 @@ int main()
     rvk_wait_idle();
     rvk_destroy_descriptor_set_layout(tex_sample_layout.handle);
     rvk_descriptor_pool_arena_destroy(arena);
-    rvk_unload_texture(render_tex.depth);
-    rvk_unload_texture(render_tex.color);
-    rvk_destroy_render_pass(render_tex.rp);
-    rvk_destroy_frame_buff(render_tex.fb);
+    rvk_destroy_render_texture(render_tex);
     rvk_destroy_pl_res(sample_tex_pl.handle, sample_tex_pl.layout);
     rvk_destroy_pl_res(render_tex_pl.handle, render_tex_pl.layout);
     close_window();

@@ -8,12 +8,15 @@ layout (location = 2) in vec2 in_uv;
 
 layout (location = 0) out vec3 out_color;
 
+#define VIEW_COUNT 2
+
 layout (binding = 0) uniform UBO {
-    mat4 mvps[2];
+    mat4 projection[VIEW_COUNT];
+    mat4 model_view[VIEW_COUNT];
 } ubo;
 
 void main()
 {
     out_color = in_color;
-    gl_Position = ubo.mvps[gl_ViewIndex] * vec4(in_pos, 1.0);
+    gl_Position = ubo.projection[gl_ViewIndex] * ubo.model_view[gl_ViewIndex] * vec4(in_pos, 1.0);
 }

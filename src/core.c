@@ -496,14 +496,18 @@ void begin_drawing(Color color)
     rvk_begin_render_pass(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f);
 }
 
+void end_frame()
+{
+    rvk_end_rec_gfx();
+    rvk_submit_gfx();
+    end_timer();
+    poll_input_events();
+}
+
 void end_drawing()
 {
     rvk_end_render_pass();
-    rvk_end_rec_gfx();
-    rvk_submit_gfx();
-
-    end_timer();
-    poll_input_events();
+    end_frame();
 }
 
 void push_matrix()
@@ -1035,4 +1039,14 @@ Rvk_Texture load_texture_from_image(const char *file_name)
     return load_texture(load_image(file_name));
 }
 
+Rvk_Buffer get_shape_vertex_buffer(Shape_Type shape)
+{
+    if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
+    return shapes[shape].vtx_buff;
+}
 
+Rvk_Buffer get_shape_index_buffer(Shape_Type shape)
+{
+    if (!is_shape_res_alloc(shape)) alloc_shape_res(shape);
+    return shapes[shape].idx_buff;
+}
