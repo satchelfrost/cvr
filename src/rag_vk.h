@@ -228,6 +228,7 @@ void rvk_set_android_asset_man(AAssetManager *aam);
 
 // TODO: switch to verb object
 void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena);
+Rvk_Descriptor_Pool_Arena rvk_create_descriptor_pool_arena();
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena);
 void rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set);
 const char *rvk_desc_type_to_str(Rvk_Descriptor_Type type);
@@ -1060,12 +1061,16 @@ void rvk_create_image_view_(VkImageView *img_view, Rvk_Image_View_Create_Info ci
 void rvk_img_views_init()
 {
     for (size_t i = 0; i < rvk_ctx.swapchain.img_count; i++)  {
-        Rvk_Image img = {
-            .handle = rvk_ctx.swapchain.imgs[i],
-            .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format = rvk_ctx.surface_fmt.format,
+        VkImageSubresourceRange subresource_range = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
         };
-        rvk_img_view_init(img, &rvk_ctx.swapchain.img_views[i]);
+        rvk_create_image_view(
+            &rvk_ctx.swapchain.img_views[i],
+            .image = rvk_ctx.swapchain.imgs[i],
+            .format = rvk_ctx.surface_fmt.format,
+            .subresource_range = subresource_range);
     }
 }
 
@@ -1483,6 +1488,7 @@ void rvk_reset_pool(VkDescriptorPool pool)
 
 void rvk_enable_atomic_features()
 {
+    rvk_log(RVK_INFO, "enabling atomic featurer");
     rvk_ctx.enable_atomic_features = true;
 }
 
@@ -2069,15 +2075,22 @@ void rvk_recreate_swapchain()
 
 void rvk_depth_init()
 {
-    rvk_ctx.depth_img.extent = rvk_ctx.extent;
-    rvk_ctx.depth_img.aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    rvk_ctx.depth_img.format = VK_FORMAT_D32_SFLOAT;
-    rvk_img_init(
-        &rvk_ctx.depth_img,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    rvk_img_view_init(rvk_ctx.depth_img, &rvk_ctx.depth_img_view);
+    VkExtent3D extent = {rvk_ctx.extent.width, rvk_ctx.extent.height, 1};
+    rvk_ctx.depth_img = rvk_create_image(
+        extent,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        .format = VK_FORMAT_D32_SFLOAT,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    VkImageSubresourceRange subresource_range = {
+        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+        .levelCount = 1,
+        .layerCount = 1,
+    };
+    rvk_create_image_view(
+        &rvk_ctx.depth_img_view,
+        .image = rvk_ctx.depth_img.handle,
+        .format = VK_FORMAT_D32_SFLOAT,
+        .subresource_range = subresource_range);
 }
 
 void rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer)
@@ -2754,6 +2767,7 @@ void rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size)
 
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
 {
+    rvk_log(RVK_WARNING, "deprecated in favor of rvk_create_image");
     if (img->extent.width == 0 && img->extent.height == 0) {
         rvk_log(RVK_ERROR, "Image must be set with width/height before calling rvk_img_init");
         RVK_EXIT_APP;
@@ -3529,6 +3543,32 @@ void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena)
         .maxSets       = MAX_DESCRIPTOR_SETS,
     };
     rvk_create_ds_pool(pool_ci, &arena->pool);
+}
+
+Rvk_Descriptor_Pool_Arena rvk_create_descriptor_pool_arena()
+{
+    Rvk_Descriptor_Pool_Arena arena = {0};
+    VkDescriptorPoolSize pool_sizes[] = {
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLER,                .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,   .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,   .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,       .descriptorCount = MAX_DESCRIPTOR_SETS},
+    };
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = RVK_ARRAY_LEN(pool_sizes),
+        .pPoolSizes    = pool_sizes,
+        .maxSets       = MAX_DESCRIPTOR_SETS,
+    };
+    rvk_create_ds_pool(pool_ci, &arena.pool);
+    return arena;
 }
 
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena)

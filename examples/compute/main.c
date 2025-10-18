@@ -200,7 +200,7 @@ int main()
             begin_mode_3d(camera);
                 rvk_bind_gfx(gfx_pl, gfx_pl_layout, NULL, 0);
                 rvk_bind_vertex_buffers(comp_buff);
-                rvk_cmd_draw(comp_buff);
+                rvk_cmd_draw(comp_buff.count);
                 time = get_time();
                 memcpy(ubo.mapped, &time, sizeof(float));
             end_mode_3d();

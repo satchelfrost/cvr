@@ -140,13 +140,13 @@ void create_pipelines(VkRenderPass multiview_rp)
 void update_uniform(Uniform *uniform, Camera camera)
 {
     Matrix view = MatrixLookAt(camera.position, camera.target, camera.up);
-    Matrix projection = get_proj(camera);
+    Matrix projection = get_proj_aspect(camera, 1.0f);
     // for now just use two identical views
     uniform->data.projection[0] = MatrixToFloatV(projection);
     uniform->data.model_view[0] = MatrixToFloatV(view);
     uniform->data.projection[1] = MatrixToFloatV(projection);
     uniform->data.model_view[1] = MatrixToFloatV(view);
-    memcpy(uniform->buffer.mapped, &uniform->data, sizeof(Uniform_Data));
+    memcpy(uniform->buffer.mapped, &uniform->data, sizeof(uniform->data));
 }
 
 void draw_shape_multiview(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape)
@@ -178,9 +178,9 @@ int main()
     VkExtent2D extent = {WINDOW_HEIGHT, WINDOW_HEIGHT};
     Rvk_Render_Texture render_texture = rvk_create_multiview_render_texture(extent, 2);
     Uniform uniform = {0};
-    uniform.buffer = rvk_create_mapped_uniform_buff(sizeof(Uniform_Data), &uniform.data);
+    uniform.buffer = rvk_create_mapped_uniform_buff(sizeof(uniform.data), &uniform.data);
 
-    rvk_descriptor_pool_arena_init(&arena);
+    arena = rvk_create_descriptor_pool_arena();
     setup_ds_layouts();
     update_ds(uniform.buffer, render_texture.color);
     create_pipelines(render_texture.rp);
@@ -191,13 +191,13 @@ int main()
         update_camera_free(&camera);
 
         begin_frame();
-            update_uniform(&uniform, camera);
             rvk_begin_offscreen_render_pass(
                 color.r / 255.0f, color.g / 255.0f, color.b / 255.0f, color.a / 255.0f,
                 render_texture.rp,
                 render_texture.fb,
                 render_texture.extent);
                 begin_mode_3d(camera);
+                    update_uniform(&uniform, camera);
                     draw_shape_multiview(multiview.pl, multiview.pl_layout, multiview.ds, SHAPE_CUBE);
                 end_mode_3d();
             rvk_end_render_pass();
