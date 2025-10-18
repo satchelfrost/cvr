@@ -11,15 +11,15 @@
 #define RVK_EXIT_APP
 #endif
 
-// easy: requires little thinking just need to go through the errors
+// easy work:
 // ----------------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------------
-// medium: requires some thinking but there's common approaches to solve
+// medium work:
 // TODO: consider using VK_WHOLE_SIZE as an option for buffer copy
-// TODO: feature requesting should be little more robust, required to fix examples that require features
+// TODOOO: feature requesting should be little more robust, required to fix examples that require features
 // TODO: device specification should be more robust
 // ----------------------------------------------------------------------------------------------
-// hard: not clear what the best solution is, meaning I will have to make thoughtful compromises
+// hard work:
 // ----------------------------------------------------------------------------------------------
 // TODO: texture and image needs to be rethought for example memory should be in texture
 // TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
@@ -126,7 +126,7 @@ typedef struct {
     VkExtent2D extent;
     VkImage handle;
     VkDeviceMemory mem;
-    VkImageAspectFlags aspect_mask;
+    VkImageAspectFlags aspect_mask; // TODO: this shouldn't really be here
     VkFormat format;
 } Rvk_Image;
 
@@ -3159,16 +3159,13 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
     rvk_buff_unmap(stg_buff);
 
     /* create the image */
-    Rvk_Image img = {
-        .extent  = {width, height},
-        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+    VkExtent3D extent = {width, height, 1};
+    Rvk_Image img = rvk_create_image(
+        extent,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         .format = fmt,
-    };
-    rvk_img_init(
-        &img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
     rvk_transition_img_layout(img.handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     rvk_img_copy(img.handle, stg_buff.handle, img.extent);
     rvk_transition_img_layout(
@@ -3179,7 +3176,16 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
 
     /* create image view */
     VkImageView img_view;
-    rvk_img_view_init(img, &img_view);
+    VkImageSubresourceRange subresource_range = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .levelCount = 1,
+        .layerCount = 1,
+    };
+    rvk_create_image_view(
+        &img_view,
+        .image = img.handle,
+        .format = fmt,
+        .subresource_range = subresource_range);
 
     /* create sampler */
     VkPhysicalDeviceProperties props = {0};
