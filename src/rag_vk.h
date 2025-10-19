@@ -11,16 +11,10 @@
 #define RVK_EXIT_APP
 #endif
 
-// easy work:
-// ----------------------------------------------------------------------------------------------
-// ----------------------------------------------------------------------------------------------
-// medium work:
-// TODO: consider using VK_WHOLE_SIZE as an option for buffer copy
+// TODO: renaming for better memory recall example 'rvk_upload_vtx_buff' is terse but hard to remember
+// the more verbose rvk_upload_vertex_buffer, would be easier to guess albeit slightly more typing
 // TODOOO: feature requesting should be little more robust, required to fix examples that require features
 // TODO: device specification should be more robust
-// ----------------------------------------------------------------------------------------------
-// hard work:
-// ----------------------------------------------------------------------------------------------
 // TODO: texture and image needs to be rethought for example memory should be in texture
 // TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
 
@@ -228,6 +222,7 @@ void rvk_set_android_asset_man(AAssetManager *aam);
 
 // TODO: switch to verb object
 void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena);
+void rvk_destroy_descriptor_pool_arena(Rvk_Descriptor_Pool_Arena arena);
 Rvk_Descriptor_Pool_Arena rvk_create_descriptor_pool_arena();
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena);
 void rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set);
@@ -362,8 +357,11 @@ void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer
 void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_upload_vtx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 Rvk_Buffer rvk_upload_vtx_buff2(size_t size, size_t count, void *data);
+Rvk_Buffer rvk_create_vertex_buffer(size_t size, size_t count, void *data);
+Rvk_Buffer rvk_create_index_buffer(size_t size, size_t count, void *data);
 void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_buff_destroy(Rvk_Buffer buffer);
+void rvk_destroy_buffer(Rvk_Buffer buffer);
 void rvk_buff_map(Rvk_Buffer *buff);
 void rvk_buff_unmap(Rvk_Buffer buff);
 void rvk_buff_staged_upload(Rvk_Buffer buff);
@@ -423,6 +421,7 @@ Rvk_Render_Texture rvk_create_render_texture(VkExtent2D extent);
 Rvk_Render_Texture rvk_create_multiview_render_texture(VkExtent2D extent, uint32_t view_count);
 void rvk_destroy_render_texture(Rvk_Render_Texture rt);
 void rvk_unload_texture(Rvk_Texture texture);
+void rvk_destroy_texture(Rvk_Texture texture);
 void rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 void rvk_sampler_init(VkSampler *sampler);
 int rvk_format_to_size(VkFormat fmt);
@@ -1227,24 +1226,22 @@ void rvk_create_graphics_pipelines_(VkPipeline *pl, Rvk_Graphics_Pipeline_Create
     actual_ci.pVertexInputState = ci.p_vertex_input_state;
     if (!actual_ci.pVertexInputState) {
         rvk_log(RVK_ERROR, "cannot create pipeline because vertex input state missing, try something like this:");
-        rvk_log(RVK_ERROR, "");
-        rvk_log(RVK_ERROR, "VkVertexInputAttributeDescription vert_attrs[] = {");
-        rvk_log(RVK_ERROR, "    { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, position), },");
-        rvk_log(RVK_ERROR, "    { .location = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, color),    },");
-        rvk_log(RVK_ERROR, "    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       },");
-        rvk_log(RVK_ERROR, "};");
-        rvk_log(RVK_ERROR, "VkVertexInputBindingDescription vert_bindings = {");
-        rvk_log(RVK_ERROR, "    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,");
-        rvk_log(RVK_ERROR, "    .stride    = sizeof(Your_Vertex),");
-        rvk_log(RVK_ERROR, "};");
-        rvk_log(RVK_ERROR, "VkPipelineVertexInputStateCreateInfo vertex_input_ci = {");
-        rvk_log(RVK_ERROR, "    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,");
-        rvk_log(RVK_ERROR, "    .vertexBindingDescriptionCount = 1,");
-        rvk_log(RVK_ERROR, "    .pVertexBindingDescriptions = &vert_bindings,");
-        rvk_log(RVK_ERROR, "    .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),");
-        rvk_log(RVK_ERROR, "    .pVertexAttributeDescriptions = vert_attrs,");
-        rvk_log(RVK_ERROR, "};");
-        rvk_log(RVK_ERROR, "");
+        printf("VkVertexInputAttributeDescription vert_attrs[] = {\n");
+        printf("    { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, position), },\n");
+        printf("    { .location = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, color),    },\n");
+        printf("    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       },\n");
+        printf("};\n");
+        printf("VkVertexInputBindingDescription vert_bindings = {\n");
+        printf("    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,\n");
+        printf("    .stride    = sizeof(Your_Vertex),\n");
+        printf("};\n");
+        printf("VkPipelineVertexInputStateCreateInfo vertex_input_ci = {\n");
+        printf("    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,\n");
+        printf("    .vertexBindingDescriptionCount = 1,\n");
+        printf("    .pVertexBindingDescriptions = &vert_bindings,\n");
+        printf("    .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),\n");
+        printf("    .pVertexAttributeDescriptions = vert_attrs,\n");
+        printf("};\n");
         rvk_log(RVK_ERROR, "Then pass that in i.e. rvk_create_graphics_pipelines(&your_pl, ..., .p_vertex_input_state=&vertex_input_ci)");
         RVK_EXIT_APP;
     }
@@ -2663,6 +2660,38 @@ Rvk_Buffer rvk_upload_vtx_buff2(size_t size, size_t count, void *data)
     return buff;
 }
 
+Rvk_Buffer rvk_create_vertex_buffer(size_t size, size_t count, void *data)
+{
+    Rvk_Buffer buff = {0};
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_VERTEX,
+        data,
+        &buff
+    );
+    rvk_buff_staged_upload(buff);
+    return buff;
+}
+
+Rvk_Buffer rvk_create_index_buffer(size_t size, size_t count, void *data)
+{
+    Rvk_Buffer buff = {0};
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_INDEX,
+        data,
+        &buff
+    );
+    rvk_buff_staged_upload(buff);
+    return buff;
+}
+
 void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
 {
     rvk_buff_init(
@@ -2702,6 +2731,12 @@ void rvk_buff_unmap(Rvk_Buffer buff)
 }
 
 void rvk_buff_destroy(Rvk_Buffer buffer)
+{
+    vkDestroyBuffer(rvk_ctx.device, buffer.handle, NULL);
+    vkFreeMemory(rvk_ctx.device, buffer.mem, NULL);
+}
+
+void rvk_destroy_buffer(Rvk_Buffer buffer)
 {
     vkDestroyBuffer(rvk_ctx.device, buffer.handle, NULL);
     vkFreeMemory(rvk_ctx.device, buffer.mem, NULL);
@@ -3461,6 +3496,14 @@ void rvk_unload_texture(Rvk_Texture texture)
     vkFreeMemory(rvk_ctx.device, texture.img.mem, NULL);
 }
 
+void rvk_destroy_texture(Rvk_Texture texture)
+{
+    vkDestroySampler(rvk_ctx.device, texture.sampler, NULL);
+    vkDestroyImageView(rvk_ctx.device, texture.view, NULL);
+    vkDestroyImage(rvk_ctx.device, texture.img.handle, NULL);
+    vkFreeMemory(rvk_ctx.device, texture.img.mem, NULL);
+}
+
 void rvk_storage_tex_init(Rvk_Texture *texture, VkExtent2D extent)
 {
     if (extent.width == 0 && extent.height == 0) {
@@ -3658,6 +3701,10 @@ void rvk_descriptor_pool_arena_destroy(Rvk_Descriptor_Pool_Arena arena)
     rvk_destroy_ds_pool(arena.pool);
 }
 
+void rvk_destroy_descriptor_pool_arena(Rvk_Descriptor_Pool_Arena arena)
+{
+    rvk_destroy_ds_pool(arena.pool);
+}
 
 void rvk_destroy_ds_pool(VkDescriptorPool pool)
 {

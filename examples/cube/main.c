@@ -13,6 +13,14 @@ int main()
     init_window(500, 500, "cube");
 
     while(!window_should_close()) {
+        if (is_key_down(KEY_UP)) {
+            camera.fovy += 10*get_frame_time();
+            printf("%f\n", camera.fovy);
+        } 
+        if (is_key_down(KEY_DOWN)) {
+            camera.fovy -= 10*get_frame_time();
+            printf("%f\n", camera.fovy);
+        }
         update_camera_free(&camera);
         begin_drawing(BEIGE);
         begin_mode_3d(camera);

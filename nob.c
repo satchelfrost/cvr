@@ -254,6 +254,22 @@ static Example examples[] = {
             .count = NOB_ARRAY_LEN(default_c_file_names)
         },
     },
+    {
+        .name = "text",
+        .shaders = {
+            .names = (const char *[]) {
+                "text.vert.glsl",
+                "text.frag.glsl",
+                "default.vert.glsl",
+                "default.frag.glsl",
+            },
+            .count = 4
+        },
+        .c_files = {
+            .names = default_c_file_names,
+            .count = NOB_ARRAY_LEN(default_c_file_names)
+        },
+    },
 };
 
 typedef struct {
