@@ -7,13 +7,7 @@
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
 
-// typedef struct
-// {
-//    unsigned short x0,y0,x1,y1; // coordinates of bbox in bitmap
-//    float xoff,yoff,xadvance;
-// } stbtt_bakedchar;
-
-#define PIXEL_WIDTH 512
+#define PIXEL_WIDTH 400
 #define PIXEL_HEIGHT PIXEL_WIDTH
 #define FIRST_CHAR 32
 #define CHAR_COUNT 96 
@@ -23,10 +17,10 @@ typedef struct {
     Vector2 uv;
 } Quad_2D_Vertex;
 
-#define NDC_UPPER_LEFT  {-0.5f, -0.5f}
-#define NDC_UPPER_RIGHT { 0.5f, -0.5f}
-#define NDC_LOWER_LEFT  {-0.5f,  0.5f}
-#define NDC_LOWER_RIGHT { 0.5f,  0.5f}
+#define NDC_UPPER_LEFT  {-1.0f, -1.0f}
+#define NDC_UPPER_RIGHT { 1.0f, -1.0f}
+#define NDC_LOWER_LEFT  {-1.0f,  1.0f}
+#define NDC_LOWER_RIGHT { 1.0f,  1.0f}
 #define UV_UPPER_LEFT  {0.0f, 0.0f}
 #define UV_UPPER_RIGHT {1.0f, 0.0f}
 #define UV_LOWER_LEFT  {0.0f, 1.0f}
@@ -79,9 +73,21 @@ void update_ds(Rvk_Texture bitmap_texture)
     rvk_update_ds(1, &write);
 }
 
+typedef struct {
+    int x;
+    int y;
+    int x0;
+    int y0;
+    int x1;
+    int y1;
+    float xoffset;
+    float yoffset;
+} My_Push_Const;
+
 void create_pipeline()
 {
-    rvk_create_pipeline_layout(&quad_2d.pl_layout, .p_set_layouts = &quad_2d.ds_layout.handle);
+    VkPushConstantRange pk_range = {.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .size = sizeof(My_Push_Const)};
+    rvk_create_pipeline_layout(&quad_2d.pl_layout, .p_set_layouts = &quad_2d.ds_layout.handle, .p_push_constant_ranges = &pk_range);
     VkVertexInputAttributeDescription vert_attrs[] = {
         { .location = 0, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Quad_2D_Vertex, ndc), },
         { .location = 1, .format = VK_FORMAT_R32G32_SFLOAT, .offset = offsetof(Quad_2D_Vertex, uv),  },
@@ -124,7 +130,30 @@ void create_pipeline()
 void draw_quad_2d(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
 {
     rvk_bind_gfx(quad_2d.pl, quad_2d.pl_layout, &quad_2d.ds, 1);
+
+    // int x0 = 354, y0 = 90, x1 = 379, y1 = 125;
+    My_Push_Const pk = {
+        .x = 3,
+        .y = 35,
+        .x0 = 354,
+        .y0 = 90,
+        .x1 = 379,
+        .y1 = 125,
+        .xoffset = 3,
+        .yoffset = -35,
+    };
+    rvk_push_const(quad_2d.pl_layout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(My_Push_Const), &pk);
     rvk_draw_buffers(vtx_buff, idx_buff);
+    pk.x = 29+2, pk.y = 27, pk.x0 = 26, pk.y0 = 181, pk.x1 = 51, pk.y1 = 209;
+    rvk_push_const(quad_2d.pl_layout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(My_Push_Const), &pk);
+    rvk_draw_buffers(vtx_buff, idx_buff);
+}
+
+void print_cdata(int i, stbtt_bakedchar *cdata)
+{
+    stbtt_bakedchar f = cdata[i];
+    printf("cdata[%i] x0 = %u, y0 = %u, x1 = %u, y1 = %u, xoff = %f, yoff = %f, xadvance = %f\n",
+           i, f.x0, f.y0, f.x1, f.y1, f.xoff, f.yoff, f.xadvance);
 }
 
 int main()
@@ -134,7 +163,7 @@ int main()
     const char *file = "res/RobotoMono-Medium.ttf";
     if (!read_entire_file(file, &sb)) return 1;
     printf("byte count %zu\n", sb.count);
-    float pixel_height = 32.0f;
+    float pixel_height = 64.0f;
     unsigned char bitmap[PIXEL_WIDTH*PIXEL_HEIGHT];
     stbtt_bakedchar cdata[CHAR_COUNT]; // ASCII 32..126 is 95 glyphs
     stbtt_BakeFontBitmap((unsigned char *)sb.items, 0,
@@ -144,7 +173,18 @@ int main()
                          CHAR_COUNT,
                          cdata);
 
-    init_window(500, 500, "text");
+    init_window(400, 400, "text");
+
+    // const char *hello = "Reese";
+    // for (size_t i = 0; i < strlen(hello); i++) {
+    //     print_cdata(hello[i]-32, cdata);
+    // }
+    // for (size_t i = 0; i < CHAR_COUNT; i++) {
+    //     print_cdata(i, cdata);
+    // }
+    print_cdata('R'-32, cdata);
+    print_cdata('e'-32, cdata);
+
 
     // upload the quad
     Rvk_Buffer vtx_buff = rvk_create_vertex_buffer(4*sizeof(Quad_2D_Vertex), 4, quad_2d_vertices);
@@ -157,6 +197,7 @@ int main()
     update_ds(bitmap_texture);
     create_pipeline();
 
+    set_target_fps(60);
     while(!window_should_close()) {
         begin_drawing(BLUE);
             draw_quad_2d(vtx_buff, idx_buff);
