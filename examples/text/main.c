@@ -127,26 +127,29 @@ void create_pipeline()
                                   .layout = quad_2d.pl_layout);
 }
 
-void draw_quad_2d(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
+void draw_quad_2d(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff, stbtt_bakedchar *cdata)
 {
     rvk_bind_gfx(quad_2d.pl, quad_2d.pl_layout, &quad_2d.ds, 1);
 
-    // int x0 = 354, y0 = 90, x1 = 379, y1 = 125;
-    My_Push_Const pk = {
-        .x = 3,
-        .y = 35,
-        .x0 = 354,
-        .y0 = 90,
-        .x1 = 379,
-        .y1 = 125,
-        .xoffset = 3,
-        .yoffset = -35,
-    };
-    rvk_push_const(quad_2d.pl_layout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(My_Push_Const), &pk);
-    rvk_draw_buffers(vtx_buff, idx_buff);
-    pk.x = 29+2, pk.y = 27, pk.x0 = 26, pk.y0 = 181, pk.x1 = 51, pk.y1 = 209;
-    rvk_push_const(quad_2d.pl_layout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(My_Push_Const), &pk);
-    rvk_draw_buffers(vtx_buff, idx_buff);
+    const char *hello = "Hello World!";
+    int x = 0;
+    int y = 0;
+    for (size_t i = 0; i < strlen(hello); i++) {
+        stbtt_bakedchar cd = cdata[hello[i]-32];
+        My_Push_Const pk = {
+            .x = x + cd.xoff,
+            .y = y + 63 + cd.yoff,
+            .x0 = cd.x0,
+            .y0 = cd.y0,
+            .x1 = cd.x1,
+            .y1 = cd.y1,
+            .xoffset = 3,
+            .yoffset = -35,
+        };
+        rvk_push_const(quad_2d.pl_layout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(My_Push_Const), &pk);
+        rvk_draw_buffers(vtx_buff, idx_buff);
+        x += cd.xadvance-1;
+    }
 }
 
 void print_cdata(int i, stbtt_bakedchar *cdata)
@@ -179,9 +182,9 @@ int main()
     // for (size_t i = 0; i < strlen(hello); i++) {
     //     print_cdata(hello[i]-32, cdata);
     // }
-    // for (size_t i = 0; i < CHAR_COUNT; i++) {
-    //     print_cdata(i, cdata);
-    // }
+    for (size_t i = 0; i < CHAR_COUNT; i++) {
+        print_cdata(i, cdata);
+    }
     print_cdata('R'-32, cdata);
     print_cdata('e'-32, cdata);
 
@@ -200,7 +203,7 @@ int main()
     set_target_fps(60);
     while(!window_should_close()) {
         begin_drawing(BLUE);
-            draw_quad_2d(vtx_buff, idx_buff);
+            draw_quad_2d(vtx_buff, idx_buff, cdata);
         end_drawing();
     }
 

@@ -40,17 +40,19 @@ void main()
     // int y = 27;
     int x = push_const.x;
     int y = push_const.y;
+    // int x = 0;
+    // int y = 37;
 
     ivec2 pixel_coords = ivec2(in_uv*vec2(400, 400));
     int dx = x1 - x0;
     int dy = y1 - y0;
     // int x_fin = pixel_coords.x + 
 
-
-    if (pixel_coords.x > x &&
+    if (pixel_coords.x >= x &&
         pixel_coords.x < x + dx &&
-        pixel_coords.y > y &&
+        pixel_coords.y >= y &&
         pixel_coords.y < y + dy) {
+        // ivec2 tex = pixel_coords - ivec2(x, y) + ivec2(x0, y0);
         ivec2 tex = pixel_coords - ivec2(x, y) + ivec2(x0, y0);
         float alpha = texelFetch(tex_sampler, tex, 0).r;
         vec4 text_color = vec4(0.0, 0.0, 0.0, 1.0);
