@@ -11,16 +11,10 @@
 #define RVK_EXIT_APP
 #endif
 
-// easy: requires little thinking just need to go through the errors
-// ----------------------------------------------------------------------------------------------
-// ----------------------------------------------------------------------------------------------
-// medium: requires some thinking but there's common approaches to solve
-// TODO: consider using VK_WHOLE_SIZE as an option for buffer copy
-// TODO: feature requesting should be little more robust, required to fix examples that require features
+// TODO: renaming for better memory recall example 'rvk_upload_vtx_buff' is terse but hard to remember
+// the more verbose rvk_upload_vertex_buffer, would be easier to guess albeit slightly more typing
+// TODOOO: feature requesting should be little more robust, required to fix examples that require features
 // TODO: device specification should be more robust
-// ----------------------------------------------------------------------------------------------
-// hard: not clear what the best solution is, meaning I will have to make thoughtful compromises
-// ----------------------------------------------------------------------------------------------
 // TODO: texture and image needs to be rethought for example memory should be in texture
 // TODO: rework rvk_img_init in the same way I re-wored rvk_buff_init
 
@@ -126,7 +120,7 @@ typedef struct {
     VkExtent2D extent;
     VkImage handle;
     VkDeviceMemory mem;
-    VkImageAspectFlags aspect_mask;
+    VkImageAspectFlags aspect_mask; // TODO: this shouldn't really be here
     VkFormat format;
 } Rvk_Image;
 
@@ -167,7 +161,11 @@ typedef struct {
     Rvk_Image depth_img;
     VkImageView depth_img_view;
     bool using_validation;
+
+    // TODO: this is really hacky of me, I should have a proper way
+    // to query/enable features
     bool enable_atomic_features;
+    bool enable_multiview_feature;
 } Rvk_Context;
 
 typedef struct {
@@ -190,6 +188,7 @@ void rvk_compute_pl_init(const char *shader_name, VkPipelineLayout pl_layout, Vk
 void rvk_shader_mod_init(const char *file_name, VkShaderModule *module);
 void rvk_render_pass_init(void);
 VkRenderPass rvk_create_basic_render_pass(void);
+VkRenderPass rvk_create_multiview_render_pass(void);
 void rvk_create_render_pass(VkRenderPassCreateInfo *rp_create_info, VkRenderPass *render_pass);
 VkFormat rvk_surface_fmt(void);
 void rvk_destroy_render_pass(VkRenderPass render_pass);
@@ -204,6 +203,7 @@ VkCommandBuffer rvk_get_comp_buff(void);
 void rvk_reset_pool(VkDescriptorPool pool);
 double rvk_dt(void);
 void rvk_enable_atomic_features();
+void rvk_enable_multiview_feature();
 
 /* platform specifics */
 #ifdef PLATFORM_DESKTOP_GLFW
@@ -220,7 +220,10 @@ double rvk_get_glfw_time();
 void rvk_set_android_asset_man(AAssetManager *aam);
 #endif
 
+// TODO: switch to verb object
 void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena);
+void rvk_destroy_descriptor_pool_arena(Rvk_Descriptor_Pool_Arena arena);
+Rvk_Descriptor_Pool_Arena rvk_create_descriptor_pool_arena();
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena);
 void rvk_descriptor_pool_arena_alloc_set(Rvk_Descriptor_Pool_Arena *arena, Rvk_Descriptor_Set_Layout *ds_layout, VkDescriptorSet *set);
 const char *rvk_desc_type_to_str(Rvk_Descriptor_Type type);
@@ -332,9 +335,13 @@ void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds
 void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count, VkExtent2D extent);
 void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff);
 void rvk_bind_vertex_buffers(Rvk_Buffer vtx_buff);
-void rvk_cmd_draw(Rvk_Buffer vtx_buff);
 void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void rvk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
+void rvk_cmd_bind_pipeline(VkPipeline pl, VkPipelineBindPoint bind_point);
+void rvk_cmd_bind_descriptor_sets(VkPipelineLayout pl_layout, VkPipelineBindPoint bind_point, VkDescriptorSet *set);
+void rvk_cmd_set_viewport(VkViewport viewport);
+void rvk_cmd_set_scissor(VkRect2D scissor);
+void rvk_cmd_draw(uint32_t vertex_count);
 
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void rvk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value);
@@ -350,8 +357,11 @@ void rvk_idx_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer
 void rvk_stage_buff_init(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_upload_vtx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 Rvk_Buffer rvk_upload_vtx_buff2(size_t size, size_t count, void *data);
+Rvk_Buffer rvk_create_vertex_buffer(size_t size, size_t count, void *data);
+Rvk_Buffer rvk_create_index_buffer(size_t size, size_t count, void *data);
 void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer);
 void rvk_buff_destroy(Rvk_Buffer buffer);
+void rvk_destroy_buffer(Rvk_Buffer buffer);
 void rvk_buff_map(Rvk_Buffer *buff);
 void rvk_buff_unmap(Rvk_Buffer buff);
 void rvk_buff_staged_upload(Rvk_Buffer buff);
@@ -407,11 +417,47 @@ bool rvk_has_unified_gfx_and_present_queue(VkPhysicalDevice phys_device);
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties);
 void rvk_img_copy(VkImage dst_img, VkBuffer src_buff, VkExtent2D extent);
 Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat fmt);
-Rvk_Render_Texture rvk_create_render_tex(VkExtent2D extent);
+Rvk_Render_Texture rvk_create_render_texture(VkExtent2D extent);
+Rvk_Render_Texture rvk_create_multiview_render_texture(VkExtent2D extent, uint32_t view_count);
+void rvk_destroy_render_texture(Rvk_Render_Texture rt);
 void rvk_unload_texture(Rvk_Texture texture);
+void rvk_destroy_texture(Rvk_Texture texture);
 void rvk_transition_img_layout(VkImage image, VkImageLayout old_layout, VkImageLayout new_layout);
 void rvk_sampler_init(VkSampler *sampler);
 int rvk_format_to_size(VkFormat fmt);
+
+typedef struct {
+    const void*           p_next;
+    VkImageCreateFlags    flags;
+    VkImageType           image_type;
+    VkFormat              format;
+    VkExtent3D            extent;
+    uint32_t              mip_levels;
+    uint32_t              array_layers;
+    VkSampleCountFlagBits samples;
+    VkImageTiling         tiling;
+    VkImageUsageFlags     usage;
+    VkSharingMode         sharing_mode;
+    uint32_t              queue_family_index_count;
+    const uint32_t*       p_queue_family_indices;
+    VkImageLayout         initial_layout;
+} Rvk_Image_Create_Info;
+
+#define rvk_create_image(extent, properties, ...) rvk_create_image_(extent, properties, (Rvk_Image_Create_Info){__VA_ARGS__})
+Rvk_Image rvk_create_image_(VkExtent3D extent, VkMemoryPropertyFlags properties, Rvk_Image_Create_Info img_ci);
+
+typedef struct {
+    const void*                p_next;
+    VkImageViewCreateFlags     flags;
+    VkImage                    image;
+    VkImageViewType            view_type;
+    VkFormat                   format;
+    VkComponentMapping         components;
+    VkImageSubresourceRange    subresource_range;
+} Rvk_Image_View_Create_Info;
+
+#define rvk_create_image_view(img_view, ...) rvk_create_image_view_(img_view, (Rvk_Image_View_Create_Info){__VA_ARGS__})
+void rvk_create_image_view_(VkImageView *img_view, Rvk_Image_View_Create_Info ci);
 
 #define rvk_return_defer(value) do { result = (value); goto defer; } while(0)
 
@@ -864,19 +910,22 @@ void rvk_device_init()
         features.shaderInt64 = VK_TRUE;
     }
 
-    // this section will only get used if we enable atomic features
-    VkPhysicalDeviceVulkan13Features features13 = {
+    // extended_features
+    VkPhysicalDeviceVulkan13Features atomic_sync_feature = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .synchronization2 = VK_TRUE,
     };
-    VkPhysicalDeviceVulkan12Features features12 = {
+    VkPhysicalDeviceVulkan12Features shader_buff_int_64_feature = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .pNext = &features13,
+        .pNext = &atomic_sync_feature,
         .shaderBufferInt64Atomics = VK_TRUE,
     };
-    VkPhysicalDeviceFeatures2 all_features = {
+    VkPhysicalDeviceMultiviewFeaturesKHR multiview_feature = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR,
+        .multiview = VK_TRUE,
+    };
+    VkPhysicalDeviceFeatures2 extended_features = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = &features12,
         .features = features,
     };
 
@@ -890,7 +939,14 @@ void rvk_device_init()
     };
 
     if (rvk_ctx.enable_atomic_features) {
-        device_ci.pNext = &all_features;
+        extended_features.pNext = &shader_buff_int_64_feature,
+        device_ci.pNext = &extended_features;
+        device_ci.pEnabledFeatures = NULL;
+    }
+
+    if (rvk_ctx.enable_multiview_feature) {
+        extended_features.pNext = &multiview_feature,
+        device_ci.pNext = &extended_features;
         device_ci.pEnabledFeatures = NULL;
     }
 
@@ -948,6 +1004,7 @@ void rvk_swapchain_init()
 
 void rvk_img_view_init(Rvk_Image img, VkImageView *img_view)
 {
+    rvk_log(RVK_WARNING, "deprecated in favor of rvk_create_image_view");
     VkImageViewCreateInfo img_view_ci = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = img.handle,
@@ -962,15 +1019,57 @@ void rvk_img_view_init(Rvk_Image img, VkImageView *img_view)
     RAG_VK(vkCreateImageView(rvk_ctx.device, &img_view_ci, NULL, img_view));
 }
 
+void rvk_create_image_view_(VkImageView *img_view, Rvk_Image_View_Create_Info ci)
+{
+    VkImageViewCreateInfo actual_ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+
+    actual_ci.pNext      = (ci.p_next           ) ? ci.p_next            : NULL;
+    actual_ci.flags      = (ci.flags            ) ? ci.flags             : 0;
+    actual_ci.viewType   = (ci.view_type        ) ? ci.view_type         : VK_IMAGE_VIEW_TYPE_2D;
+
+    if (ci.components.r || ci.components.g || ci.components.b || ci.components.a)
+        actual_ci.components = ci.components;
+
+    /* required */
+    if (ci.format) {
+        actual_ci.format = ci.format;
+    } else {
+        rvk_log(RVK_ERROR, "required image view format");
+        RVK_EXIT_APP;
+    }
+    if (ci.image) {
+        actual_ci.image = ci.image;
+    } else {
+        rvk_log(RVK_ERROR, "required image handle for creating image view");
+        RVK_EXIT_APP;
+    }
+    if (ci.subresource_range.aspectMask ||
+        ci.subresource_range.baseMipLevel ||
+        ci.subresource_range.levelCount ||
+        ci.subresource_range.baseArrayLayer ||
+        ci.subresource_range.layerCount) {
+        actual_ci.subresourceRange = ci.subresource_range;
+    } else {
+        rvk_log(RVK_ERROR, "required subresource_range for image view");
+        RVK_EXIT_APP;
+    }
+
+    RAG_VK(vkCreateImageView(rvk_ctx.device, &actual_ci, NULL, img_view));
+}
+
 void rvk_img_views_init()
 {
     for (size_t i = 0; i < rvk_ctx.swapchain.img_count; i++)  {
-        Rvk_Image img = {
-            .handle = rvk_ctx.swapchain.imgs[i],
-            .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format = rvk_ctx.surface_fmt.format,
+        VkImageSubresourceRange subresource_range = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .levelCount = 1,
+            .layerCount = 1,
         };
-        rvk_img_view_init(img, &rvk_ctx.swapchain.img_views[i]);
+        rvk_create_image_view(
+            &rvk_ctx.swapchain.img_views[i],
+            .image = rvk_ctx.swapchain.imgs[i],
+            .format = rvk_ctx.surface_fmt.format,
+            .subresource_range = subresource_range);
     }
 }
 
@@ -1127,24 +1226,22 @@ void rvk_create_graphics_pipelines_(VkPipeline *pl, Rvk_Graphics_Pipeline_Create
     actual_ci.pVertexInputState = ci.p_vertex_input_state;
     if (!actual_ci.pVertexInputState) {
         rvk_log(RVK_ERROR, "cannot create pipeline because vertex input state missing, try something like this:");
-        rvk_log(RVK_ERROR, "");
-        rvk_log(RVK_ERROR, "VkVertexInputAttributeDescription vert_attrs[] = {");
-        rvk_log(RVK_ERROR, "    { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, position), },");
-        rvk_log(RVK_ERROR, "    { .location = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, color),    },");
-        rvk_log(RVK_ERROR, "    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       },");
-        rvk_log(RVK_ERROR, "};");
-        rvk_log(RVK_ERROR, "VkVertexInputBindingDescription vert_bindings = {");
-        rvk_log(RVK_ERROR, "    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,");
-        rvk_log(RVK_ERROR, "    .stride    = sizeof(Your_Vertex),");
-        rvk_log(RVK_ERROR, "};");
-        rvk_log(RVK_ERROR, "VkPipelineVertexInputStateCreateInfo vertex_input_ci = {");
-        rvk_log(RVK_ERROR, "    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,");
-        rvk_log(RVK_ERROR, "    .vertexBindingDescriptionCount = 1,");
-        rvk_log(RVK_ERROR, "    .pVertexBindingDescriptions = &vert_bindings,");
-        rvk_log(RVK_ERROR, "    .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),");
-        rvk_log(RVK_ERROR, "    .pVertexAttributeDescriptions = vert_attrs,");
-        rvk_log(RVK_ERROR, "};");
-        rvk_log(RVK_ERROR, "");
+        printf("VkVertexInputAttributeDescription vert_attrs[] = {\n");
+        printf("    { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, position), },\n");
+        printf("    { .location = 1, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(Your_Vertex, color),    },\n");
+        printf("    { .location = 2, .format = VK_FORMAT_R32G32_SFLOAT,    .offset = offsetof(Your_Vertex, uv),       },\n");
+        printf("};\n");
+        printf("VkVertexInputBindingDescription vert_bindings = {\n");
+        printf("    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,\n");
+        printf("    .stride    = sizeof(Your_Vertex),\n");
+        printf("};\n");
+        printf("VkPipelineVertexInputStateCreateInfo vertex_input_ci = {\n");
+        printf("    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,\n");
+        printf("    .vertexBindingDescriptionCount = 1,\n");
+        printf("    .pVertexBindingDescriptions = &vert_bindings,\n");
+        printf("    .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),\n");
+        printf("    .pVertexAttributeDescriptions = vert_attrs,\n");
+        printf("};\n");
         rvk_log(RVK_ERROR, "Then pass that in i.e. rvk_create_graphics_pipelines(&your_pl, ..., .p_vertex_input_state=&vertex_input_ci)");
         RVK_EXIT_APP;
     }
@@ -1388,7 +1485,14 @@ void rvk_reset_pool(VkDescriptorPool pool)
 
 void rvk_enable_atomic_features()
 {
+    rvk_log(RVK_INFO, "enabling atomic featurer");
     rvk_ctx.enable_atomic_features = true;
+}
+
+void rvk_enable_multiview_feature()
+{
+    rvk_log(RVK_INFO, "enabling multiview feature");
+    rvk_ctx.enable_multiview_feature = true;
 }
 
 // TODO: make this obsolete with rvk_create_shader_module
@@ -1818,12 +1922,6 @@ void rvk_bind_vertex_buffers(Rvk_Buffer vtx_buff)
     vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
 }
 
-void rvk_cmd_draw(Rvk_Buffer vtx_buff)
-{
-    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
-    vkCmdDraw(cmd_buff, vtx_buff.count, 1, 0, 0);
-}
-
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z)
 {
     vkCmdBindPipeline(rvk_ctx.cmd_buff, VK_PIPELINE_BIND_POINT_COMPUTE, pl);
@@ -1974,15 +2072,22 @@ void rvk_recreate_swapchain()
 
 void rvk_depth_init()
 {
-    rvk_ctx.depth_img.extent = rvk_ctx.extent;
-    rvk_ctx.depth_img.aspect_mask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    rvk_ctx.depth_img.format = VK_FORMAT_D32_SFLOAT;
-    rvk_img_init(
-        &rvk_ctx.depth_img,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
-    rvk_img_view_init(rvk_ctx.depth_img, &rvk_ctx.depth_img_view);
+    VkExtent3D extent = {rvk_ctx.extent.width, rvk_ctx.extent.height, 1};
+    rvk_ctx.depth_img = rvk_create_image(
+        extent,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        .format = VK_FORMAT_D32_SFLOAT,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    VkImageSubresourceRange subresource_range = {
+        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+        .levelCount = 1,
+        .layerCount = 1,
+    };
+    rvk_create_image_view(
+        &rvk_ctx.depth_img_view,
+        .image = rvk_ctx.depth_img.handle,
+        .format = VK_FORMAT_D32_SFLOAT,
+        .subresource_range = subresource_range);
 }
 
 void rvk_uniform_buff_init(size_t size, void *data, Rvk_Buffer *buffer)
@@ -2555,6 +2660,38 @@ Rvk_Buffer rvk_upload_vtx_buff2(size_t size, size_t count, void *data)
     return buff;
 }
 
+Rvk_Buffer rvk_create_vertex_buffer(size_t size, size_t count, void *data)
+{
+    Rvk_Buffer buff = {0};
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_VERTEX,
+        data,
+        &buff
+    );
+    rvk_buff_staged_upload(buff);
+    return buff;
+}
+
+Rvk_Buffer rvk_create_index_buffer(size_t size, size_t count, void *data)
+{
+    Rvk_Buffer buff = {0};
+    rvk_buff_init(
+        size,
+        count,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        RVK_BUFFER_TYPE_INDEX,
+        data,
+        &buff
+    );
+    rvk_buff_staged_upload(buff);
+    return buff;
+}
+
 void rvk_upload_idx_buff(size_t size, size_t count, void *data, Rvk_Buffer *buffer)
 {
     rvk_buff_init(
@@ -2594,6 +2731,12 @@ void rvk_buff_unmap(Rvk_Buffer buff)
 }
 
 void rvk_buff_destroy(Rvk_Buffer buffer)
+{
+    vkDestroyBuffer(rvk_ctx.device, buffer.handle, NULL);
+    vkFreeMemory(rvk_ctx.device, buffer.mem, NULL);
+}
+
+void rvk_destroy_buffer(Rvk_Buffer buffer)
 {
     vkDestroyBuffer(rvk_ctx.device, buffer.handle, NULL);
     vkFreeMemory(rvk_ctx.device, buffer.mem, NULL);
@@ -2659,6 +2802,7 @@ void rvk_buff_copy(Rvk_Buffer dst_buff, Rvk_Buffer src_buff, VkDeviceSize size)
 
 void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags properties)
 {
+    rvk_log(RVK_WARNING, "deprecated in favor of rvk_create_image");
     if (img->extent.width == 0 && img->extent.height == 0) {
         rvk_log(RVK_ERROR, "Image must be set with width/height before calling rvk_img_init");
         RVK_EXIT_APP;
@@ -2691,6 +2835,58 @@ void rvk_img_init(Rvk_Image *img, VkImageUsageFlags usage, VkMemoryPropertyFlags
     }
     RAG_VK(vkAllocateMemory(rvk_ctx.device, &alloc_ci, NULL, &img->mem));
     RAG_VK(vkBindImageMemory(rvk_ctx.device, img->handle, img->mem, 0));
+}
+
+Rvk_Image rvk_create_image_(VkExtent3D extent, VkMemoryPropertyFlags properties, Rvk_Image_Create_Info img_ci)
+{
+    Rvk_Image img = {0};
+
+    /* setup and create the image*/
+    VkImageCreateInfo actual_ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    actual_ci.pNext                 = (img_ci.p_next                  ) ? img_ci.p_next                   : NULL;
+    actual_ci.flags                 = (img_ci.flags                   ) ? img_ci.flags                    : 0;
+    actual_ci.imageType             = (img_ci.image_type              ) ? img_ci.image_type               : VK_IMAGE_TYPE_2D;
+    actual_ci.mipLevels             = (img_ci.mip_levels              ) ? img_ci.mip_levels               : 1;
+    actual_ci.arrayLayers           = (img_ci.array_layers            ) ? img_ci.array_layers             : 1;
+    actual_ci.samples               = (img_ci.samples                 ) ? img_ci.samples                  : VK_SAMPLE_COUNT_1_BIT;
+    actual_ci.tiling                = (img_ci.tiling                  ) ? img_ci.tiling                   : VK_IMAGE_TILING_OPTIMAL;
+    actual_ci.sharingMode           = (img_ci.sharing_mode            ) ? img_ci.sharing_mode             : VK_SHARING_MODE_EXCLUSIVE;
+    actual_ci.queueFamilyIndexCount = (img_ci.queue_family_index_count) ? img_ci.queue_family_index_count : 0;
+    actual_ci.pQueueFamilyIndices   = (img_ci.p_queue_family_indices  ) ? img_ci.p_queue_family_indices   : NULL;
+    actual_ci.initialLayout         = (img_ci.initial_layout          ) ? img_ci.initial_layout           : VK_IMAGE_LAYOUT_UNDEFINED;
+    if (img_ci.usage) {
+        actual_ci.usage = img_ci.usage;
+    } else {
+        actual_ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    }
+    if (img_ci.format) {
+        actual_ci.format = img_ci.format;
+    } else {
+        rvk_log(RVK_ERROR, "failed to create image, must specify image format (e.g. VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT)");
+        RVK_EXIT_APP;
+    }
+    actual_ci.extent = extent;
+    RAG_VK(vkCreateImage(rvk_ctx.device, &actual_ci, NULL, &img.handle));
+
+    /* allocate resources for image */
+    VkMemoryRequirements mem_reqs = {0};
+    vkGetImageMemoryRequirements(rvk_ctx.device, img.handle, &mem_reqs);
+
+    VkMemoryAllocateInfo alloc_ci = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_reqs.size,
+    };
+    if (!rvk_find_mem_type_idx(mem_reqs.memoryTypeBits, properties, &alloc_ci.memoryTypeIndex)) {
+        rvk_log(RVK_ERROR, "Memory not suitable based on memory requirements");
+        RVK_EXIT_APP;
+    }
+    RAG_VK(vkAllocateMemory(rvk_ctx.device, &alloc_ci, NULL, &img.mem));
+    RAG_VK(vkBindImageMemory(rvk_ctx.device, img.handle, img.mem, 0));
+
+    /* book keeping */
+    img.extent = (VkExtent2D){actual_ci.extent.width, actual_ci.extent.height}; // TODO: this probably means that image should be VkExtent3D
+    img.format = actual_ci.format;
+    return img;
 }
 
 void rvk_cmd_pool_init()
@@ -2998,16 +3194,13 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
     rvk_buff_unmap(stg_buff);
 
     /* create the image */
-    Rvk_Image img = {
-        .extent  = {width, height},
-        .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+    VkExtent3D extent = {width, height, 1};
+    Rvk_Image img = rvk_create_image(
+        extent,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         .format = fmt,
-    };
-    rvk_img_init(
-        &img,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-    );
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
     rvk_transition_img_layout(img.handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     rvk_img_copy(img.handle, stg_buff.handle, img.extent);
     rvk_transition_img_layout(
@@ -3018,7 +3211,16 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
 
     /* create image view */
     VkImageView img_view;
-    rvk_img_view_init(img, &img_view);
+    VkImageSubresourceRange subresource_range = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .levelCount = 1,
+        .layerCount = 1,
+    };
+    rvk_create_image_view(
+        &img_view,
+        .image = img.handle,
+        .format = fmt,
+        .subresource_range = subresource_range);
 
     /* create sampler */
     VkPhysicalDeviceProperties props = {0};
@@ -3051,7 +3253,7 @@ Rvk_Texture rvk_load_texture(void *data, size_t width, size_t height, VkFormat f
     return texture;
 }
 
-Rvk_Render_Texture rvk_create_render_tex(VkExtent2D extent)
+Rvk_Render_Texture rvk_create_render_texture(VkExtent2D extent)
 {
     Rvk_Render_Texture rt = {0};
     rt.extent = extent;
@@ -3110,7 +3312,191 @@ Rvk_Render_Texture rvk_create_render_tex(VkExtent2D extent)
     return rt;
 }
 
+void rvk_destroy_render_texture(Rvk_Render_Texture rt)
+{
+    rvk_unload_texture(rt.depth);
+    rvk_unload_texture(rt.color);
+    rvk_destroy_render_pass(rt.rp);
+    rvk_destroy_frame_buff(rt.fb);
+}
+
+VkRenderPass rvk_create_multiview_render_pass()
+{
+    VkRenderPass rp;
+    VkAttachmentDescription color = {
+        .format = rvk_ctx.surface_fmt.format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+    VkAttachmentReference color_ref = {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
+    VkAttachmentDescription depth = {
+        .format = VK_FORMAT_D32_SFLOAT,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    };
+    VkAttachmentReference depth_ref = {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
+    // TODO: I don't fully understand this... still
+    VkSubpassDependency dependencies[] = {
+        {
+            .srcSubpass = VK_SUBPASS_EXTERNAL,
+            .dstSubpass = 0,
+            .srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+            .dependencyFlags = 0,
+        },
+        {
+            .srcSubpass = VK_SUBPASS_EXTERNAL,
+            .dstSubpass = 0,
+            .srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+        },
+        {
+            .srcSubpass = 0,
+            .dstSubpass = VK_SUBPASS_EXTERNAL,
+            .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+        },
+    };
+
+    VkSubpassDescription subpass = {
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_ref,
+        .pDepthStencilAttachment = &depth_ref,
+    };
+    VkAttachmentDescription attachments[] = {color, depth};
+
+    // TODO: this works for stereo, but wont work for CAVE
+    uint32_t view_mask = 3;        // 00000011, view rendering broadcast to first and second layer
+    uint32_t correlation_mask = 3; // 00000011, implementation may introduce optimizations
+    VkRenderPassMultiviewCreateInfo rp_multiview_ci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+        .subpassCount = 1,
+        .pViewMasks = &view_mask,
+        .correlationMaskCount = 1,
+        .pCorrelationMasks = &correlation_mask,
+    };
+
+    VkRenderPassCreateInfo render_pass_ci = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .pNext = &rp_multiview_ci,
+        .attachmentCount = RVK_ARRAY_LEN(attachments),
+        .pAttachments = attachments,
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+        .dependencyCount = RVK_ARRAY_LEN(dependencies),
+        .pDependencies = dependencies,
+    };
+
+    rvk_create_render_pass(&render_pass_ci, &rp);
+    return rp;
+}
+
+Rvk_Render_Texture rvk_create_multiview_render_texture(VkExtent2D extent, uint32_t view_count)
+{
+    VkExtent3D extent3d = (VkExtent3D){extent.width, extent.height, 1};
+    Rvk_Render_Texture rt = { .extent = extent };
+    rt.depth.img = rvk_create_image(
+        extent3d,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        .format = VK_FORMAT_D32_SFLOAT,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        .array_layers = view_count,
+    );
+    VkImageSubresourceRange subresource_range = {
+        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = view_count,
+    };
+    rvk_create_image_view(
+        &rt.depth.view,
+        .subresource_range = subresource_range,
+        .image = rt.depth.img.handle,
+        .format = rt.depth.img.format,
+        .view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+    );
+
+    /* book keeping */
+    rt.depth.info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    rt.depth.info.imageView   = rt.depth.view;
+
+    /* create the color image */
+    rt.color.img = rvk_create_image(
+        extent3d,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        .format = rvk_ctx.surface_fmt.format,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .array_layers = view_count,
+    );
+
+    subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    rvk_create_image_view(
+        &rt.color.view,
+        .subresource_range = subresource_range,
+        .image = rt.color.img.handle,
+        .format = rt.color.img.format,
+        .view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+    );
+    rvk_sampler_init(&rt.color.sampler);
+
+    /* book keeping */
+    rt.color.info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    rt.color.info.imageView   = rt.color.view;
+    rt.color.info.sampler     = rt.color.sampler;
+
+    /* create the frame buffer which combines both depth and color */
+    rt.img_views[0] = rt.color.view;
+    rt.img_views[1] = rt.depth.view;
+
+    // TODO: the viewcount doesn't do anything here and it should
+    rt.rp = rvk_create_multiview_render_pass();
+
+    rvk_create_frame_buff(
+        extent.width,
+        extent.height,
+        rt.img_views,
+        RVK_ARRAY_LEN(rt.img_views),
+        rt.rp,
+        &rt.fb
+    );
+    return rt;
+}
+
 void rvk_unload_texture(Rvk_Texture texture)
+{
+    vkDestroySampler(rvk_ctx.device, texture.sampler, NULL);
+    vkDestroyImageView(rvk_ctx.device, texture.view, NULL);
+    vkDestroyImage(rvk_ctx.device, texture.img.handle, NULL);
+    vkFreeMemory(rvk_ctx.device, texture.img.mem, NULL);
+}
+
+void rvk_destroy_texture(Rvk_Texture texture)
 {
     vkDestroySampler(rvk_ctx.device, texture.sampler, NULL);
     vkDestroyImageView(rvk_ctx.device, texture.view, NULL);
@@ -3208,6 +3594,32 @@ void rvk_descriptor_pool_arena_init(Rvk_Descriptor_Pool_Arena *arena)
     rvk_create_ds_pool(pool_ci, &arena->pool);
 }
 
+Rvk_Descriptor_Pool_Arena rvk_create_descriptor_pool_arena()
+{
+    Rvk_Descriptor_Pool_Arena arena = {0};
+    VkDescriptorPoolSize pool_sizes[] = {
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLER,                .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,   .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,   .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, .descriptorCount = MAX_DESCRIPTOR_SETS},
+        {.type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,       .descriptorCount = MAX_DESCRIPTOR_SETS},
+    };
+    VkDescriptorPoolCreateInfo pool_ci = {
+        .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = RVK_ARRAY_LEN(pool_sizes),
+        .pPoolSizes    = pool_sizes,
+        .maxSets       = MAX_DESCRIPTOR_SETS,
+    };
+    rvk_create_ds_pool(pool_ci, &arena.pool);
+    return arena;
+}
+
 void rvk_descriptor_pool_arena_reset(Rvk_Descriptor_Pool_Arena *arena)
 {
     for (size_t i = 0; i < RVK_DESCRIPTOR_TYPE_COUNT; i++)
@@ -3289,6 +3701,10 @@ void rvk_descriptor_pool_arena_destroy(Rvk_Descriptor_Pool_Arena arena)
     rvk_destroy_ds_pool(arena.pool);
 }
 
+void rvk_destroy_descriptor_pool_arena(Rvk_Descriptor_Pool_Arena arena)
+{
+    rvk_destroy_ds_pool(arena.pool);
+}
 
 void rvk_destroy_ds_pool(VkDescriptorPool pool)
 {
@@ -3322,6 +3738,31 @@ void rvk_update_ds(size_t count, VkWriteDescriptorSet *writes)
 void rvk_wait_idle()
 {
     RAG_VK(vkDeviceWaitIdle(rvk_ctx.device));
+}
+
+void rvk_cmd_bind_pipeline(VkPipeline pl, VkPipelineBindPoint bind_point)
+{
+    vkCmdBindPipeline(rvk_ctx.cmd_buff, bind_point, pl);
+}
+
+void rvk_cmd_bind_descriptor_sets(VkPipelineLayout pl_layout, VkPipelineBindPoint bind_point, VkDescriptorSet *set)
+{
+    vkCmdBindDescriptorSets(rvk_ctx.cmd_buff, bind_point, pl_layout, 0, 1, set, 0, NULL);
+}
+
+void rvk_cmd_set_viewport(VkViewport viewport)
+{
+    vkCmdSetViewport(rvk_ctx.cmd_buff, 0, 1, &viewport);
+}
+
+void rvk_cmd_set_scissor(VkRect2D scissor)
+{
+    vkCmdSetScissor(rvk_ctx.cmd_buff, 0, 1, &scissor);
+}
+
+void rvk_cmd_draw(uint32_t vertex_count)
+{
+    vkCmdDraw(rvk_ctx.cmd_buff, vertex_count, 1, 0, 0);
 }
 
 #endif // RAG_VK_IMPLEMENTATION

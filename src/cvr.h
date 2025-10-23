@@ -261,6 +261,9 @@ void begin_drawing(Color color);                            /* Vulkan for comman
  * don't want to immeidately begin the rendering pass, but still want to start recording commands (such as compute). */
 void begin_frame();
 
+/* ends everything except for rendering pass, called by end_drawing*/
+void end_frame();
+
 void end_drawing();                                         /* Submits commands, presents, and polls for input */
 bool draw_shape(Shape_Type shape_type);                     /* Draw one of the existing shapes (solid fill) */
 void draw_shape_ex(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, Shape_Type shape);
@@ -319,6 +322,8 @@ bool get_matrix_tos(Matrix *model); /* get the top of the matrix stack */
 bool get_mvp(Matrix *mvp);
 bool get_mvp_float16(float16 *mvp);
 Matrix get_view_proj();
+Rvk_Buffer get_shape_vertex_buffer(Shape_Type shape);
+Rvk_Buffer get_shape_index_buffer(Shape_Type shape);
 
 /* color */
 Color color_from_HSV(float hue, float saturation, float value);
