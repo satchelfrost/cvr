@@ -8,9 +8,9 @@
 #define NOB_IMPLEMENTATION
 #include "../../nob.h"
 
-#define CUBE_SPEED 3.0f
+#define CUBE_SPEED 1.0f
 #define ROTATION_SPEED 2.0f
-#define SCALE_SPEED 2.0f
+#define SCALE_SPEED 1.0f
 #define MIN_SCALE 0.4f
 #define MAX_SCALE 2.0f
 #define DEAD_ZONE 0.25f
@@ -41,7 +41,6 @@ typedef enum {
     CUBE_TRANFORM_COUNT,
 } Cube_Transform;
 
-// #define CHEAT_MODE
 bool should_transform(Cube_Transform tform, float *joy_scale)
 {
     float l_joy_x = get_gamepad_axis_movement(GAMEPAD_AXIS_LEFT_X);
@@ -190,26 +189,17 @@ int main(int argc, char **argv)
         .projection = PERSPECTIVE,
     };
 
+    /* handle command line args */
     const char *program = shift(argv, argc);
     while (argc > 0) {
         char *flag = shift(argv, argc);
-        if (strcmp("--ip", flag) == 0) {
-            ip = shift(argv, argc);
-        }
-        if (strcmp("--port", flag) == 0) {
-            port = atoi(shift(argv, argc));
-        }
-        if (strcmp("--debug", flag) == 0) {
-            debug = true;
-        }
-        if (strcmp("--help", flag) == 0) {
-            log_usage(program);
-            return 0;
-        }
+        if (strcmp("--ip", flag) == 0)    ip = shift(argv, argc);
+        if (strcmp("--port", flag) == 0)  port = atoi(shift(argv, argc));
+        if (strcmp("--debug", flag) == 0) debug = true;
+        if (strcmp("--help", flag) == 0) {log_usage(program); return 0;}
     }
 
     if (!init_networking()) return 1;
-
     init_window(500, 500, "cube");
 
     Cube cube = {.heading = {0.0f, 0.0f, -1.0f}, .scale = 1.0f};
