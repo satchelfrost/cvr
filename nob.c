@@ -468,7 +468,7 @@ bool build_glfw(Config config, const char *platform_path)
 }
 
 static const char *cvr[] = {
-    "core",
+    "cvr",
 };
 
 bool build_cvr_linux(const char *platform_path)

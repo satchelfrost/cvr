@@ -135,9 +135,9 @@ bool is_shape_res_alloc(Shape_Type shape_type);
 void destroy_shape_res();
 
 #if defined(PLATFORM_DESKTOP_GLFW)
-    #include "platform_desktop.c"
+    #include "platforms/cvr_glfw.c"
 #elif defined(PLATFORM_ANDROID_QUEST)
-    #include "platform_quest.c"
+    #include "platforms/cvr_quest3.c"
 #else
     /* alternative backend here */
 #endif
