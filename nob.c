@@ -416,11 +416,12 @@ bool build_glfw_linux(const char *platform_path)
     const char *build_path = nob_temp_sprintf("%s/glfw", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
     const char *output_path = nob_temp_sprintf("%s/glfw.o", build_path);
-    const char *input_path = nob_temp_sprintf("./external/raylib-5.0/rglfw.c");
+    const char *input_path = nob_temp_sprintf("./src/external/raylib-5.0/rglfw.c");
     if (nob_needs_rebuild(output_path, &input_path, 1)) {
+        nob_log(NOB_INFO, "building glfw...");
         nob_cmd_append(&cmd, "cc");
-        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
-        nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw");
+        nob_cmd_append(&cmd, "-I./src/external/raylib-5.0/glfw/include");
+        nob_cmd_append(&cmd, "-I./src/external/raylib-5.0/glfw");
         nob_cmd_append(&cmd, "-c", input_path);
         nob_cmd_append(&cmd, "-o", output_path);
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
@@ -480,6 +481,7 @@ bool build_cvr_linux(const char *platform_path)
     /* build modules */
     const char *build_path = nob_temp_sprintf("%s/cvr", platform_path);
     if (!nob_mkdir_if_not_exists(build_path)) nob_return_defer(false);
+    // TODO: I should instead check if nob_needs_rebuild on all of the modules before iterating
     for (size_t i = 0; i < NOB_ARRAY_LEN(cvr); i++) {
         const char *output_path = nob_temp_sprintf("%s/%s.o", build_path, cvr[i]);
         const char *input_path = nob_temp_sprintf("./src/%s.c", cvr[i]);
@@ -491,8 +493,8 @@ bool build_cvr_linux(const char *platform_path)
             nob_cmd_append(&cmd, "cc");
             nob_cmd_append(&cmd, "-DPLATFORM_DESKTOP_GLFW");
             nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
-            nob_cmd_append(&cmd, "-I./external");
-            nob_cmd_append(&cmd, "-I./external/raylib-5.0/glfw/include");
+            nob_cmd_append(&cmd, "-I./src/external");
+            nob_cmd_append(&cmd, "-I./src/external/raylib-5.0/glfw/include");
             nob_cmd_append(&cmd, "-DVK_VALIDATION");
             nob_cmd_append(&cmd, "-c", input_path);
             nob_cmd_append(&cmd, "-o", output_path);
@@ -655,11 +657,12 @@ bool build_example_linux(Config config, const char *build_path)
     bool c_files_updated = nob_needs_rebuild(exec_path, c_files.items, example->c_files.count);
     bool libcvr_updated = nob_needs_rebuild(exec_path, &libcvr_path, 1);
     if (c_files_updated || libcvr_updated) {
+        nob_log(NOB_INFO, "building example %s...", example->name);
         cmd.count = 0;
         nob_cmd_append(&cmd, "cc");
         nob_cmd_append(&cmd, "-Werror", "-Wall", "-Wextra", "-g");
         nob_cmd_append(&cmd, "-I./src");
-        nob_cmd_append(&cmd, "-I./external");
+        nob_cmd_append(&cmd, "-I./src/external");
         nob_cmd_append(&cmd, "-o", exec_path);
         nob_cmd_append(&cmd, nob_temp_sprintf("%s/main.c", example_path));
         const char *cvr_path = nob_temp_sprintf("-L./build/%s/cvr", target_names[config.target]);
