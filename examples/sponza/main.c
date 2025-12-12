@@ -8,35 +8,46 @@
 #include "cgltf.h" // https://github.com/jkuhlmann/cgltf
 
 typedef struct {
-    uint32_t *items;
+    uint16_t *items;
     size_t count;
     size_t capacity;
 } glTF_Indices;
 
 typedef struct {
     Vector3 position;
-    Vector2 uv;
+    Vector2 texcoord;
     Vector3 normal;
     Vector4 tanget;
-} glTF_Vertex;
+} glTF_Attribute_Group;
 
 typedef struct {
-    glTF_Vertex *items;
+    glTF_Attribute_Group *items;
     size_t count;
     size_t capacity;
     Rvk_Buffer buff;
-} glTF_Vertices;
+} glTF_Attribute_Groups;
 
 typedef struct {
-    glTF_Vertices vertices;
-    int material_id; 
+    glTF_Attribute_Groups attr_groups;
+    glTF_Indices indices;
 } glTF_Mesh;
 
 typedef struct {
     glTF_Mesh *items;
     size_t count;
     size_t capacity;
-} glTF_Model;
+} glTF_Meshes;
+
+typedef struct {
+    const char *uri;
+    String_Builder sb;
+} glTF_Buffer;
+
+typedef struct {
+    glTF_Buffer *items;
+    size_t count;
+    size_t capacity;
+} glTF_Buffers;
 
 const char *cgltf_res_to_str(cgltf_result res)
 {
@@ -73,6 +84,11 @@ const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
     }
 }
 
+// float *load_attrribute_array()
+// {
+//
+// }
+
 int main()
 {
     const char *gltf_file_name = "res/Sponza.gltf";
@@ -86,14 +102,67 @@ int main()
     cgltf_result res = cgltf_parse(&options, sb.items, sb.count, &gltf_data);
     if (res != cgltf_result_success) printf("failed to parse %s: error %s\n", gltf_file_name, cgltf_res_to_str(res));
 
-	printf("meshes_count %zu\n",    gltf_data->meshes_count);
-	printf("materials_count %zu\n", gltf_data->materials_count);
-	printf("accessors_count %zu\n", gltf_data->accessors_count);
-	printf("buffers count %zu\n", gltf_data->buffers_count);
-	printf("buffer views count %zu\n", gltf_data->buffer_views_count);
-	printf("samplers count %zu\n", gltf_data->samplers_count);
-	printf("skins count %zu\n", gltf_data->skins_count);
-	printf("lights count %zu\n", gltf_data->skins_count);
+    /* load buffers */
+    glTF_Buffers buffers = {0};
+    for (size_t i = 0; i < gltf_data->buffers_count; i++) {
+        glTF_Buffer buffer = {0};
+        buffer.uri = strdup(gltf_data->buffers[i].uri);
+        const char *buffer_path = temp_sprintf("res/%s", buffer.uri);
+        if (!read_entire_file(buffer_path, &buffer.sb)) return 1;
+        printf("loaded buffer %s, %zu bytes\n", buffer_path, buffer.sb.count);
+        da_append(&buffers, buffer);
+    }
+
+    /* load images */
+
+    return 0;
+
+    /* load meshes */
+    glTF_Meshes meshes = {0};
+
+    for (size_t m = 0; m < gltf_data->meshes_count; m++) {
+
+        glTF_Mesh mesh = {0};
+
+        for (size_t p = 0; p < gltf_data->meshes[m].primitives_count; p++) {
+            cgltf_primitive primitive = gltf_data->meshes[m].primitives[p];
+            assert(primitive.type == cgltf_primitive_type_triangles);
+
+            /* get the attributes */
+            // cgltf_buffer_view *position_view = NULL;
+            // cgltf_buffer_view *normal_view   = NULL;
+            // cgltf_buffer_view *texcoord_view = NULL;
+            // cgltf_buffer_view *tanget_view   = NULL;
+
+            glTF_Attribute_Group group = {0};
+            // for (size_t a = 0; a < primitive.attributes_count; a++) {
+            //     cgltf_attribute_type type = primitive.attributes[a].type;
+            //     switch (type) {
+            //     case cgltf_attribute_type_position:
+            //         assert(primitive.attributes[a].data->type == cgltf_type_vec3);
+            //         position_view = primitive.attributes[a].data->buffer_view;
+            //         break;
+            //     case cgltf_attribute_type_normal:
+            //         assert(primitive.attributes[a].data->type == cgltf_type_vec3);
+            //         normal_view = primitive.attributes[a].data->buffer_view;
+            //         break;
+            //     case cgltf_attribute_type_tangent:
+            //         assert(primitive.attributes[a].data->type == cgltf_type_vec4);
+            //         tanget_view = primitive.attributes[a].data->buffer_view;
+            //         break;
+            //     case cgltf_attribute_type_texcoord:
+            //         assert(primitive.attributes[a].data->type == cgltf_type_vec2);
+            //         texcorrd_view = primitive.attributes[a].data->buffer_view;
+            //         break;
+            //     default:
+            //         printf("attribute %s unsupported", cgltf_attr_type_to_str(type));
+            //         assert(0);
+            //     }
+            // }
+            da_append(&mesh.attr_groups, group);
+        }
+        da_append(&meshes, mesh);
+    }
 
     return 0;
 }
