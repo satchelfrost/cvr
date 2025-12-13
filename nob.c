@@ -834,7 +834,10 @@ bool run_example_linux(Config config, const char *example_build_path)
     if (config.debug) {
         nob_cmd_append(&cmd, "gf2", "-ex", "start", bin);
         // nob_cmd_append(&cmd, "gdb", "-ex", "start", bin);
-        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
+        if (!nob_cmd_run_sync(cmd)) {
+            nob_log(NOB_ERROR, "ensure you have gf2 installed: https://github.com/nakst/gf");
+            nob_return_defer(false);
+        }
     } else if (config.renderdoc) {
         /* open renderdoc to take a capture */
         nob_cmd_append(&cmd, "renderdoccmd", "capture", "-c", "snapshot", "-w", bin);
