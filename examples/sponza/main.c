@@ -18,36 +18,50 @@ typedef struct {
     Vector2 texcoord;
     Vector3 normal;
     Vector4 tanget;
-} glTF_Attribute_Group;
+} glTF_Vertex;
 
 typedef struct {
-    glTF_Attribute_Group *items;
+    glTF_Vertex *items;
     size_t count;
     size_t capacity;
-} glTF_Attribute_Groups;
+} glTF_Vertices;
+
+typedef enum {
+    MATERIAL_BASE               = (1 << 0),
+    MATERIAL_METALLIC_ROUGHNESS = (1 << 1),
+    MATERIAL_NORMAL             = (1 << 2),
+} Material_Flags;
 
 typedef struct {
+    uint32_t flags;
     size_t base_image_index;
     size_t metallic_roughness_image_index;
     size_t normal_image_index;
+	float base_color_factor[4];
+	float metallic_factor;
+	float roughness_factor;
 } glTF_Material;
+
+typedef enum {
+    ATTRIBUTE_POSITION = (1 << 0),
+    ATTRIBUTE_TEXCOORD = (1 << 1),
+    ATTRIBUTE_NORMAL   = (1 << 2),
+    ATTRIBUTE_TANGET   = (1 << 3),
+} Attribute_Flags;
 
 typedef struct {
     Rvk_Buffer vtx_buff;
     Rvk_Buffer idx_buff;
     glTF_Material material;
     glTF_Indices indices;
-    glTF_Attribute_Groups attr_groups;
+    glTF_Vertices vertices;
+    Attribute_Flags flags;
 } glTF_Primitive;
 
 typedef struct {
     glTF_Primitive *items;
     size_t count;
     size_t capacity;
-} glTF_Primitives;
-
-typedef struct {
-    glTF_Primitive primitives;
 } glTF_Mesh;
 
 typedef struct {
@@ -57,26 +71,10 @@ typedef struct {
 } glTF_Meshes;
 
 typedef struct {
-    const char *uri;
-    String_Builder sb;
-} glTF_Buffer;
-
-typedef struct {
-    glTF_Buffer *items;
+    Rvk_Texture *items;
     size_t count;
     size_t capacity;
-} glTF_Buffers;
-
-typedef struct {
-    const char *uri;
-    String_Builder sb;
-} glTF_Image;
-
-typedef struct {
-    glTF_Image *items;
-    size_t count;
-    size_t capacity;
-} glTF_Images;
+} glTF_Textures;
 
 const char *cgltf_res_to_str(cgltf_result res)
 {
@@ -113,21 +111,77 @@ const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
     }
 }
 
-float *load_attrribute_array(glTF_Buffers buffers, const char *uri, size_t offset)
+void fill_attribute_groups(glTF_Primitive *primitive, cgltf_attribute attribute)
 {
-    float *attribute_array = NULL;
-    for (size_t i = 0; i < buffers.count; i++) {
-        if (strcmp(buffers.items[i].uri, uri) == 0) {
-            assert(offset < buffers.items[i].sb.count);
-            attribute_array = (float *)buffers.items[i].sb.items + offset;
-        }
-    }
+    Vector3 *positions = NULL;
+    Vector3 *normals   = NULL;
+    Vector2 *texcoords = NULL;
+    Vector4 *tangets   = NULL;
 
-    return attribute_array;
+    switch (attribute.type) {
+    case cgltf_attribute_type_position:
+        assert(attribute.data->type == cgltf_type_vec3);
+        positions = (Vector3 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        primitive->flags |= ATTRIBUTE_POSITION;
+        for (size_t i = 0; i < attribute.data->count; i++) {
+            if (primitive->vertices.count <= i) {
+                glTF_Vertex vertex = {.position = positions[i]};
+                da_append(&primitive->vertices, vertex);
+            } else {
+                primitive->vertices.items[i].position = positions[i];
+            }
+        }
+        break;
+    case cgltf_attribute_type_normal:
+        assert(attribute.data->type == cgltf_type_vec3);
+        normals = (Vector3 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        primitive->flags |= ATTRIBUTE_NORMAL;
+        for (size_t i = 0; i < attribute.data->count; i++) {
+            if (primitive->vertices.count < i) {
+                glTF_Vertex vertex = {.normal = normals[i]};
+                da_append(&primitive->vertices, vertex);
+            } else {
+                primitive->vertices.items[i].normal = normals[i];
+            }
+        }
+        break;
+    case cgltf_attribute_type_tangent:
+        assert(attribute.data->type == cgltf_type_vec4);
+        tangets = (Vector4 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        primitive->flags |= ATTRIBUTE_TANGET;
+        for (size_t i = 0; i < attribute.data->count; i++) {
+            if (primitive->vertices.count < i) {
+                glTF_Vertex vertex = {.tanget = tangets[i]};
+                da_append(&primitive->vertices, vertex);
+            } else {
+                primitive->vertices.items[i].tanget = tangets[i];
+            }
+        }
+        break;
+    case cgltf_attribute_type_texcoord:
+        assert(attribute.data->type == cgltf_type_vec2);
+        texcoords = (Vector2 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        primitive->flags |= ATTRIBUTE_TEXCOORD;
+        for (size_t i = 0; i < attribute.data->count; i++) {
+            if (primitive->vertices.count < i) {
+                glTF_Vertex vertex = {.texcoord = texcoords[i]};
+                da_append(&primitive->vertices, vertex);
+            } else {
+                primitive->vertices.items[i].texcoord = texcoords[i];
+            }
+        }
+        break;
+    default:
+        printf("attribute %s unsupported", cgltf_attr_type_to_str(attribute.type));
+        assert(0);
+    }
 }
 
 int main()
 {
+    /* initialize vulkan */
+    init_window(500, 500, "sponza");
+
     /* read and parse the gltf file */
     const char *gltf_file_name = "res/Sponza.gltf";
     String_Builder sb = {0};
@@ -136,29 +190,8 @@ int main()
     cgltf_data *gltf_data = NULL;
     cgltf_result res = cgltf_parse(&options, sb.items, sb.count, &gltf_data);
     if (res != cgltf_result_success) printf("failed to parse %s: error %s\n", gltf_file_name, cgltf_res_to_str(res));
-
-    cgltf_load_buffers(&options, gltf_data, gltf_file_name);
-    printf("size of attribute group %zu\n", sizeof(glTF_Attribute_Group));
-
-    /* load buffers */
-    glTF_Buffers buffers = {0};
-    for (size_t i = 0; i < gltf_data->buffers_count; i++) {
-        glTF_Buffer buffer = {0};
-        buffer.uri = strdup(gltf_data->buffers[i].uri);
-        const char *buffer_path = temp_sprintf("res/%s", buffer.uri);
-        if (!read_entire_file(buffer_path, &buffer.sb)) return 1;
-        da_append(&buffers, buffer);
-    }
-
-    /* load images */
-    glTF_Images images = {0};
-    for (size_t i = 0; i < gltf_data->images_count; i++) {
-        glTF_Image image = {0};
-        image.uri = strdup(gltf_data->images[i].uri);
-        const char *image_path = temp_sprintf("res/%s", image.uri);
-        if (!read_entire_file(image_path, &image.sb)) return 1;
-        da_append(&images, image);
-    }
+    res = cgltf_load_buffers(&options, gltf_data, gltf_file_name);
+    if (res != cgltf_result_success) printf("failed to load buffers: error %s\n", cgltf_res_to_str(res));
 
     /* load meshes */
     glTF_Meshes meshes = {0};
@@ -171,87 +204,54 @@ int main()
             cgltf_primitive primitive = gltf_data->meshes[m].primitives[p];
             assert(primitive.type == cgltf_primitive_type_triangles);
 
-            /* get the attributes for this primitive */
-            cgltf_buffer_view *position_view = NULL;
-            cgltf_buffer_view *normal_view   = NULL;
-            cgltf_buffer_view *texcoord_view = NULL;
-            cgltf_buffer_view *tanget_view   = NULL;
-            size_t position_count = 0;
-            size_t normal_count   = 0;
-            size_t texcoord_count = 0;
-            size_t tanget_count   = 0;
+            /* interleave the attributes for this primitive */
+            glTF_Primitive gltf_primitive = {0};
+            for (size_t a = 0; a < primitive.attributes_count; a++)
+                fill_attribute_groups(&gltf_primitive, primitive.attributes[a]);
 
-            for (size_t a = 0; a < primitive.attributes_count; a++) {
-                cgltf_attribute_type type = primitive.attributes[a].type;
-                switch (type) {
-                case cgltf_attribute_type_position:
-                    assert(primitive.attributes[a].data->type == cgltf_type_vec3);
-                    position_view = primitive.attributes[a].data->buffer_view;
-                    position_count = primitive.attributes[a].data->count;
-                    break;
-                case cgltf_attribute_type_normal:
-                    assert(primitive.attributes[a].data->type == cgltf_type_vec3);
-                    normal_view = primitive.attributes[a].data->buffer_view;
-                    normal_count = primitive.attributes[a].data->count;
-                    break;
-                case cgltf_attribute_type_tangent:
-                    assert(primitive.attributes[a].data->type == cgltf_type_vec4);
-                    tanget_view = primitive.attributes[a].data->buffer_view;
-                    tanget_count = primitive.attributes[a].data->count;
-                    break;
-                case cgltf_attribute_type_texcoord:
-                    assert(primitive.attributes[a].data->type == cgltf_type_vec2);
-                    texcoord_view = primitive.attributes[a].data->buffer_view;
-                    texcoord_count = primitive.attributes[a].data->count;
-                    break;
-                default:
-                    printf("attribute %s unsupported", cgltf_attr_type_to_str(type));
-                    assert(0);
-                }
+            /* grab material indices */
+            cgltf_texture *texture = NULL;
+            texture = primitive.material->pbr_metallic_roughness.base_color_texture.texture;
+            if (texture) {
+                gltf_primitive.material.base_image_index = cgltf_image_index(gltf_data, texture->image);
+                gltf_primitive.material.flags |= MATERIAL_BASE;
             }
-            assert(position_view);
-            assert(normal_view);
-            assert(texcoord_view);
-            assert(tanget_view);
-            assert(position_count == normal_count);
-            assert(normal_count   == texcoord_count);
-            assert(texcoord_count == tanget_count);
+            texture = primitive.material->normal_texture.texture;
+            if (texture) {
+                gltf_primitive.material.normal_image_index = cgltf_image_index(gltf_data, texture->image);
+                gltf_primitive.material.flags |= MATERIAL_METALLIC_ROUGHNESS;
+            }
+            texture = primitive.material->pbr_metallic_roughness.metallic_roughness_texture.texture;
+            if (texture) {
+                gltf_primitive.material.metallic_roughness_image_index = cgltf_image_index(gltf_data, texture->image);
+                gltf_primitive.material.flags |= MATERIAL_NORMAL;
+            }
 
-            float *positions = load_attrribute_array(buffers, position_view->buffer->uri, position_view->offset);
-            float *normals   = load_attrribute_array(buffers, normal_view->buffer->uri, normal_view->offset);
-            float *texcoords = load_attrribute_array(buffers, texcoord_view->buffer->uri, texcoord_view->offset);
-            float *tangets   = load_attrribute_array(buffers, tanget_view->buffer->uri, tanget_view->offset);
-            assert(positions);
-            assert(normals);
-            assert(texcoords);
-            assert(tangets);
+            /* grab indices */
+            assert(primitive.indices->component_type == cgltf_component_type_r_16u);
+            uint16_t *indices = (uint16_t *)cgltf_buffer_view_data(primitive.indices->buffer_view);
+            for (size_t i = 0; i < primitive.indices->count; i++)
+                da_append(&gltf_primitive.indices, indices[i]);
 
-            // for (size_t i = 0; i < position_count; i++) {
-            //     glTF_Attribute_Group group = {
-            //         .position = {
-            //             positions + i*position_view->stride + 0,
-            //             positions + i*position_view->stride + 1,
-            //             positions + i*position_view->stride + 2
-            //         },
-            //         .texcoord = {
-            //             texcoords + i*texcoord_view->stride + 0,
-            //             texcoords + i*texcoord_view->stride + 1,
-            //         },
-            //         .normal   = {
-            //             normals + i*normal_view->stride + 0,
-            //             normals + i*normal_view->stride + 1,
-            //             normals + i*normal_view->stride + 2
-            //         },
-            //         .tanget   = {
-            //             tangets + i*tanget_view->stride + 0,
-            //             tangets + i*tanget_view->stride + 1,
-            //             tangets + i*tanget_view->stride + 2
-            //         },
-            //     };
-            //     da_append(&mesh.attr_groups, group);
-            // }
+            /* upload buffers to GPU */
+            size_t count = gltf_primitive.vertices.count;
+            size_t size  = count * sizeof(*gltf_primitive.vertices.items);
+            gltf_primitive.vtx_buff = rvk_create_vertex_buffer(size, count, gltf_primitive.vertices.items);
+            count = gltf_primitive.indices.count;
+            size  = count * sizeof(*gltf_primitive.indices.items);
+            gltf_primitive.idx_buff = rvk_create_index_buffer(size, count, gltf_primitive.indices.items);
+
+            da_append(&mesh, gltf_primitive);
         }
         da_append(&meshes, mesh);
+    }
+
+    /* load images */
+    glTF_Textures textures = {0};
+    for (size_t i = 0; i < gltf_data->images_count; i++) {
+        const char *image_path = temp_sprintf("res/%s", gltf_data->images[i].uri);
+        Rvk_Texture texture = load_texture_from_image(image_path);
+        da_append(&textures, texture);
     }
 
     return 0;
