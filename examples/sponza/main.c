@@ -111,7 +111,7 @@ const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
     }
 }
 
-void fill_attribute_groups(glTF_Primitive *primitive, cgltf_attribute attribute)
+void populate_vertices(glTF_Primitive *primitive, cgltf_attribute attribute)
 {
     Vector3 *positions = NULL;
     Vector3 *normals   = NULL;
@@ -207,7 +207,7 @@ int main()
             /* interleave the attributes for this primitive */
             glTF_Primitive gltf_primitive = {0};
             for (size_t a = 0; a < primitive.attributes_count; a++)
-                fill_attribute_groups(&gltf_primitive, primitive.attributes[a]);
+                populate_vertices(&gltf_primitive, primitive.attributes[a]);
 
             /* grab material indices */
             cgltf_texture *texture = NULL;
