@@ -74,7 +74,7 @@ typedef struct {
     uint32_t desc_count[RVK_DESCRIPTOR_TYPE_COUNT];
 } Rvk_Descriptor_Set_Layout;
 
-#define MAX_DESCRIPTOR_SETS 100
+#define MAX_DESCRIPTOR_SETS 400
 typedef struct {
     VkDescriptorPool pool;
     /* Please note that pool usage tracking is only good

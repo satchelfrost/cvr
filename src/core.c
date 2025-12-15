@@ -1019,10 +1019,11 @@ Cvr_Image load_image(const char *file_name)
 
     if (!img.data) {
         rvk_log(RVK_ERROR, "image %s could not be loaded", file_name);
-    } else {
-        rvk_log(RVK_INFO, "image %s was successfully loaded", file_name);
-        rvk_log(RVK_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
     }
+    // else {
+    //     rvk_log(RVK_INFO, "image %s was successfully loaded", file_name);
+    //     rvk_log(RVK_INFO, "    (height, width) = (%d, %d)", img.height, img.width);
+    // }
 
     return img;
 }
