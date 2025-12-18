@@ -332,16 +332,27 @@ void rvk_cmd_begin_render_pass_(VkCommandBuffer cmd_buff, Rvk_Render_Pass_Begin_
 
 void rvk_draw(VkPipeline pl, VkPipelineLayout pl_layout, Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff, void *float16_mvp);
 void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count);
+void rag_standard_viewport_scissor();
 void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count, VkExtent2D extent);
 void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff);
 void rvk_bind_vertex_buffers(Rvk_Buffer vtx_buff);
 void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void rvk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
 void rvk_cmd_bind_pipeline(VkPipeline pl, VkPipelineBindPoint bind_point);
-void rvk_cmd_bind_descriptor_sets(VkPipelineLayout pl_layout, VkPipelineBindPoint bind_point, VkDescriptorSet *set);
 void rvk_cmd_set_viewport(VkViewport viewport);
 void rvk_cmd_set_scissor(VkRect2D scissor);
 void rvk_cmd_draw(uint32_t vertex_count);
+
+typedef struct {
+    VkCommandBuffer        commandBuffer;
+    VkPipelineBindPoint    pipelineBindPoint;
+    uint32_t               firstSet;
+    uint32_t               descriptorSetCount;
+    uint32_t               dynamicOffsetCount;
+    const uint32_t*        pDynamicOffsets;
+} Rvk_Descriptor_Set_Bind_Info;
+#define rvk_cmd_bind_descriptor_sets(pl_layout, set, ...) rvk_cmd_bind_descriptor_sets_(pl_layout, set, (Rvk_Descriptor_Set_Bind_Info){__VA_ARGS__})
+void rvk_cmd_bind_descriptor_sets_(VkPipelineLayout pl_layout, VkDescriptorSet *set, Rvk_Descriptor_Set_Bind_Info info);
 
 void rvk_dispatch(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds, size_t x, size_t y, size_t z);
 void rvk_push_const(VkPipelineLayout pl_layout, VkShaderStageFlags flags, uint32_t size, void *value);
@@ -562,7 +573,7 @@ void rvk_handle_bad_vk_result(VkResult result, const char* function);
 #include <vulkan/vulkan.h>
 
 #define Z_NEAR 0.01
-#define Z_FAR 500.0
+#define Z_FAR 1000.0
 
 Rvk_Context rvk_ctx = {0};
 
@@ -1884,6 +1895,19 @@ void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds
     /* bind descriptor sets */
     for (size_t i = 0; i < ds_count; i++)
         vkCmdBindDescriptorSets(cmd_buff, VK_PIPELINE_BIND_POINT_GRAPHICS, pl_layout, i, 1, &ds[i], 0, NULL);
+}
+
+void rag_standard_viewport_scissor()
+{
+    VkViewport viewport = {
+        .width    = rvk_ctx.extent.width,
+        .height   = rvk_ctx.extent.height,
+        .maxDepth = 1.0f,
+    };
+    vkCmdSetViewport(rvk_ctx.cmd_buff, 0, 1, &viewport);
+    VkRect2D scissor = {0};
+    scissor.extent = rvk_ctx.extent;
+    vkCmdSetScissor(rvk_ctx.cmd_buff, 0, 1, &scissor);
 }
 
 void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count, VkExtent2D extent)
@@ -3745,9 +3769,21 @@ void rvk_cmd_bind_pipeline(VkPipeline pl, VkPipelineBindPoint bind_point)
     vkCmdBindPipeline(rvk_ctx.cmd_buff, bind_point, pl);
 }
 
-void rvk_cmd_bind_descriptor_sets(VkPipelineLayout pl_layout, VkPipelineBindPoint bind_point, VkDescriptorSet *set)
+void rvk_cmd_bind_descriptor_sets_(VkPipelineLayout pl_layout, VkDescriptorSet *set, Rvk_Descriptor_Set_Bind_Info info)
 {
-    vkCmdBindDescriptorSets(rvk_ctx.cmd_buff, bind_point, pl_layout, 0, 1, set, 0, NULL);
+    VkCommandBuffer     cmd_buff        = (info.commandBuffer     ) ? info.commandBuffer : rvk_ctx.cmd_buff;
+    uint32_t            set_count       = (info.descriptorSetCount) ? info.descriptorSetCount : 1;
+    VkPipelineBindPoint bind_point      = info.pipelineBindPoint;  // 0 as a default is graphics anyway
+    uint32_t            first_set       = info.firstSet;           // 0 (i.e. first set) works as a default
+    uint32_t            dynamic_offset  = info.dynamicOffsetCount; // 0 as a default here for dynamic offset works
+    const uint32_t*     dynamic_offsets = info.pDynamicOffsets;    // NULL is valid as a default
+
+    if (dynamic_offset && !dynamic_offsets) {
+        rvk_log(RVK_ERROR, "dynamic offset was set, but no pointer to dynamic offsets");
+        return;
+    }
+
+    vkCmdBindDescriptorSets(cmd_buff, bind_point, pl_layout, first_set, set_count, set, dynamic_offset, dynamic_offsets);
 }
 
 void rvk_cmd_set_viewport(VkViewport viewport)

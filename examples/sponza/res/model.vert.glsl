@@ -32,6 +32,6 @@ void main()
 
     out_normal    = mat3(primitive.model) * in_normal;
     vec4 pos      = primitive.model * vec4(in_pos, 1.0);
-    out_view_vec  = ubo.view.pos.xyz - pos;
-    out_light_vec = ubo.light.pos.xyz - pos;
+    out_view_vec  = ubo.view_pos.xyz - pos.xyz;
+    out_light_vec = ubo.light_pos.xyz - pos.xyz;
 }

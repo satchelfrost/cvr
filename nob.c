@@ -273,8 +273,13 @@ static Example examples[] = {
     {
         .name = "sponza",
         .shaders = {
-            .names = default_shader_names,
-            .count = NOB_ARRAY_LEN(default_shader_names)
+            .names = (const char *[]) {
+                "default.vert.glsl",
+                "default.frag.glsl",
+                "model.vert.glsl",
+                "model.frag.glsl",
+            },
+            .count = 4
         },
         .c_files = {
             .names = default_c_file_names,
@@ -297,12 +302,14 @@ typedef struct {
     Host host;
     bool debug;
     bool renderdoc;
+    bool return_after_compiling;
 } Config;
 
 void log_usage(const char *program)
 {
     nob_log(NOB_INFO, "usage: %s <flags> <optional_input>", program);
     nob_log(NOB_INFO, "    -e followed by <example_name> to build");
+    nob_log(NOB_INFO, "    -k followed by <example_name> to compile but not run");
     nob_log(NOB_INFO, "    -h help (log usage)");
     nob_log(NOB_INFO, "    -c clean build");
     nob_log(NOB_INFO, "    -l list available examples");
@@ -362,6 +369,14 @@ bool handle_usr_args(Config *config)
                     nob_return_defer(false);
                 }
                 config->supplied_name = nob_shift_args(&config->argc, &config->argv);
+                break;
+            case 'k':
+                if (config->argc == 0) {
+                    log_usage(config->program);
+                    nob_return_defer(false);
+                }
+                config->supplied_name = nob_shift_args(&config->argc, &config->argv);
+                config->return_after_compiling = true;
                 break;
             case 't':
                 if (config->argc == 0) {
@@ -955,6 +970,12 @@ int main(int argc, char **argv)
     if (!build_example(example_build_path, config)) return 1;
     if (!compile_shaders(config)) return 1;
     if (!copy_resources(example_build_path, config)) return 1;
+
+    if (config.return_after_compiling) {
+        nob_cmd_free(cmd);
+        return 0;
+    }
+
     if (!run(config, example_build_path)) return 1;
 
     nob_cmd_free(cmd);
