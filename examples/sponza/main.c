@@ -263,6 +263,11 @@ bool load_model_into_memory(const char *file_name, glTF_Model *model, bool print
             if (texture) {
                 prim.material.base_image_index = cgltf_image_index(model->gltf_data, texture->image);
                 prim.material.flags |= MATERIAL_BASE;
+                // memcpy(prim.material.base_color_factor, primitive.material->pbr_metallic_roughness.base_color_factor, 4*sizeof(float));
+                prim.material.base_color_factor[0] = primitive.material->pbr_metallic_roughness.base_color_factor[0];
+                prim.material.base_color_factor[1] = primitive.material->pbr_metallic_roughness.base_color_factor[1];
+                prim.material.base_color_factor[2] = primitive.material->pbr_metallic_roughness.base_color_factor[2];
+                prim.material.base_color_factor[3] = primitive.material->pbr_metallic_roughness.base_color_factor[3];
             }
             texture = primitive.material->normal_texture.texture;
             if (texture) {
@@ -277,7 +282,7 @@ bool load_model_into_memory(const char *file_name, glTF_Model *model, bool print
 
             /* grab indices */
             assert(primitive.indices->component_type == cgltf_component_type_r_16u);
-            uint16_t *indices = (uint16_t *)cgltf_buffer_view_data(primitive.indices->buffer_view);
+            uint16_t *indices = (uint16_t *)cgltf_buffer_view_data(primitive.indices->buffer_view) + primitive.indices->offset/2;
             for (size_t i = 0; i < primitive.indices->count; i++)
                 da_append(&prim.indices, indices[i]);
 
@@ -336,31 +341,31 @@ void setup_ds_layouts()
     rvk_ds_layout_init(bindings + 1, 2, &scene.ds_layouts.textures);
 }
 
-void update_ds(glTF_Model model, UBO ubo, Rvk_Descriptor_Pool_Arena arena)
+void update_ds(glTF_Model model, UBO *ubo, Rvk_Descriptor_Pool_Arena arena)
 {
     /* uniform buffer */
-    rvk_descriptor_pool_arena_alloc_set(&arena, &scene.ds_layouts.matrices, &ubo.ds);
+    rvk_descriptor_pool_arena_alloc_set(&arena, &scene.ds_layouts.matrices, &ubo->ds);
     VkWriteDescriptorSet write = {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstBinding = 0,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &ubo.buff.info,
-        .dstSet = ubo.ds,
+        .pBufferInfo = &ubo->buff.info,
+        .dstSet = ubo->ds,
     };
     rvk_update_ds(1, &write);
 
     /* material descriptor sets */
     for (size_t i = 0; i < model.meshes.count; i++) {
-        glTF_Mesh mesh = model.meshes.items[i];
-        for (size_t j = 0; j < mesh.primitives.count; j++) {
-            rvk_descriptor_pool_arena_alloc_set(&arena, &scene.ds_layouts.textures, &mesh.primitives.items[j].material.ds);
-
-            glTF_Primitive primitive = mesh.primitives.items[j];
-            Rvk_Texture base_color_texture = model.textures.items[primitive.material.base_image_index];
-            Rvk_Texture normal_texture = model.textures.items[primitive.material.normal_image_index];
+        glTF_Mesh *mesh = &model.meshes.items[i];
+        for (size_t j = 0; j < mesh->primitives.count; j++) {
+            glTF_Primitive *primitive = &mesh->primitives.items[j];
+            Rvk_Texture base_color_texture = model.textures.items[primitive->material.base_image_index];
+            Rvk_Texture normal_texture = model.textures.items[primitive->material.normal_image_index];
             assert(base_color_texture.img.handle);
             assert(normal_texture.img.handle);
+
+            rvk_descriptor_pool_arena_alloc_set(&arena, &scene.ds_layouts.textures, &primitive->material.ds);
 
             VkWriteDescriptorSet writes[] = {
                 {
@@ -369,7 +374,7 @@ void update_ds(glTF_Model model, UBO ubo, Rvk_Descriptor_Pool_Arena arena)
                     .descriptorCount = 1,
                     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                     .pImageInfo = &base_color_texture.info,
-                    .dstSet = primitive.material.ds,
+                    .dstSet = primitive->material.ds,
                 },
                 {
                     .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -377,12 +382,58 @@ void update_ds(glTF_Model model, UBO ubo, Rvk_Descriptor_Pool_Arena arena)
                     .descriptorCount = 1,
                     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                     .pImageInfo = &normal_texture.info,
-                    .dstSet = primitive.material.ds,
+                    .dstSet = primitive->material.ds,
                 },
             };
             rvk_update_ds(ARRAY_LEN(writes), writes);
         }
     }
+}
+
+
+typedef struct {
+    float16 model;
+    Vector4 base_color_factor;
+} Push_Const;
+
+void create_pipeline()
+{
+    VkPushConstantRange pk_range = {
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+        .size = sizeof(Push_Const)
+    };
+    VkDescriptorSetLayout layouts[2] = {scene.ds_layouts.matrices.handle, scene.ds_layouts.textures.handle};
+    assert(scene.ds_layouts.matrices.handle);
+    assert(scene.ds_layouts.textures.handle);
+    rvk_create_pipeline_layout(
+        &scene.pl_layout,
+        .p_set_layouts = layouts,
+        .set_layout_count = 2,
+        .p_push_constant_ranges = &pk_range,
+    );
+
+    VkVertexInputAttributeDescription vert_attrs[] = {
+        { .location = 0, .format = VK_FORMAT_R32G32B32_SFLOAT,    .offset = offsetof(glTF_Vertex, position), },
+        { .location = 1, .format = VK_FORMAT_R32G32_SFLOAT,       .offset = offsetof(glTF_Vertex, texcoord), },
+        { .location = 2, .format = VK_FORMAT_R32G32B32_SFLOAT,    .offset = offsetof(glTF_Vertex, normal),   },
+        { .location = 3, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = offsetof(glTF_Vertex, tanget),   },
+    };
+    VkVertexInputBindingDescription vert_bindings = {
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride    = sizeof(glTF_Vertex),
+    };
+    VkPipelineVertexInputStateCreateInfo vertex_input_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &vert_bindings,
+        .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),
+        .pVertexAttributeDescriptions = vert_attrs,
+    };
+    rvk_create_graphics_pipelines(&scene.pl,
+                                  .vertex_shader_name   = "res/model.vert.glsl.spv",
+                                  .fragment_shader_name = "res/model.frag.glsl.spv",
+                                  .p_vertex_input_state  = &vertex_input_ci,
+                                  .layout = scene.pl_layout);
 }
 
 int main()
@@ -397,17 +448,17 @@ int main()
     for (size_t i = 0; i < model.meshes.count; i++) {
         glTF_Mesh mesh = model.meshes.items[i];
         for (size_t j = 0; j < mesh.primitives.count; j++) {
-            glTF_Primitive primitive = mesh.primitives.items[j];
+            glTF_Primitive *primitive = &mesh.primitives.items[j];
 
             /* vertex buffer */
-            size_t count = primitive.vertices.count;
-            size_t size  = count * sizeof(*primitive.vertices.items);
-            primitive.vtx_buff = rvk_create_vertex_buffer(size, count, primitive.vertices.items);
+            size_t count = primitive->vertices.count;
+            size_t size  = count * sizeof(*primitive->vertices.items);
+            primitive->vtx_buff = rvk_create_vertex_buffer(size, count, primitive->vertices.items);
 
             /* index buffer */
-            count = primitive.indices.count;
-            size  = count * sizeof(*primitive.indices.items);
-            primitive.idx_buff = rvk_create_index_buffer(size, count, primitive.indices.items);
+            count = primitive->indices.count;
+            size  = count * sizeof(*primitive->indices.items);
+            primitive->idx_buff = rvk_create_index_buffer(size, count, primitive->indices.items);
         }
     }
 
@@ -428,8 +479,92 @@ int main()
     /* upload vulkan resources */
     Rvk_Descriptor_Pool_Arena ds_pool_arena = rvk_create_descriptor_pool_arena();
     setup_ds_layouts();
-    update_ds(model, ubo, ds_pool_arena);
-    // create_pipeline();
+    update_ds(model, &ubo, ds_pool_arena);
+    create_pipeline();
+
+    Camera camera = {
+        .position   = {0.0f, 0.0f, 3.0f},
+        .target     = {0.0f, 0.0f, 0.0f},
+        .up         = {0.0f, 1.0f, 0.0f},
+        .fovy       = 45,
+        .projection = PERSPECTIVE,
+    };
+
+    Vector3 cube_pos = {0};
+
+    while (!window_should_close())
+    {
+        // input
+        update_camera_free(&camera);
+
+        cube_pos.x = 10*cosf(get_time());
+        cube_pos.y = 10*sinf(get_time());
+        // cube_pos.y = 10;
+
+        // drawing
+        // draw_shape
+        begin_drawing(BLUE);
+            begin_mode_3d(camera);
+                scale(0.1, 0.1, 0.1);
+                push_matrix();
+                    translate(cube_pos.x, cube_pos.y, 0.0f);
+                    draw_shape(SHAPE_CUBE);
+                pop_matrix();
+
+                rvk_cmd_bind_pipeline(scene.pl, VK_PIPELINE_BIND_POINT_GRAPHICS);
+                rag_standard_viewport_scissor();
+
+                // TODO: examples/stereo_render/main.c:157 is now broken because of new function
+                assert(ubo.ds && "ubo ds was not initialized");
+                rvk_cmd_bind_descriptor_sets(scene.pl_layout, &ubo.ds); // set 0
+
+                // loop through primitives
+                for (size_t i = 0; i < model.meshes.count; i++) {
+                    glTF_Mesh mesh = model.meshes.items[i];
+                    for (size_t j = 0; j < mesh.primitives.count; j++) {
+                        glTF_Primitive primitive = mesh.primitives.items[j];
+                        glTF_Material material = primitive.material;
+
+                        assert(material.ds && "was the material ds initialized?");
+                        rvk_cmd_bind_descriptor_sets(
+                            scene.pl_layout, &material.ds,
+                            .firstSet = 1, .descriptorSetCount = 1); // set 1, binding 0/1 = base_color/normal
+
+                        // push constant
+                        Matrix model = {0};
+                        get_matrix_tos(&model);
+                        float r = material.base_color_factor[0];
+                        float g = material.base_color_factor[1];
+                        float b = material.base_color_factor[2];
+                        float a = material.base_color_factor[3];
+                        assert(r);
+                        assert(g);
+                        assert(b);
+                        assert(a);
+                        Vector4 base_color_factor = {r, g, b, a};
+                        Push_Const pc = {
+                            .model = MatrixToFloatV(model),
+                            .base_color_factor = base_color_factor,
+                        };
+                        VkShaderStageFlags flags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+                        rvk_push_const(scene.pl_layout, flags, sizeof(Push_Const), &pc);
+
+                        rvk_draw_buffers(primitive.vtx_buff, primitive.idx_buff);
+                    }
+                }
+
+                // update the uniform buffer
+                Vector4 view_pos = {camera.position.x, camera.position.y, camera.position.z, 1.0f};
+                ubo.data = (UBO_Data) {
+                    .proj = MatrixToFloatV(get_proj(camera)),
+                    .view = MatrixToFloatV(MatrixLookAt(camera.position, camera.target, camera.up)),
+                    .light_pos = {cube_pos.x, cube_pos.y, 0.0f, 1.0f},
+                    .view_pos = view_pos,
+                };
+                memcpy(ubo.buff.mapped, &ubo.data, sizeof(ubo.data));
+            end_mode_3d();
+        end_drawing();
+    }
 
     // close_window();
 
