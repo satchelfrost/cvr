@@ -20,11 +20,20 @@ layout (location = 0) out vec4 out_color;
 
 void main()
 {
-    vec3 n   = normalize(in_normal);
-    vec3 t   = normalize(in_tanget.xyz);
-    vec3 b   = cross(in_normal, in_tanget.xyz) * in_tanget.w;
-    mat3 tbn = mat3(t, b, n);
-    vec3 N   = tbn * normalize(texture(sampler_normal, in_uv).xyz * 2.0 - vec3(1.0));
+    // vec3 n   = normalize(in_normal);
+    // vec3 t   = normalize(in_tanget.xyz);
+    // vec3 b   = cross(in_normal, in_tanget.xyz) * in_tanget.w;
+    // mat3 tbn = mat3(t, b, n);
+    // vec3 N   = normalize(tbn * texture(sampler_normal, in_uv).xyz * 2.0 - vec3(1.0));
+
+    vec3 n            = normalize(in_normal);
+    vec3 t            = normalize(in_tanget.xyz);
+    vec3 b            = cross(in_normal, in_tanget.xyz) * in_tanget.w;
+    mat3 TBN          = mat3(t, b, n);
+    vec3 local_normal = texture(sampler_normal, in_uv).xyz * 2.0 - 1.0;
+    vec3 N            = normalize(TBN * local_normal);
+    N                 = n;
+
 
     vec3 l = normalize(in_light_vec);
     vec3 v = normalize(in_view_vec);
@@ -34,5 +43,6 @@ void main()
 
     out_color = texture(sampler_color, in_uv) * primitive.base_color_factor;
     out_color.rgb  = diffuse*out_color.rgb + specular*out_color.rgb;
-    // out_color = vec4(n, 1.0);
+    // N = 0.5*N + 0.5;
+    // out_color = vec4(N, 1.0);
 }
