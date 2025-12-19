@@ -1030,7 +1030,7 @@ Cvr_Image load_image(const char *file_name)
 
 Rvk_Texture load_texture(Cvr_Image img)
 {
-    Rvk_Texture t = rvk_load_texture(img.data, img.width, img.height, VK_FORMAT_R8G8B8A8_SRGB);
+    Rvk_Texture t = rvk_load_texture(img.data, img.width, img.height, VK_FORMAT_R8G8B8A8_UNORM);
     free(img.data);
     return t;
 }

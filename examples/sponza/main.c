@@ -456,12 +456,40 @@ void create_pipeline()
         .vertexAttributeDescriptionCount = RVK_ARRAY_LEN(vert_attrs),
         .pVertexAttributeDescriptions = vert_attrs,
     };
+    VkPipelineRasterizationStateCreateInfo rasterization_state_ci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .lineWidth = 1.0f,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+    };
+    // VkPipelineColorBlendAttachmentState color_blend = {
+    //     .colorWriteMask = 0xf, // rgba
+    //     .blendEnable = VK_TRUE,
+    //     .colorBlendOp = VK_BLEND_OP_ADD,
+    //     .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+    //     .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+    //     .alphaBlendOp = VK_BLEND_OP_ADD,
+    //     .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+    //     .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+    // };
+    // VkPipelineColorBlendStateCreateInfo color_blend_ci = {
+    //     .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    //     .attachmentCount = 1,
+    //     .pAttachments = &color_blend,
+    //     .logicOp = VK_LOGIC_OP_COPY,
+    // };
     rvk_create_graphics_pipelines(&scene.pl,
                                   .vertex_shader_name   = "res/model.vert.glsl.spv",
                                   .fragment_shader_name = "res/model.frag.glsl.spv",
-                                  .p_vertex_input_state  = &vertex_input_ci,
+                                  .p_vertex_input_state = &vertex_input_ci,
+                                  .p_rasterization_state = &rasterization_state_ci,
+                                  // .p_color_blend_state = &color_blend_ci,
                                   .layout = scene.pl_layout);
 }
+
+#define FACTOR 60
+#define WINDOW_WIDTH  (16*FACTOR)
+#define WINDOW_HIEGHT ( 9*FACTOR)
 
 int main()
 {
@@ -469,7 +497,9 @@ int main()
     if (!load_model_into_memory("res/Sponza.gltf", &model, true)) return 1;
 
     /* initialize window/vulkan */
+    enable_full_screen();
     init_window(800, 600, "sponza");
+    set_target_fps(120);
     
     /* upload mesh to GPU */
     for (size_t i = 0; i < model.meshes.count; i++) {
@@ -510,32 +540,46 @@ int main()
     create_pipeline();
 
     Camera camera = {
-        .position   = {0.0f, 0.0f, 3.0f},
+        .position   = {8.0f, 2.0f, 0.0f},
         .target     = {0.0f, 0.0f, 0.0f},
         .up         = {0.0f, 1.0f, 0.0f},
         .fovy       = 45,
         .projection = PERSPECTIVE,
     };
 
-    Vector3 cube_pos = {0};
+    Vector3 cube_pos = {.x = -50};
 
     while (!window_should_close())
     {
         // input
         update_camera_free(&camera);
-
-        // cube_pos.x = 10*cosf(get_time());
-        cube_pos.y = 25*(sinf(get_time())*0.5 + 0.5);
-        // cube_pos.y = 10;
+        double dt = get_frame_time();
+        if (is_key_down(KEY_I)) cube_pos.z -= 15.0*dt;
+        if (is_key_down(KEY_K)) cube_pos.z += 15.0*dt;
+        if (is_key_down(KEY_J)) cube_pos.x -= 15.0*dt;
+        if (is_key_down(KEY_L)) cube_pos.x += 15.0*dt;
+        if (is_key_down(KEY_U)) cube_pos.y += 15.0*dt;
+        if (is_key_down(KEY_M)) cube_pos.y -= 15.0*dt;
 
         // drawing
-        // draw_shape
         begin_drawing(BLUE);
+
+
+        if (is_key_down(KEY_F)) log_fps();
             begin_mode_3d(camera);
                 push_matrix();
-                    translate(cube_pos.x, cube_pos.y, 0.0f);
+                    translate(cube_pos.x, cube_pos.y, cube_pos.z);
                     draw_shape(SHAPE_CUBE);
                 pop_matrix();
+
+                Vector4 view_pos = {camera.position.x, camera.position.y, camera.position.z, 1.0f};
+                ubo.data = (UBO_Data) {
+                    .proj = MatrixToFloatV(get_proj(camera)),
+                    .view = MatrixToFloatV(MatrixLookAt(camera.position, camera.target, camera.up)),
+                    .light_pos = {cube_pos.x, cube_pos.y, cube_pos.z, 1.0f},
+                    .view_pos = view_pos,
+                };
+                memcpy(ubo.buff.mapped, &ubo.data, sizeof(ubo.data));
 
                 scale(0.1, 0.1, 0.1);
 
@@ -580,16 +624,6 @@ int main()
                         rvk_draw_buffers(primitive.vtx_buff, primitive.idx_buff);
                     }
                 }
-
-                // update the uniform buffer
-                Vector4 view_pos = {camera.position.x, camera.position.y, camera.position.z, 1.0f};
-                ubo.data = (UBO_Data) {
-                    .proj = MatrixToFloatV(get_proj(camera)),
-                    .view = MatrixToFloatV(MatrixLookAt(camera.position, camera.target, camera.up)),
-                    .light_pos = {cube_pos.x, cube_pos.y, cube_pos.z, 1.0f},
-                    .view_pos = view_pos,
-                };
-                memcpy(ubo.buff.mapped, &ubo.data, sizeof(ubo.data));
             end_mode_3d();
         end_drawing();
     }

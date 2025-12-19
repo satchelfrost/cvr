@@ -572,8 +572,8 @@ void rvk_handle_bad_vk_result(VkResult result, const char* function);
 
 #include <vulkan/vulkan.h>
 
-#define Z_NEAR 0.01
-#define Z_FAR 1000.0
+#define Z_NEAR 0.1
+#define Z_FAR 500.0
 
 Rvk_Context rvk_ctx = {0};
 
@@ -2025,6 +2025,7 @@ void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPi
 void rvk_wait_to_begin_gfx()
 {
     RAG_VK(vkWaitForFences(rvk_ctx.device, 1, &rvk_ctx.fence, VK_TRUE, UINT64_MAX));
+    RAG_VK(vkResetFences(rvk_ctx.device, 1, &rvk_ctx.fence));
 
     VkResult res = vkAcquireNextImageKHR(
         rvk_ctx.device, rvk_ctx.swapchain.handle, UINT64_MAX,
@@ -2039,7 +2040,6 @@ void rvk_wait_to_begin_gfx()
         rvk_log(RVK_WARNING, "suboptimal swapchain image");
     }
 
-    RAG_VK(vkResetFences(rvk_ctx.device, 1, &rvk_ctx.fence));
     RAG_VK(vkResetCommandBuffer(rvk_ctx.cmd_buff, 0));
 }
 
