@@ -9,6 +9,11 @@
 
 #define PROGRESS_BAR 20
 
+#define GLTF_ATTR_PTR(accessor_ptr, out_type) \
+    (out_type *)(accessor_ptr)->buffer_view->buffer->data + \
+    (accessor_ptr)->buffer_view->offset / sizeof(out_type) + \
+    (accessor_ptr)->offset / sizeof(out_type)
+
 typedef struct {
     uint16_t *items;
     size_t count;
@@ -164,61 +169,81 @@ const char *cgltf_attr_type_to_str(cgltf_attribute_type attr_type)
 
 void populate_vertices(glTF_Primitive *primitive, cgltf_attribute attribute)
 {
-    Vector3 *positions = NULL;
-    Vector3 *normals   = NULL;
-    Vector2 *texcoords = NULL;
-    Vector4 *tangets   = NULL;
+    float *positions = NULL;
+    float *normals   = NULL;
+    float *texcoords = NULL;
+    float *tangets   = NULL;
 
     switch (attribute.type) {
     case cgltf_attribute_type_position:
         assert(attribute.data->type == cgltf_type_vec3);
-        positions = (Vector3 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        positions = GLTF_ATTR_PTR(attribute.data, float);
         primitive->flags |= ATTRIBUTE_POSITION;
         for (size_t i = 0; i < attribute.data->count; i++) {
+            Vector3 position = {
+                positions[i*3+0],
+                positions[i*3+1],
+                positions[i*3+2],
+            };
             if (primitive->vertices.count <= i) {
-                glTF_Vertex vertex = {.position = positions[i]};
+                glTF_Vertex vertex = {.position = position };
                 da_append(&primitive->vertices, vertex);
             } else {
-                primitive->vertices.items[i].position = positions[i];
+                primitive->vertices.items[i].position = position;
             }
         }
         break;
     case cgltf_attribute_type_normal:
         assert(attribute.data->type == cgltf_type_vec3);
-        normals = (Vector3 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        normals = GLTF_ATTR_PTR(attribute.data, float);
         primitive->flags |= ATTRIBUTE_NORMAL;
         for (size_t i = 0; i < attribute.data->count; i++) {
+            Vector3 normal = {
+                normals[i*3+0],
+                normals[i*3+1],
+                normals[i*3+2],
+            };
             if (primitive->vertices.count < i) {
-                glTF_Vertex vertex = {.normal = normals[i]};
+                glTF_Vertex vertex = {.normal = normal};
                 da_append(&primitive->vertices, vertex);
             } else {
-                primitive->vertices.items[i].normal = normals[i];
+                primitive->vertices.items[i].normal = normal;
             }
         }
         break;
     case cgltf_attribute_type_tangent:
         assert(attribute.data->type == cgltf_type_vec4);
-        tangets = (Vector4 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        tangets = GLTF_ATTR_PTR(attribute.data, float);
         primitive->flags |= ATTRIBUTE_TANGET;
         for (size_t i = 0; i < attribute.data->count; i++) {
+            Vector4 tanget = {
+                tangets[i*4+0],
+                tangets[i*4+1],
+                tangets[i*4+2],
+                tangets[i*4+3],
+            };
             if (primitive->vertices.count < i) {
-                glTF_Vertex vertex = {.tanget = tangets[i]};
+                glTF_Vertex vertex = {.tanget = tanget};
                 da_append(&primitive->vertices, vertex);
             } else {
-                primitive->vertices.items[i].tanget = tangets[i];
+                primitive->vertices.items[i].tanget = tanget;
             }
         }
         break;
     case cgltf_attribute_type_texcoord:
         assert(attribute.data->type == cgltf_type_vec2);
-        texcoords = (Vector2 *)cgltf_buffer_view_data(attribute.data->buffer_view);
+        texcoords = GLTF_ATTR_PTR(attribute.data, float);
         primitive->flags |= ATTRIBUTE_TEXCOORD;
         for (size_t i = 0; i < attribute.data->count; i++) {
+            Vector2 texcoord = {
+                texcoords[i*2+0],
+                texcoords[i*2+1],
+            };
             if (primitive->vertices.count < i) {
-                glTF_Vertex vertex = {.texcoord = texcoords[i]};
+                glTF_Vertex vertex = {.texcoord = texcoord};
                 da_append(&primitive->vertices, vertex);
             } else {
-                primitive->vertices.items[i].texcoord = texcoords[i];
+                primitive->vertices.items[i].texcoord = texcoord;
             }
         }
         break;
@@ -282,7 +307,9 @@ bool load_model_into_memory(const char *file_name, glTF_Model *model, bool print
 
             /* grab indices */
             assert(primitive.indices->component_type == cgltf_component_type_r_16u);
-            uint16_t *indices = (uint16_t *)cgltf_buffer_view_data(primitive.indices->buffer_view) + primitive.indices->offset/2;
+
+            // uint16_t *indices = (uint16_t *)cgltf_buffer_view_data(primitive.indices->buffer_view) + primitive.indices->offset/2;
+            uint16_t *indices = GLTF_ATTR_PTR(primitive.indices, uint16_t);
             for (size_t i = 0; i < primitive.indices->count; i++)
                 da_append(&prim.indices, indices[i]);
 
@@ -442,7 +469,7 @@ int main()
     if (!load_model_into_memory("res/Sponza.gltf", &model, true)) return 1;
 
     /* initialize window/vulkan */
-    init_window(1600, 900, "sponza");
+    init_window(800, 600, "sponza");
     
     /* upload mesh to GPU */
     for (size_t i = 0; i < model.meshes.count; i++) {
@@ -497,19 +524,20 @@ int main()
         // input
         update_camera_free(&camera);
 
-        cube_pos.x = 10*cosf(get_time());
-        cube_pos.y = 10*sinf(get_time());
+        // cube_pos.x = 10*cosf(get_time());
+        cube_pos.y = 25*(sinf(get_time())*0.5 + 0.5);
         // cube_pos.y = 10;
 
         // drawing
         // draw_shape
         begin_drawing(BLUE);
             begin_mode_3d(camera);
-                scale(0.1, 0.1, 0.1);
                 push_matrix();
                     translate(cube_pos.x, cube_pos.y, 0.0f);
                     draw_shape(SHAPE_CUBE);
                 pop_matrix();
+
+                scale(0.1, 0.1, 0.1);
 
                 rvk_cmd_bind_pipeline(scene.pl, VK_PIPELINE_BIND_POINT_GRAPHICS);
                 rag_standard_viewport_scissor();
@@ -558,7 +586,7 @@ int main()
                 ubo.data = (UBO_Data) {
                     .proj = MatrixToFloatV(get_proj(camera)),
                     .view = MatrixToFloatV(MatrixLookAt(camera.position, camera.target, camera.up)),
-                    .light_pos = {cube_pos.x, cube_pos.y, 0.0f, 1.0f},
+                    .light_pos = {cube_pos.x, cube_pos.y, cube_pos.z, 1.0f},
                     .view_pos = view_pos,
                 };
                 memcpy(ubo.buff.mapped, &ubo.data, sizeof(ubo.data));
