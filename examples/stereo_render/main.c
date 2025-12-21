@@ -154,7 +154,7 @@ void draw_shape_multiview(VkPipeline pl, VkPipelineLayout pl_layout, VkDescripto
     Rvk_Buffer vtx_buff = get_shape_vertex_buffer(shape);
     Rvk_Buffer idx_buff = get_shape_index_buffer(shape);
     rvk_cmd_bind_pipeline(pl, VK_PIPELINE_BIND_POINT_GRAPHICS);
-    rvk_cmd_bind_descriptor_sets(pl_layout, VK_PIPELINE_BIND_POINT_GRAPHICS, &ds);
+    rvk_cmd_bind_descriptor_sets(pl_layout, &ds);
     VkViewport viewport = { .width  = WINDOW_HEIGHT, .height = WINDOW_HEIGHT, .maxDepth = 1.0f };
     VkRect2D scissor = { .extent = {.width = WINDOW_HEIGHT, .height = WINDOW_HEIGHT}};
     rvk_cmd_set_viewport(viewport);
@@ -204,7 +204,7 @@ int main()
 
             rvk_begin_render_pass(0.0f, 0.0f, 0.0f, 1.0f);
                 rvk_cmd_bind_pipeline(viewdisplay.pl, VK_PIPELINE_BIND_POINT_GRAPHICS);
-                rvk_cmd_bind_descriptor_sets(viewdisplay.pl_layout, VK_PIPELINE_BIND_POINT_GRAPHICS, &viewdisplay.ds);
+                rvk_cmd_bind_descriptor_sets(viewdisplay.pl_layout, &viewdisplay.ds);
 
                 VkViewport viewport = {
                     .width    = WINDOW_WIDTH/2.0f,
