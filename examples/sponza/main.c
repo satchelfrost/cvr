@@ -460,30 +460,13 @@ void create_pipeline()
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
         .lineWidth = 1.0f,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .cullMode = VK_CULL_MODE_NONE,
     };
-    // VkPipelineColorBlendAttachmentState color_blend = {
-    //     .colorWriteMask = 0xf, // rgba
-    //     .blendEnable = VK_TRUE,
-    //     .colorBlendOp = VK_BLEND_OP_ADD,
-    //     .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-    //     .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-    //     .alphaBlendOp = VK_BLEND_OP_ADD,
-    //     .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-    //     .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-    // };
-    // VkPipelineColorBlendStateCreateInfo color_blend_ci = {
-    //     .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    //     .attachmentCount = 1,
-    //     .pAttachments = &color_blend,
-    //     .logicOp = VK_LOGIC_OP_COPY,
-    // };
     rvk_create_graphics_pipelines(&scene.pl,
                                   .vertex_shader_name   = "res/model.vert.glsl.spv",
                                   .fragment_shader_name = "res/model.frag.glsl.spv",
                                   .p_vertex_input_state = &vertex_input_ci,
                                   .p_rasterization_state = &rasterization_state_ci,
-                                  // .p_color_blend_state = &color_blend_ci,
                                   .layout = scene.pl_layout);
 }
 
