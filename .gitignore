@@ -15,4 +15,5 @@ tags
 *.keystore
 *.glb
 *.gltf
+*.ply
 main

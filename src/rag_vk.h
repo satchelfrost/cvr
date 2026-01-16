@@ -335,6 +335,7 @@ void rvk_bind_gfx(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds
 void rag_standard_viewport_scissor();
 void rvk_bind_gfx_extent(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds, size_t ds_count, VkExtent2D extent);
 void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff);
+void rvk_draw_buffers_idx32(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff);
 void rvk_bind_vertex_buffers(Rvk_Buffer vtx_buff);
 void rvk_draw_points(Rvk_Buffer vtx_buff, void *float16_mvp, VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet *ds_sets, size_t ds_set_count);
 void rvk_draw_sst(VkPipeline pl, VkPipelineLayout pl_layout, VkDescriptorSet ds);
@@ -1936,6 +1937,15 @@ void rvk_draw_buffers(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
     vkCmdBindIndexBuffer(cmd_buff, idx_buff.handle, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(cmd_buff, idx_buff.count, 1, 0, 0, 0);
+}
+
+void rvk_draw_buffers_idx32(Rvk_Buffer vtx_buff, Rvk_Buffer idx_buff)
+{
+    VkCommandBuffer cmd_buff = rvk_ctx.cmd_buff;
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd_buff, 0, 1, &vtx_buff.handle, offsets);
+    vkCmdBindIndexBuffer(cmd_buff, idx_buff.handle, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd_buff, idx_buff.count, 1, 0, 0, 0);
 }
 
